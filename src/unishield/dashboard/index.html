@@ -1,0 +1,1206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UniShield — AI Security Dashboard</title>
+    <meta name="description" content="Real-time cybersecurity monitoring dashboard for unidirectional networks">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-secondary: #111827;
+            --bg-card: #1a1f36;
+            --bg-card-hover: #1e2545;
+            --border-color: #2a3055;
+            --border-glow: rgba(99, 102, 241, 0.3);
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-primary: #6366f1;
+            --accent-secondary: #818cf8;
+            --accent-glow: rgba(99, 102, 241, 0.15);
+            --critical: #ef4444;
+            --critical-bg: rgba(239, 68, 68, 0.12);
+            --high: #f97316;
+            --high-bg: rgba(249, 115, 22, 0.12);
+            --medium: #eab308;
+            --medium-bg: rgba(234, 179, 8, 0.12);
+            --low: #22c55e;
+            --low-bg: rgba(34, 197, 94, 0.12);
+            --info: #3b82f6;
+            --info-bg: rgba(59, 130, 246, 0.12);
+            --success: #10b981;
+            --success-bg: rgba(16, 185, 129, 0.12);
+            --radius: 12px;
+            --radius-sm: 8px;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+            --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Background grid pattern */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background:
+                linear-gradient(rgba(99, 102, 241, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(99, 102, 241, 0.03) 1px, transparent 1px);
+            background-size: 60px 60px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ============ HEADER ============ */
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(10, 14, 26, 0.85);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 0 2rem;
+        }
+
+        .header-inner {
+            max-width: 1600px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 64px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent-primary), #a78bfa);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+        }
+
+        .logo-text {
+            font-size: 1.25rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #e2e8f0, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.02em;
+        }
+
+        .logo-sub {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            padding: 4px 12px;
+            border-radius: 20px;
+            background: var(--success-bg);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .security-badges {
+            display: flex;
+            gap: 8px;
+        }
+
+        .security-badge {
+            font-size: 0.65rem;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--accent-secondary);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* ============ MAIN LAYOUT ============ */
+        .main {
+            position: relative;
+            z-index: 1;
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 1.5rem 2rem;
+        }
+
+        /* ============ CONTROLS BAR ============ */
+        .controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .controls-left {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .btn:hover {
+            background: var(--bg-card-hover);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-primary), #7c3aed);
+            border-color: transparent;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            box-shadow: 0 0 30px rgba(99, 102, 241, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .btn-danger {
+            border-color: rgba(239, 68, 68, 0.3);
+            color: var(--critical);
+        }
+
+        .btn-danger:hover {
+            background: var(--critical-bg);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .controls-right {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        /* ============ METRIC CARDS ============ */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .metric-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .metric-card:hover {
+            border-color: var(--border-glow);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .metric-card:hover::before {
+            opacity: 1;
+        }
+
+        .metric-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .metric-value {
+            font-size: 1.75rem;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+            background: linear-gradient(135deg, var(--text-primary), var(--accent-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            line-height: 1.2;
+        }
+
+        .metric-sub {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* ============ CHARTS + ALERTS GRID ============ */
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        @media (max-width: 1024px) {
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .panel-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .panel-badge {
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: var(--accent-glow);
+            color: var(--accent-secondary);
+        }
+
+        .panel-body {
+            padding: 1.25rem;
+        }
+
+        /* ============ SEVERITY BARS ============ */
+        .severity-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .severity-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .severity-label {
+            width: 70px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .severity-track {
+            flex: 1;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .severity-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .severity-count {
+            font-size: 0.8rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+            min-width: 30px;
+            text-align: right;
+        }
+
+        /* ============ THREAT CLASS LIST ============ */
+        .threat-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .threat-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: var(--radius-sm);
+            border: 1px solid transparent;
+            transition: var(--transition);
+        }
+
+        .threat-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: var(--border-color);
+        }
+
+        .threat-name {
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .threat-count {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--accent-secondary);
+        }
+
+        /* ============ ALERTS TABLE ============ */
+        .alerts-panel {
+            grid-column: 1 / -1;
+        }
+
+        .alerts-table-wrapper {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .alerts-table-wrapper::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .alerts-table-wrapper::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .alerts-table-wrapper::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            position: sticky;
+            top: 0;
+            background: var(--bg-card);
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            padding: 10px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+            z-index: 5;
+        }
+
+        td {
+            font-size: 0.82rem;
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            color: var(--text-secondary);
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .alert-id {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--accent-secondary);
+        }
+
+        .severity-tag {
+            display: inline-block;
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .severity-CRITICAL { background: var(--critical-bg); color: var(--critical); }
+        .severity-HIGH { background: var(--high-bg); color: var(--high); }
+        .severity-MEDIUM { background: var(--medium-bg); color: var(--medium); }
+        .severity-LOW { background: var(--low-bg); color: var(--low); }
+        .severity-INFO { background: var(--info-bg); color: var(--info); }
+
+        .threat-tag {
+            font-size: 0.72rem;
+            font-weight: 500;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--accent-secondary);
+            white-space: nowrap;
+        }
+
+        .confidence-bar-container {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .confidence-bar {
+            width: 60px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            border-radius: 2px;
+            background: var(--accent-primary);
+        }
+
+        .confidence-val {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+        }
+
+        .mitre-tag {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            padding: 1px 6px;
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            margin-right: 4px;
+        }
+
+        /* ============ PERF STATS ============ */
+        .perf-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
+        .perf-item {
+            text-align: center;
+            padding: 14px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: var(--radius-sm);
+        }
+
+        .perf-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--accent-secondary);
+        }
+
+        .perf-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* ============ EMPTY STATE ============ */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+
+        .empty-state-text {
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .empty-state-hint {
+            font-size: 0.8rem;
+            opacity: 0.6;
+        }
+
+        /* ============ LOADING ============ */
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* ============ TOAST NOTIFICATIONS ============ */
+        .toast-container {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toast {
+            padding: 12px 20px;
+            border-radius: var(--radius-sm);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            box-shadow: var(--shadow);
+            animation: slideIn 0.3s ease-out;
+            max-width: 360px;
+        }
+
+        .toast-success { border-left: 3px solid var(--success); }
+        .toast-error { border-left: 3px solid var(--critical); }
+        .toast-info { border-left: 3px solid var(--info); }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* ============ ANIMATIONS ============ */
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-in {
+            animation: fadeInUp 0.4s ease-out forwards;
+        }
+
+        .stagger-1 { animation-delay: 0.05s; }
+        .stagger-2 { animation-delay: 0.1s; }
+        .stagger-3 { animation-delay: 0.15s; }
+        .stagger-4 { animation-delay: 0.2s; }
+        .stagger-5 { animation-delay: 0.25s; }
+        .stagger-6 { animation-delay: 0.3s; }
+
+        /* ============ RESPONSIVE ============ */
+        @media (max-width: 768px) {
+            .header-inner { padding: 0 1rem; }
+            .main { padding: 1rem; }
+            .security-badges { display: none; }
+            .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+            .controls { flex-direction: column; align-items: stretch; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header" id="header">
+    <div class="header-inner">
+        <div class="logo">
+            <div class="logo-icon">🛡️</div>
+            <div>
+                <div class="logo-text">UniShield</div>
+                <div class="logo-sub">AI Security for One-Way Networks</div>
+            </div>
+        </div>
+        <div class="header-status">
+            <div class="security-badges">
+                <span class="security-badge">Read-Only</span>
+                <span class="security-badge">No Decryption</span>
+                <span class="security-badge">Passive</span>
+            </div>
+            <div class="status-badge" id="system-status">
+                <span class="status-dot"></span>
+                <span id="status-text">Connecting...</span>
+            </div>
+        </div>
+    </div>
+</header>
+
+<!-- TOAST CONTAINER -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- MAIN -->
+<main class="main">
+
+    <!-- CONTROLS -->
+    <div class="controls">
+        <div class="controls-left">
+            <button class="btn btn-primary" id="btn-demo" onclick="runDemo()">
+                ⚡ Run Demo Analysis
+            </button>
+            <button class="btn" id="btn-refresh" onclick="refreshData()">
+                🔄 Refresh
+            </button>
+            <button class="btn btn-danger" id="btn-clear" onclick="clearAlerts()">
+                🗑️ Clear
+            </button>
+        </div>
+        <div class="controls-right">
+            <span id="last-update">—</span>
+        </div>
+    </div>
+
+    <!-- METRIC CARDS -->
+    <div class="metrics-grid" id="metrics-grid">
+        <div class="metric-card animate-in stagger-1">
+            <div class="metric-label">Total Alerts</div>
+            <div class="metric-value" id="m-total-alerts">0</div>
+            <div class="metric-sub" id="m-alerts-sub">No data yet</div>
+        </div>
+        <div class="metric-card animate-in stagger-2">
+            <div class="metric-label">Records Processed</div>
+            <div class="metric-value" id="m-records">0</div>
+            <div class="metric-sub" id="m-records-sub">—</div>
+        </div>
+        <div class="metric-card animate-in stagger-3">
+            <div class="metric-label">Threat Classes</div>
+            <div class="metric-value" id="m-threat-classes">0</div>
+            <div class="metric-sub">Distinct types detected</div>
+        </div>
+        <div class="metric-card animate-in stagger-4">
+            <div class="metric-label">Avg Confidence</div>
+            <div class="metric-value" id="m-avg-confidence">—</div>
+            <div class="metric-sub">Detection confidence</div>
+        </div>
+        <div class="metric-card animate-in stagger-5">
+            <div class="metric-label">Avg Latency</div>
+            <div class="metric-value" id="m-avg-latency">—</div>
+            <div class="metric-sub">ms per detection</div>
+        </div>
+        <div class="metric-card animate-in stagger-6">
+            <div class="metric-label">Pipeline Status</div>
+            <div class="metric-value" id="m-pipeline-status">Idle</div>
+            <div class="metric-sub" id="m-pipeline-sub">Ready</div>
+        </div>
+    </div>
+
+    <!-- CHARTS ROW -->
+    <div class="content-grid">
+        <!-- Severity Distribution -->
+        <div class="panel animate-in stagger-2">
+            <div class="panel-header">
+                <span class="panel-title">Severity Distribution</span>
+                <span class="panel-badge" id="severity-total">0 alerts</span>
+            </div>
+            <div class="panel-body">
+                <div class="severity-bars" id="severity-bars">
+                    <div class="empty-state">
+                        <div class="empty-state-text">No alerts to display</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Threat Classes -->
+        <div class="panel animate-in stagger-3">
+            <div class="panel-header">
+                <span class="panel-title">Threat Classification</span>
+                <span class="panel-badge" id="threat-total">0 types</span>
+            </div>
+            <div class="panel-body">
+                <div class="threat-list" id="threat-list">
+                    <div class="empty-state">
+                        <div class="empty-state-text">No threats detected</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PERFORMANCE STATS -->
+    <div class="panel animate-in stagger-4" style="margin-bottom: 1.5rem;" id="perf-panel">
+        <div class="panel-header">
+            <span class="panel-title">Pipeline Performance</span>
+            <span class="panel-badge" id="perf-badge">—</span>
+        </div>
+        <div class="panel-body">
+            <div class="perf-grid" id="perf-grid">
+                <div class="perf-item">
+                    <div class="perf-value" id="p-throughput">—</div>
+                    <div class="perf-label">Records/sec</div>
+                </div>
+                <div class="perf-item">
+                    <div class="perf-value" id="p-latency-p50">—</div>
+                    <div class="perf-label">P50 Latency (ms)</div>
+                </div>
+                <div class="perf-item">
+                    <div class="perf-value" id="p-latency-p95">—</div>
+                    <div class="perf-label">P95 Latency (ms)</div>
+                </div>
+                <div class="perf-item">
+                    <div class="perf-value" id="p-latency-p99">—</div>
+                    <div class="perf-label">P99 Latency (ms)</div>
+                </div>
+                <div class="perf-item">
+                    <div class="perf-value" id="p-windows">—</div>
+                    <div class="perf-label">Windows Processed</div>
+                </div>
+                <div class="perf-item">
+                    <div class="perf-value" id="p-duration">—</div>
+                    <div class="perf-label">Duration (sec)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ALERTS TABLE -->
+    <div class="panel alerts-panel animate-in stagger-5">
+        <div class="panel-header">
+            <span class="panel-title">Alert Stream</span>
+            <span class="panel-badge" id="alerts-badge">0 alerts</span>
+        </div>
+        <div class="alerts-table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Severity</th>
+                        <th>Threat</th>
+                        <th>Source IP</th>
+                        <th>Dest IP</th>
+                        <th>Confidence</th>
+                        <th>Detector</th>
+                        <th>MITRE</th>
+                        <th>Latency</th>
+                    </tr>
+                </thead>
+                <tbody id="alerts-tbody">
+                    <tr>
+                        <td colspan="9">
+                            <div class="empty-state">
+                                <div class="empty-state-icon">🛡️</div>
+                                <div class="empty-state-text">No alerts yet</div>
+                                <div class="empty-state-hint">Click "Run Demo Analysis" to process synthetic traffic</div>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</main>
+
+<script>
+    const API_BASE = 'http://127.0.0.1:8000';
+    let lastAlerts = [];
+    let lastResult = null;
+
+    // ===================================================================
+    // API CALLS
+    // ===================================================================
+
+    async function apiGet(path) {
+        const res = await fetch(`${API_BASE}${path}`);
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        return res.json();
+    }
+
+    async function apiPost(path, params = {}) {
+        const url = new URL(`${API_BASE}${path}`);
+        Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+        const res = await fetch(url, { method: 'POST' });
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        return res.json();
+    }
+
+    // ===================================================================
+    // HEALTH CHECK
+    // ===================================================================
+
+    async function checkHealth() {
+        try {
+            const health = await apiGet('/health');
+            const statusEl = document.getElementById('system-status');
+            const statusText = document.getElementById('status-text');
+            statusText.textContent = health.status === 'healthy' ? 'System Healthy' : health.status;
+            statusEl.style.background = health.status === 'healthy' ? 'var(--success-bg)' : 'var(--critical-bg)';
+            statusEl.style.color = health.status === 'healthy' ? 'var(--success)' : 'var(--critical)';
+            statusEl.style.borderColor = health.status === 'healthy' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)';
+        } catch (e) {
+            document.getElementById('status-text').textContent = 'Disconnected';
+            document.getElementById('system-status').style.background = 'var(--critical-bg)';
+            document.getElementById('system-status').style.color = 'var(--critical)';
+        }
+    }
+
+    // ===================================================================
+    // RUN DEMO
+    // ===================================================================
+
+    async function runDemo() {
+        const btn = document.getElementById('btn-demo');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="loading-spinner"></span> Analysing...';
+        showToast('Starting demo analysis with synthetic traffic...', 'info');
+
+        try {
+            const result = await apiPost('/replay/demo', {
+                normal: 300,
+                ddos: 400,
+                scan: 150,
+                beacon: 30,
+                exfil: 40,
+            });
+
+            lastResult = result.result;
+            showToast(`Analysis complete: ${result.alerts_count} alerts detected`, 'success');
+            await refreshData();
+        } catch (e) {
+            showToast(`Error: ${e.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '⚡ Run Demo Analysis';
+        }
+    }
+
+    // ===================================================================
+    // REFRESH DATA
+    // ===================================================================
+
+    async function refreshData() {
+        try {
+            // Fetch alerts
+            const alerts = await apiGet('/alerts?limit=500');
+            lastAlerts = alerts;
+
+            // Fetch summary
+            const summary = await apiGet('/alerts/summary');
+
+            // Fetch replay status
+            const replayStatus = await apiGet('/replay/status');
+            if (replayStatus.result) {
+                lastResult = replayStatus.result;
+            }
+
+            // Update UI
+            updateMetrics(summary, replayStatus);
+            updateSeverityBars(summary);
+            updateThreatList(summary);
+            updatePerformance(lastResult);
+            updateAlertsTable(alerts);
+
+            document.getElementById('last-update').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+        } catch (e) {
+            console.error('Refresh error:', e);
+        }
+    }
+
+    // ===================================================================
+    // CLEAR
+    // ===================================================================
+
+    async function clearAlerts() {
+        lastAlerts = [];
+        lastResult = null;
+        updateMetrics({ total_alerts: 0, by_threat_class: {}, by_severity: {}, avg_confidence: 0, avg_detection_latency_ms: 0 }, { status: 'idle', records_processed: 0 });
+        updateSeverityBars({ by_severity: {} });
+        updateThreatList({ by_threat_class: {} });
+        updatePerformance(null);
+        updateAlertsTable([]);
+        showToast('Dashboard cleared', 'info');
+    }
+
+    // ===================================================================
+    // UPDATE UI
+    // ===================================================================
+
+    function updateMetrics(summary, replayStatus) {
+        animateValue('m-total-alerts', summary.total_alerts || 0);
+        document.getElementById('m-alerts-sub').textContent = summary.total_alerts > 0 ?
+            `${Object.keys(summary.by_severity || {}).length} severity levels` : 'No data yet';
+
+        animateValue('m-records', replayStatus?.records_processed || 0);
+        document.getElementById('m-records-sub').textContent = replayStatus?.status || '—';
+
+        const threatCount = Object.keys(summary.by_threat_class || {}).length;
+        animateValue('m-threat-classes', threatCount);
+
+        document.getElementById('m-avg-confidence').textContent =
+            summary.avg_confidence > 0 ? `${(summary.avg_confidence * 100).toFixed(1)}%` : '—';
+
+        document.getElementById('m-avg-latency').textContent =
+            summary.avg_detection_latency_ms > 0 ? `${summary.avg_detection_latency_ms.toFixed(1)}` : '—';
+
+        const status = replayStatus?.status || 'idle';
+        document.getElementById('m-pipeline-status').textContent =
+            status.charAt(0).toUpperCase() + status.slice(1);
+        document.getElementById('m-pipeline-sub').textContent =
+            status === 'completed' ? 'Analysis done' : status === 'running' ? 'Processing...' : 'Ready';
+    }
+
+    function updateSeverityBars(summary) {
+        const container = document.getElementById('severity-bars');
+        const severities = summary.by_severity || {};
+        const total = Object.values(severities).reduce((a, b) => a + b, 0);
+
+        document.getElementById('severity-total').textContent = `${total} alerts`;
+
+        if (total === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="empty-state-text">No alerts to display</div></div>';
+            return;
+        }
+
+        const order = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
+        const colors = {
+            CRITICAL: 'var(--critical)',
+            HIGH: 'var(--high)',
+            MEDIUM: 'var(--medium)',
+            LOW: 'var(--low)',
+            INFO: 'var(--info)',
+        };
+
+        let html = '';
+        for (const sev of order) {
+            const count = severities[sev] || 0;
+            const pct = total > 0 ? (count / total * 100) : 0;
+            html += `
+                <div class="severity-bar">
+                    <span class="severity-label" style="color: ${colors[sev]}">${sev}</span>
+                    <div class="severity-track">
+                        <div class="severity-fill" style="width: ${pct}%; background: ${colors[sev]}"></div>
+                    </div>
+                    <span class="severity-count" style="color: ${colors[sev]}">${count}</span>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+    }
+
+    function updateThreatList(summary) {
+        const container = document.getElementById('threat-list');
+        const threats = summary.by_threat_class || {};
+        const count = Object.keys(threats).length;
+
+        document.getElementById('threat-total').textContent = `${count} types`;
+
+        if (count === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="empty-state-text">No threats detected</div></div>';
+            return;
+        }
+
+        const sorted = Object.entries(threats).sort((a, b) => b[1] - a[1]);
+        let html = '';
+        for (const [name, cnt] of sorted) {
+            const displayName = name.replace(/_/g, ' ');
+            html += `
+                <div class="threat-item">
+                    <span class="threat-name">${displayName}</span>
+                    <span class="threat-count">${cnt}</span>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+    }
+
+    function updatePerformance(result) {
+        if (!result) {
+            ['p-throughput', 'p-latency-p50', 'p-latency-p95', 'p-latency-p99', 'p-windows', 'p-duration'].forEach(id => {
+                document.getElementById(id).textContent = '—';
+            });
+            document.getElementById('perf-badge').textContent = '—';
+            return;
+        }
+
+        document.getElementById('p-throughput').textContent = (result.records_per_second || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+        document.getElementById('p-latency-p50').textContent = (result.latency_p50_ms || 0).toFixed(2);
+        document.getElementById('p-latency-p95').textContent = (result.latency_p95_ms || 0).toFixed(2);
+        document.getElementById('p-latency-p99').textContent = (result.latency_p99_ms || 0).toFixed(2);
+        document.getElementById('p-windows').textContent = result.total_windows || 0;
+        document.getElementById('p-duration').textContent = (result.duration_seconds || 0).toFixed(2);
+        document.getElementById('perf-badge').textContent = `${(result.records_per_second || 0).toFixed(0)} rec/s`;
+    }
+
+    function updateAlertsTable(alerts) {
+        const tbody = document.getElementById('alerts-tbody');
+        document.getElementById('alerts-badge').textContent = `${alerts.length} alerts`;
+
+        if (alerts.length === 0) {
+            tbody.innerHTML = `
+                <tr><td colspan="9">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🛡️</div>
+                        <div class="empty-state-text">No alerts yet</div>
+                        <div class="empty-state-hint">Click "Run Demo Analysis" to process synthetic traffic</div>
+                    </div>
+                </td></tr>
+            `;
+            return;
+        }
+
+        // Sort by severity priority
+        const sevOrder = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
+        const sorted = [...alerts].sort((a, b) => (sevOrder[a.severity] || 5) - (sevOrder[b.severity] || 5));
+
+        let html = '';
+        for (const alert of sorted) {
+            const mitre = (alert.mitre_techniques || []).map(t => `<span class="mitre-tag">${t}</span>`).join('');
+            const confPct = ((alert.confidence || 0) * 100).toFixed(0);
+            const latency = alert.detection_latency_ms != null ? `${alert.detection_latency_ms.toFixed(1)}ms` : '—';
+
+            html += `
+                <tr>
+                    <td><span class="alert-id">${alert.alert_id || '—'}</span></td>
+                    <td><span class="severity-tag severity-${alert.severity}">${alert.severity}</span></td>
+                    <td><span class="threat-tag">${(alert.threat_class || '').replace(/_/g, ' ')}</span></td>
+                    <td>${alert.source_ip || '—'}</td>
+                    <td>${alert.destination_ip || '—'}</td>
+                    <td>
+                        <div class="confidence-bar-container">
+                            <div class="confidence-bar"><div class="confidence-fill" style="width: ${confPct}%"></div></div>
+                            <span class="confidence-val">${confPct}%</span>
+                        </div>
+                    </td>
+                    <td>${alert.detector_name || '—'}</td>
+                    <td>${mitre || '—'}</td>
+                    <td>${latency}</td>
+                </tr>
+            `;
+        }
+        tbody.innerHTML = html;
+    }
+
+    // ===================================================================
+    // UTILITIES
+    // ===================================================================
+
+    function animateValue(id, target) {
+        const el = document.getElementById(id);
+        const current = parseInt(el.textContent) || 0;
+        if (current === target) return;
+
+        const duration = 500;
+        const start = performance.now();
+
+        function update(now) {
+            const elapsed = now - start;
+            const progress = Math.min(elapsed / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3);
+            el.textContent = Math.round(current + (target - current) * eased).toLocaleString();
+            if (progress < 1) requestAnimationFrame(update);
+        }
+        requestAnimationFrame(update);
+    }
+
+    function showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(() => toast.remove(), 4000);
+    }
+
+    // ===================================================================
+    // INIT
+    // ===================================================================
+
+    async function init() {
+        await checkHealth();
+        await refreshData();
+        // Auto-refresh every 5 seconds
+        setInterval(async () => {
+            await checkHealth();
+        }, 10000);
+    }
+
+    init();
+</script>
+
+</body>
+</html>
