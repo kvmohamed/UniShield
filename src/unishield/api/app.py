@@ -395,10 +395,11 @@ async def replay_start(
 )
 async def replay_demo(
     normal: int = Query(default=200, ge=10, le=5000),
-    ddos: int = Query(default=300, ge=0, le=5000),
+    ddos: int = Query(default=6000, ge=0, le=20000, description="DDoS flow records (SYN + UDP flood)"),
     scan: int = Query(default=100, ge=0, le=5000),
     beacon: int = Query(default=25, ge=0, le=500),
     exfil: int = Query(default=30, ge=0, le=500),
+    seed: int | None = Query(default=None, description="Random seed for a reproducible demo"),
 ) -> dict:
     """
     Run the full pipeline on synthetic data with embedded attacks.
@@ -415,6 +416,7 @@ async def replay_demo(
         scan_count=scan,
         beacon_count=beacon,
         exfil_count=exfil,
+        seed=seed,
     )
     reader = SimulatedReader(flows)
 
