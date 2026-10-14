@@ -47,17 +47,26 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
         if not flows:
             return {name: 0 for name in self.feature_names}
 
-        # Classify flows by direction
+        # Exfiltration ratio: bytes internal hosts SEND on connections they
+        # initiate (uploads) versus bytes the network receives. With
+        # per-direction counts, an outbound connection's responder bytes are a
+        # download. Replies from internal servers to inbound requests are not
+        # counted as uploads: serving content is not exfiltration evidence here.
         outbound_bytes = 0
         inbound_bytes = 0
+        dest_bytes: dict[str, int] = defaultdict(int)   # bytes uploaded per destination
         for f in flows:
+            split = f.orig_bytes is not None and f.resp_bytes is not None
             if f.direction == FlowDirection.OUTBOUND:
-                outbound_bytes += f.byte_count
+                sent = f.orig_bytes if split else f.byte_count
+                outbound_bytes += sent
+                inbound_bytes += f.resp_bytes if split else 0
+                dest_bytes[f.destination_ip] += sent
             elif f.direction == FlowDirection.INBOUND:
-                inbound_bytes += f.byte_count
-            else:
-                # If direction is unknown, use a heuristic:
-                # higher source port → likely outbound
+                inbound_bytes += f.orig_bytes if split else f.byte_count
+            elif f.direction == FlowDirection.UNKNOWN:
+                # Unknown direction: higher source port → likely an outbound client
+                dest_bytes[f.destination_ip] += f.byte_count
                 if f.source_port and f.destination_port:
                     if f.source_port > f.destination_port:
                         outbound_bytes += f.byte_count
@@ -67,11 +76,9 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
         # Outbound/inbound ratio
         ob_ratio = outbound_bytes / max(inbound_bytes, 1)
 
-        # Per-destination analysis
-        dest_bytes: dict[str, int] = defaultdict(int)
+        # Per-destination session length
         dest_durations: dict[str, float] = defaultdict(float)
         for f in flows:
-            dest_bytes[f.destination_ip] += f.byte_count
             if f.duration:
                 dest_durations[f.destination_ip] = max(
                     dest_durations[f.destination_ip], f.duration
@@ -93,7 +100,7 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
         if dest_bytes:
             top_dest = max(dest_bytes.items(), key=lambda x: x[1])
         else:
-            top_dest = ("none", 0)
+            top_dest = (None, 0)
 
         avg_bytes_per_dest = sum(dest_bytes.values()) / max(len(dest_bytes), 1)
 
