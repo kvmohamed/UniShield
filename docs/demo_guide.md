@@ -26,10 +26,11 @@ curl http://127.0.0.1:8000/health
 ### 4. Run the synthetic demo
 Click **Run Demo Analysis** on the dashboard, or:
 ```bash
-curl -X POST "http://127.0.0.1:8000/replay/demo?normal=300&ddos=400&scan=150&beacon=30&exfil=40"
+curl -X POST "http://127.0.0.1:8000/replay/demo?normal=300&ddos=6000&scan=150&beacon=30&exfil=40&seed=42"
 ```
-Currently this produces a small number of scan and exfiltration alerts; DDoS and beaconing
-alerts do not appear in the demo yet (audit defects D4, D10).
+This produces DDoS (volumetric, SYN flood, UDP flood), port-scan and exfiltration alerts.
+`seed=42` makes the run reproducible; omit it for a random one. Beaconing at the demo's 60-second interval is not
+detected yet, and some LOW-severity beaconing alerts are false positives (Phase 5).
 
 ### 5. Replay sample traffic files
 ```bash
@@ -38,8 +39,10 @@ curl -X POST "http://127.0.0.1:8000/replay/start?file_path=data/samples/sample.p
 curl http://127.0.0.1:8000/replay/status
 ```
 The sample PCAP (26 packets) is grouped into 10 flows; `/replay/status` shows the
-reader, sessionizer and normaliser counts. It is too short to fill a 10-second
-analysis window, so it produces no alerts yet (audit defect D1, fixed in Phase 4).
+reader, sessionizer, normaliser and window counts. It is benign, so it raises no DDoS
+or scan alert. Replay `data/samples/attack_portscan.pcap` or
+`data/samples/attack_synflood.pcap` to see PORT_SCAN / SYN_FLOOD alerts from a real
+capture.
 
 ### 6. Run Tests
 ```bash

@@ -136,7 +136,7 @@ Then open:
 
 ```bash
 # Via API (generates synthetic traffic with embedded attacks)
-curl -X POST "http://127.0.0.1:8000/replay/demo?normal=300&ddos=400&scan=150&beacon=30&exfil=40"
+curl -X POST "http://127.0.0.1:8000/replay/demo?normal=300&ddos=6000&scan=150&beacon=30&exfil=40&seed=42"
 
 # View alerts
 curl http://127.0.0.1:8000/alerts/summary
@@ -160,9 +160,13 @@ Sample files with known contents:
 
 ```bash
 python scripts/make_samples.py          # writes data/samples/
-curl -X POST "http://127.0.0.1:8000/replay/start?file_path=data/samples/sample.pcap"
+curl -X POST "http://127.0.0.1:8000/replay/start?file_path=data/samples/attack_portscan.pcap"
 curl http://127.0.0.1:8000/replay/status
+curl http://127.0.0.1:8000/alerts
 ```
+
+`sample.pcap` is benign mixed traffic; `attack_portscan.pcap` (200-port SYN scan) and
+`attack_synflood.pcap` (3,000-packet spoofed SYN flood) raise PORT_SCAN and SYN_FLOOD alerts.
 
 Paths outside the data directory are refused (HTTP 403). Inputs over
 `ingest.max_file_size_mb` are refused (413). Direction (inbound/outbound/internal) is
@@ -312,19 +316,22 @@ security:
   no_active_scanning: true
   no_response_path: true
 
-# Processing windows
+# Processing windows (traffic time, grid-aligned; last window flushed at end of input)
 processing:
   window_size_sec: 10
   slide_interval_sec: 5
-  max_queue_size: 10000
+  allowed_lateness_sec: 0        # tolerate out-of-order input (delays analysis equally)
 
-# Thresholds (configs/thresholds.yaml)
-ddos:
-  packets_per_second: 10000
-  syn_rate_threshold: 5000
-scanning:
-  unique_dest_ports: 25
-  unique_dest_hosts: 10
+# Thresholds (configs/thresholds.yaml) — per window
+ddos:                            # per targeted destination, peak 1-second rates
+  packets_per_second: 10000      # volumetric
+  syn_rate_threshold: 1000       # half-open attempts/s
+  syn_only_ratio: 0.8
+  udp_flood_pps: 8000
+scanning:                        # per source, connection attempts only
+  unique_dest_ports: 25          # on one host, or on any hosts with failures
+  failed_connection_ratio: 0.5
+  horizontal_scan_hosts: 20      # hosts on one port, with failures
 beaconing:
   regularity_cv_threshold: 0.3
   periodicity_score: 0.7

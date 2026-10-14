@@ -453,3 +453,49 @@ Notes and remaining limitations:
 - Detectors still use their pre-Phase-3 features: e.g. the scan features do not yet use `conn_state`, so D7 is not fixed until Phase 4.
 - TLS hellos split across TCP segments are not reassembled (version left empty); JA3/JA4 are not computed from PCAP (Phase F).
 - CIC-IDS2017 timestamps are local lab time and some files use 12-hour times without AM/PM; they are read as UTC as-is.
+
+### Phase 4 — Windowing, DDoS and scan detection (2026-10-14) — exit test passed
+
+Branch `phase-4-windowing-ddos-scan` (on top of `main` @ `803a106`).
+
+| Item | Change | Evidence |
+|---|---|---|
+| Window (D1, D11) | `processing/window.py` rewritten: grid-aligned event-time windows (close when the watermark passes their end), `flush()` at end of input, `advance()` for clock-driven closing, `allowed_lateness_sec` (default 0) with late records counted, `observed_seconds` per window (1 s floor), empty windows skipped. Unused per-source windows removed. | `test_window.py` (12 tests), 97% coverage |
+| Rates (D2) | All extractors receive a `WindowContext`; rates divide by the observed window duration. New `peak_per_second` spreads each flow over its duration. | one 20-packet flow after 30 s silence: no alert (was HIGH DDoS at "20,000 pps") |
+| DDoS features/detector (D10) | Per-target profiles (most packets / most half-open attempts / most UDP); peak 1-s rates; half-open = S0/REJ or SYN-only. Rules: VOLUMETRIC (peak pps or bps), SYN_FLOOD (peak half-open/s and ≥ 80% half-open), UDP_FLOOD (peak UDP pps and ≥ 70% UDP). Alerts name the target and whether the attack is distributed. Thresholds redefined and documented in `thresholds.yaml`. | `test_ddos.py` (19 tests) |
+| Scan features/detector (D7) | Connection attempts only (replies from service ports ignored); failed = S0/REJ/RST ≤ 4 packets; per-source profiles; every candidate source evaluated. PORT_SCAN = ≥ 25 ports on one host, or ≥ 25 ports with ≥ 50% failures; HOST_SCAN = ≥ 20 hosts on one port with failures, or ≥ 50 regardless; RECONNAISSANCE = failed burst below those. | `test_scan.py` (24 tests); CDN browsing and per-packet HTTPS raise nothing |
+| Pipeline (D12) | Uses the new window and flushes at end; latency/feature histories bounded (100k records / 10k windows / 1k feature sets); window processing P50/P95 and window stats in `/replay/status`; `/metrics` reports queue size and dropped records. Unused lock and "thread-safe" claim removed. | — |
+| Generator (D10) | `sample_generator.py`: every generator seedable, every flow labelled; flows carry per-direction counts and connection state; DDoS = SYN flood ~3,000 attempts/s + UDP botnet ~24,000 pps; new host sweep; `build_scenario(name, seed)` with expected classes (`benign_hard`, `ddos_syn`, `ddos_udp`, `port_scan`, `host_sweep`). Demo default DDoS volume 6,000 records; demo endpoint takes `seed`. | `test_generator.py` (14 tests) |
+| Exfiltration byte attribution | Uses per-direction counts: uploads on internally initiated connections vs bytes received; downloads and server replies are no longer counted as exfiltration. Full exfiltration rework remains Phase 5. | `benign_hard`: 3–4 false exfiltration alerts → 0 |
+| Samples | `attack_portscan.pcap` (200-port SYN scan) and `attack_synflood.pcap` (3,000-packet spoofed SYN flood) added to `scripts/make_samples.py`. | — |
+
+Exit test results (`tests/integration/test_detection_scenarios.py`, full pipeline, default config):
+
+| Scenario | Seeds | Expected DDoS/scan classes | Result |
+|---|---|---|---|
+| `ddos_syn` | 1–5 | SYN_FLOOD | 5/5 exact match |
+| `ddos_udp` | 1–5 | UDP_FLOOD + DDOS_VOLUMETRIC | 5/5 exact match |
+| `port_scan` | 1–5 | PORT_SCAN | 5/5 exact match (no spurious HOST_SCAN) |
+| `host_sweep` | 1–5 | HOST_SCAN | 5/5 exact match |
+| `benign_hard` | 1–5 | none | 5/5 — zero DDoS/scan alerts |
+| `attack_portscan.pcap` | — | PORT_SCAN from 198.51.100.66 → 192.168.1.20 | ✔ (also via API, source `pcap_file`) |
+| `attack_synflood.pcap` | — | SYN_FLOOD on 192.168.1.100, distributed | ✔ (3,000 packets → 3,000 flows) |
+| `sample.pcap` (benign) | — | none; short capture analysed | ✔ (D1 fixed) |
+
+`pytest tests/` → **314 passed** (99 new), no warnings with deprecations as errors; coverage 89% (scan features 99%, volume 99%, window 97%, detectors 95%).
+
+Live server: `attack_portscan.pcap` via `/replay/start` → CRITICAL PORT_SCAN (200 ports on one host, 100% failed); dashboard demo → DDOS_VOLUMETRIC (peak 25,229 pps), SYN_FLOOD (3,070 half-open/s), UDP_FLOOD (24,572 pps), PORT_SCAN, DATA_EXFILTRATION.
+
+Performance (5 runs, 12,550-record mixed scenario, seeds 1000–1004):
+
+| Pipeline | Records/s mean (σ, min–max) | Window processing P95 |
+|---|---|---|
+| Default (6 detectors) | 937 (29, 888–957) | 12.8 ms |
+| Without Isolation Forest | 22,389 (1,023, 21,248–23,214) | 0.4 ms |
+
+Remaining issues observed (not Phase 4 scope):
+
+- Beaconing false positives: machine-regular sub-second sequences (scan probes 10 ms apart, a client's 40 connections 200 ms apart, DNS bursts, UDP bot flows) are reported as C2 beaconing; the configured `min_interval_sec` is not applied (D4, Phase 5).
+- DGA false positives on many unique benign subdomains (optional DNS module, Phase E).
+- Isolation Forest: 4–14 anomaly alerts per benign scenario and still the throughput bottleneck (D5, D6 — Phase 6); throughput remains just under the 1,000 records/s target.
+- Deduplication still uses wall-clock time (D3, Phase 5), so repeated alerts for one attack collapse during fast replay.
