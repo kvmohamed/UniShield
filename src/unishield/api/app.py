@@ -103,10 +103,10 @@ async def health_check() -> HealthStatus:
         no_payload_decryption=config.security.no_payload_decryption,
         no_active_scanning=config.security.no_active_scanning,
         no_response_path=config.security.no_response_path,
-        database_connected=False,  # Updated in Phase 7
-        pipeline_active=False,  # Updated in Phase 3
-        detectors_loaded=0,  # Updated in Phase 3
-        models_loaded=0,  # Updated in Phase 5
+        database_connected=False,  # In-memory store, not a DB
+        pipeline_active=_pipeline.is_running if _pipeline else False,
+        detectors_loaded=len(_pipeline.detectors) if _pipeline else 0,
+        models_loaded=1 if _pipeline else 0,  # Anomaly detector model
     )
 
 
@@ -262,6 +262,7 @@ def _run_replay_in_background(reader, file_path: str) -> None:
     """Run the pipeline in a background thread."""
     global _pipeline
     _pipeline = Pipeline(alert_callback=add_alert)
+    _pipeline.set_metrics_callback(update_metrics)
     _replay_state["status"] = "running"
     _replay_state["file_path"] = file_path
 

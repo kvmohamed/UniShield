@@ -1,6 +1,5 @@
 """
 UniShield — Configuration Module
-
 Loads settings from YAML files and environment variables.
 All security constraints are validated at startup.
 """

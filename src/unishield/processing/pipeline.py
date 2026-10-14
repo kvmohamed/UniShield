@@ -26,16 +26,21 @@ from pathlib import Path
 from typing import Any, Optional
 
 from unishield.config import get_config, get_thresholds
+from unishield.correlation.correlator import AlertCorrelator
 from unishield.detectors.base import BaseDetector
 from unishield.detectors.ddos_detector import DDoSDetector
 from unishield.detectors.scan_detector import ScanDetector
 from unishield.detectors.beaconing_detector import BeaconingDetector
 from unishield.detectors.exfiltration_detector import ExfiltrationDetector
+from unishield.detectors.dns_detector import DNSDetector
+from unishield.detectors.anomaly_detector import AnomalyDetector
 from unishield.features.base import BaseFeatureExtractor
 from unishield.features.volume import VolumeFeatureExtractor
 from unishield.features.scan import ScanFeatureExtractor
 from unishield.features.beaconing import BeaconingFeatureExtractor
 from unishield.features.exfiltration import ExfiltrationFeatureExtractor
+from unishield.features.dns import DNSFeatureExtractor
+from unishield.features.statistical import StatisticalFeatureExtractor
 from unishield.ingest.base import BaseReader
 from unishield.processing.window import SlidingWindow, WindowManager
 from unishield.schemas.alert import Alert
@@ -133,6 +138,7 @@ class Pipeline:
         extractors: list[BaseFeatureExtractor] | None = None,
         detectors: list[BaseDetector] | None = None,
         alert_callback: Any | None = None,
+        enable_correlation: bool = True,
     ):
         config = get_config()
 
@@ -147,32 +153,52 @@ class Pipeline:
             enable_per_source_windows=True,
         )
 
-        # Feature extractors (default: all built-in)
+        # Feature extractors (default: all built-in including DNS & Statistical)
         self.extractors = extractors or [
             VolumeFeatureExtractor(),
             ScanFeatureExtractor(),
             BeaconingFeatureExtractor(),
             ExfiltrationFeatureExtractor(),
+            DNSFeatureExtractor(),
+            StatisticalFeatureExtractor(),
         ]
 
-        # Detectors (default: all built-in)
+        # Detectors (default: all built-in including DNS & Anomaly)
         self.detectors = detectors or [
             DDoSDetector(),
             ScanDetector(),
             BeaconingDetector(),
             ExfiltrationDetector(),
+            DNSDetector(),
+            AnomalyDetector(),
         ]
+
+        # Alert correlation engine
+        self._correlator = AlertCorrelator() if enable_correlation else None
 
         # Optional callback for real-time alert delivery (e.g., to API store)
         self._alert_callback = alert_callback
+
+        # Metrics callback for live metrics delivery to API
+        self._metrics_callback: Any | None = None
 
         self._lock = threading.Lock()
         self._is_running = False
         self._should_stop = False
 
+        # Live counters for metrics
+        self._total_records: int = 0
+        self._total_alerts: int = 0
+        self._total_windows: int = 0
+        self._latencies: list[float] = []
+
     @property
     def is_running(self) -> bool:
         return self._is_running
+
+    def set_metrics_callback(self, callback: Any) -> None:
+        """Set a callback for live metrics updates."""
+        self._metrics_callback = callback
 
     def run(self, reader: BaseReader) -> PipelineResult:
         """
@@ -186,6 +212,10 @@ class Pipeline:
 
         self._is_running = True
         self._should_stop = False
+        self._total_records = 0
+        self._total_alerts = 0
+        self._total_windows = 0
+        self._latencies = []
 
         logger.info(
             "Pipeline started: window=%ds, slide=%ds, extractors=%d, detectors=%d",
@@ -202,6 +232,7 @@ class Pipeline:
                     break
 
                 result.total_records += 1
+                self._total_records += 1
                 record_start = time.time()
 
                 # Add to window manager
@@ -213,6 +244,7 @@ class Pipeline:
 
                     if window_flows:
                         result.total_windows += 1
+                        self._total_windows += 1
                         window_start = self.window_manager.global_window.window_start
                         window_end = self.window_manager.global_window.window_end
 
@@ -225,10 +257,15 @@ class Pipeline:
                             window_flows, all_features, window_start, window_end
                         )
 
+                        # Deduplicate via correlator if enabled
+                        if self._correlator and window_alerts:
+                            window_alerts = self._correlator.deduplicate(window_alerts)
+
                         # Collect alerts
                         for alert in window_alerts:
                             result.alerts.append(alert)
                             result.total_alerts += 1
+                            self._total_alerts += 1
 
                             if self._alert_callback:
                                 try:
@@ -239,6 +276,14 @@ class Pipeline:
                 # Track latency
                 latency_ms = (time.time() - record_start) * 1000.0
                 result.latencies_ms.append(latency_ms)
+                self._latencies.append(latency_ms)
+
+                # Publish live metrics periodically (every 500 records)
+                if self._metrics_callback and self._total_records % 500 == 0:
+                    try:
+                        self._metrics_callback(self.get_metrics())
+                    except Exception:
+                        pass
 
         except Exception as e:
             logger.error("Pipeline error: %s", e, exc_info=True)
@@ -246,6 +291,12 @@ class Pipeline:
         finally:
             self._is_running = False
             result.end_time = time.time()
+            # Push final metrics
+            if self._metrics_callback:
+                try:
+                    self._metrics_callback(self.get_metrics())
+                except Exception:
+                    pass
 
         logger.info(
             "Pipeline complete: %d records, %d windows, %d alerts in %.2fs",
@@ -304,12 +355,34 @@ class Pipeline:
     def get_metrics(self) -> PipelineMetrics:
         """Return current pipeline metrics."""
         stats = self.window_manager.stats()
+
+        # Compute live latency percentiles
+        latencies = self._latencies[-10000:]  # last 10k for efficiency
+        p50 = self._percentile(latencies, 50)
+        p95 = self._percentile(latencies, 95)
+        p99 = self._percentile(latencies, 99)
+        avg_lat = sum(latencies) / len(latencies) if latencies else 0.0
+
         return PipelineMetrics(
-            total_records_ingested=stats["global"]["total_ingested"],
-            total_records_processed=stats["global"]["total_ingested"],
-            active_windows=1 if self._is_running else 0,
+            total_records_ingested=self._total_records,
+            total_records_processed=self._total_records,
+            total_alerts_generated=self._total_alerts,
+            active_windows=self._total_windows,
             window_size_sec=self.window_size_sec,
             slide_interval_sec=self.slide_interval_sec,
             is_processing=self._is_running,
             detectors_loaded=len(self.detectors),
+            latency_p50_ms=round(p50, 3),
+            latency_p95_ms=round(p95, 3),
+            latency_p99_ms=round(p99, 3),
+            latency_avg_ms=round(avg_lat, 3),
         )
+
+    @staticmethod
+    def _percentile(values: list[float], p: int) -> float:
+        """Compute the p-th percentile of a list of values."""
+        if not values:
+            return 0.0
+        sorted_v = sorted(values)
+        idx = min(int(len(sorted_v) * p / 100), len(sorted_v) - 1)
+        return sorted_v[idx]

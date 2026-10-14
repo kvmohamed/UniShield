@@ -683,6 +683,46 @@
             .metrics-grid { grid-template-columns: repeat(2, 1fr); }
             .controls { flex-direction: column; align-items: stretch; }
         }
+
+        /* ============ REAL-TIME STATUS PANEL ============ */
+        .status-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 8px;
+            margin-bottom: 1.25rem;
+            padding: 14px;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(139, 92, 246, 0.04));
+            border: 1px solid rgba(99, 102, 241, 0.15);
+            border-radius: var(--radius);
+        }
+
+        .sp-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            background: rgba(0,0,0,0.15);
+        }
+
+        .sp-label {
+            font-size: 0.6rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+        }
+
+        .sp-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .sp-value.ok { color: var(--success); }
+        .sp-value.warn { color: var(--medium); }
+        .sp-value.live { color: var(--accent-secondary); animation: pulse-dot 2s infinite; }
     </style>
 </head>
 <body>
@@ -717,6 +757,46 @@
 <!-- MAIN -->
 <main class="main">
 
+    <!-- REAL-TIME STATUS PANEL -->
+    <div class="status-panel" id="status-panel">
+        <div class="sp-item">
+            <span class="sp-label">Mode</span>
+            <span class="sp-value live" id="sp-mode">Idle</span>
+        </div>
+        <div class="sp-item">
+            <span class="sp-label">Input Rate</span>
+            <span class="sp-value" id="sp-input-rate">0 rec/s</span>
+        </div>
+        <div class="sp-item">
+            <span class="sp-label">Processed Rate</span>
+            <span class="sp-value" id="sp-processed-rate">0 rec/s</span>
+        </div>
+        <div class="sp-item">
+            <span class="sp-label">Latest Alert</span>
+            <span class="sp-value" id="sp-latest-alert">—</span>
+        </div>
+        <div class="sp-item">
+            <span class="sp-label">P95 Latency</span>
+            <span class="sp-value" id="sp-p95-latency">—</span>
+        </div>
+        <div class="sp-item">
+            <span class="sp-label">Refresh Delay</span>
+            <span class="sp-value" id="sp-refresh-delay">4s</span>
+        </div>
+        <div class="sp-item">
+            <span class="sp-label">Passive Mode</span>
+            <span class="sp-value ok" id="sp-passive">Enabled</span>
+        </div>
+        <div class="sp-item">
+            <span class="sp-label">Payload Decrypt</span>
+            <span class="sp-value ok" id="sp-decrypt">Disabled</span>
+        </div>
+        <div class="sp-item">
+            <span class="sp-label">Response Actions</span>
+            <span class="sp-value ok" id="sp-response">Disabled</span>
+        </div>
+    </div>
+
     <!-- CONTROLS -->
     <div class="controls">
         <div class="controls-left">
@@ -731,6 +811,7 @@
             </button>
         </div>
         <div class="controls-right">
+            <span class="sp-value live" style="font-size:0.7rem;">● Auto-polling 4s</span>
             <span id="last-update">—</span>
         </div>
     </div>
@@ -1187,13 +1268,78 @@
     }
 
     // ===================================================================
+    // REAL-TIME STATUS PANEL
+    // ===================================================================
+
+    async function updateStatusPanel() {
+        try {
+            const health = await apiGet('/health');
+            const metrics = await apiGet('/metrics');
+
+            // Mode
+            const modeEl = document.getElementById('sp-mode');
+            if (health.pipeline_active) {
+                modeEl.textContent = 'Replay';
+                modeEl.className = 'sp-value live';
+            } else {
+                modeEl.textContent = 'Idle';
+                modeEl.className = 'sp-value';
+            }
+
+            // Input / processed rate
+            document.getElementById('sp-input-rate').textContent =
+                `${(metrics.records_per_second || 0).toFixed(0)} rec/s`;
+            document.getElementById('sp-processed-rate').textContent =
+                `${metrics.total_records_processed || 0} total`;
+
+            // P95 Latency
+            const p95 = metrics.latency_p95_ms || 0;
+            const p95El = document.getElementById('sp-p95-latency');
+            p95El.textContent = p95 > 0 ? `${p95.toFixed(2)} ms` : '—';
+
+            // Latest alert time
+            if (lastAlerts.length > 0) {
+                const latest = lastAlerts[lastAlerts.length - 1];
+                const ts = new Date(latest.timestamp);
+                document.getElementById('sp-latest-alert').textContent = ts.toLocaleTimeString();
+            }
+
+            // Security constraints
+            document.getElementById('sp-passive').textContent =
+                health.read_only_mode ? 'Enabled' : 'VIOLATION';
+            document.getElementById('sp-passive').className =
+                health.read_only_mode ? 'sp-value ok' : 'sp-value warn';
+            document.getElementById('sp-decrypt').textContent =
+                health.no_payload_decryption ? 'Disabled' : 'ACTIVE';
+            document.getElementById('sp-decrypt').className =
+                health.no_payload_decryption ? 'sp-value ok' : 'sp-value warn';
+            document.getElementById('sp-response').textContent =
+                health.no_response_path ? 'Disabled' : 'ACTIVE';
+            document.getElementById('sp-response').className =
+                health.no_response_path ? 'sp-value ok' : 'sp-value warn';
+
+        } catch (e) {
+            document.getElementById('sp-mode').textContent = 'Offline';
+            document.getElementById('sp-mode').className = 'sp-value warn';
+        }
+    }
+
+    // ===================================================================
     // INIT
     // ===================================================================
 
     async function init() {
         await checkHealth();
         await refreshData();
-        // Auto-refresh every 5 seconds
+        await updateStatusPanel();
+
+        // Auto-poll alerts + metrics every 4 seconds
+        setInterval(async () => {
+            await refreshData();
+            await updateStatusPanel();
+        }, 4000);
+
+        // Health check every 10 seconds
         setInterval(async () => {
             await checkHealth();
         }, 10000);

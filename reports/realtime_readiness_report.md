@@ -1,0 +1,393 @@
+# UniShield — Phase 1 Audit & Real-Time Readiness Report
+
+| | |
+|---|---|
+| **Date** | 2026-10-14 |
+| **Code audited** | commit `1f82e47` **plus** uncommitted working-tree changes to `api/app.py`, `config.py`, `dashboard/index.html`, `processing/pipeline.py`, and untracked `scripts/*`, `reports/*` |
+| **Environment** | Windows 10 (19045), Python 3.14.7 (`.venv`), AMD 12-core, 7.4 GB RAM. Docker **not installed** |
+| **Method** | Every source file read; full test suite executed; scripted runs on synthetic and locally-written sample files (PCAP, Zeek JSON/TSV, CSV, JSON); API exercised in-process with FastAPI `TestClient`. For the PCAP test only, `scapy==2.6.1` was installed into an isolated scratch folder (the project venv was not modified). No packets were sent; no network access was used by any test. |
+| **Supersedes** | The auto-generated version of this file dated 2026-10-05 (several of its statements are no longer true for the current working tree). |
+
+Status vocabulary used throughout:
+
+- **Implemented** — exists, runs, and does what it claims in tests or a scripted run.
+- **Partial** — exists and runs, but is incomplete or has a confirmed defect that affects its purpose.
+- **Placeholder** — file exists but contains only a docstring/comment.
+- **Missing** — required by the target architecture, no file or equivalent exists.
+- **Unverified** — exists but could not be executed in this environment.
+
+---
+
+## 0. Executive summary
+
+1. **A working end-to-end path exists, but only for synthetic data.** `POST /replay/demo` → synthetic flows → sliding window → 6 extractors → 6 detectors → dedup → in-memory store → `/alerts` → HTML dashboard. Measured: 920 synthetic flows produced **3 alerts** (PORT_SCAN, HOST_SCAN, DATA_EXFILTRATION). No DDoS or beaconing alert appears in the demo.
+2. **Real-file ingestion is weak.** PCAP reading **cannot run** in the current venv (`scapy` not installed) and `/replay/start` rejects `.pcap`. Flow-format JSON through the API parses **0 records**. Zeek's default TSV format parses 0 records. CICIDS2017-style CSV rows fail on timestamp format, and when they parse, units and columns are wrong.
+3. **Detectors are connected to the pipeline** (all 6), but several are **functionally broken in the pipeline context** (DDoS false-alarms after quiet periods, port-scan false positives on normal two-way traffic, beaconing blind to intervals ≥ ~5 s, Isolation Forest confidence capped at ~0.03). See §10.
+4. **No ML model is trained, saved or loaded.** The only model is an Isolation Forest fitted in memory on the first 10 windows of each run, then discarded. No supervised model, no dataset, no registry, no calibration.
+5. **Headline performance claims are not supported by the current code.** Measured throughput is **~706 records/s** (5 runs, σ = 1.4), not "40,000+". 97% of CPU time is the Isolation Forest's two per-window scikit-learn calls; without it, ~30,000 records/s. "Sub-millisecond latency" is the time to append a record to a queue, not detection latency.
+6. **No persistence, no auth, no sessionization, no statistical detector, no encrypted-session module, no Streamlit dashboard, no integration/performance tests, no CI.**
+7. **Passive-operation constraint holds in code:** no socket/send/HTTP-client/subprocess calls anywhere in `src/`; readers only open local files; the security-flag validator rejects disabling read-only mode. Two adjacent risks: the API has no authentication and `/replay/start` opens any path on disk; the dashboard has a stored-XSS sink.
+8. **Tests: 96 collected, 95 pass, 1 fails** (`test_pipeline_metrics` expects 4 detectors; the uncommitted change registers 6). There are no tests for any reader or replay endpoint.
+9. **Existing reports are not reliable evidence.** `realtime_verdict.md` was produced by a harness that re-implements the pipeline loop with 4 of 6 detectors, contains hard-coded pass marks and limitation text, and uses non-reproducible seeds.
+
+**Honest classification today: _Accelerated replay (offline)_.** It is not near-real-time replay (no end-of-stream flush, record-driven window emission, no paced replay through the real pipeline, no end-to-end timestamps stored with alerts). It is not live passive monitoring (no live input).
+
+---
+
+## 1. Claims vs. measured evidence
+
+| Claim (source) | Measured / found | Verdict |
+|---|---|---|
+| "7 detectors" / "7+ threat classes" (README) | **6** detector classes. Threat-class enum has 13 values; **11** can be emitted; `DDOS_PROTOCOL` and `ENCRYPTED_SESSION_ANOMALY` are never produced. | Overstated |
+| "85+ features" (README per-module counts) | **84** named feature outputs (volume 24, scan 12, beaconing 11, exfiltration 12, DNS 14, statistical 11); 4 of them are IP strings, so **80 numeric**. The 11 statistical features are computed every window but **no detector reads them**. | Overstated |
+| "40,000+ records/sec" (README) | Current default pipeline, 9,050-record mixed synthetic scenario, 5 runs: **mean 706.5 rec/s, median 706.6, σ 1.4, min 704.5, max 708.3**. Same data without `AnomalyDetector`: ~30,000 rec/s. The 34k figure in `benchmark_report.json` predates adding the Isolation Forest to the default pipeline. | **Not supported** (and below the 1,000 rec/s target) |
+| "P50 < 0.01 ms, P95 < 0.2 ms, P99 < 0.3 ms" (README) | The metric is wall time per record for `window.add()` plus, occasionally, a whole window's analysis. Measured now: per-record **P50 0.002 ms, P95 13.7 ms, P99 13.9 ms**. True per-window analysis time: **P50 13.6 ms, P95 14.1 ms, max 88–102 ms**. Event-to-alert time in traffic terms is bounded below by the window/slide (≥ seconds), and is not measured anywhere. | Mislabelled metric |
+| "15+ API endpoints" (README table) | **13 routes** (11 API + `/` and `/dashboard`), plus auto-generated `/docs`, `/redoc`, `/openapi.json`. | Overstated (counts docs) |
+| "100+ tests" (README) | **96** tests collected, **95 pass, 1 fails**. `tests/integration/` and `tests/performance/` contain only `__init__.py`. | Overstated |
+| "Isolation Forest with online learning" (README) | Fitted **once**, after the first 10 windows of a run, on whatever those windows contain (attacks included); never refitted; never saved; discarded at end of run. | False |
+| "Real-time dashboard" (README) | HTML page polls `/alerts`, `/alerts/summary`, `/replay/status`, `/health`, `/metrics` every 4 s (uncommitted change). No push (WebSocket/SSE). | Polling, near-real-time display only |
+| "POST /replay/start — Replay a PCAP/JSON/CSV file" (README) | `.pcap` → `"Unsupported format: .pcap"`. Flow `.json` → 0 records (wrong reader chosen). `.csv` works. | Partially false |
+| "Docker deployment" (README) | Not executable here (Docker absent). Static review: compose `dashboard` service runs non-existent `streamlit_app.py`; no `.dockerignore`, so `.venv/` and `.git/` are copied into the image. | Unverified, known defects |
+| `pytest --cov` (README, Makefile) | `pytest-cov` is not installed in the venv; command fails. | Broken |
+| Commit `c2a054e` "storage layer with migrations support and ML model package" | `storage/` and `models/` contain only `__init__.py`; `migrations/` is empty. | False |
+| Commit `1f82e47` "utility scripts for dataset prep, model training, and PCAP replay" | All four scripts are one-line placeholders. | False |
+| Commit `da38d76` "unit, integration, and performance tests" | Integration and performance test folders are empty. | False |
+
+---
+
+## 2. Module status: required structure vs. current repository
+
+### 2.1 Top level, configuration, data
+
+| Required item | Current equivalent | Status | Evidence / notes |
+|---|---|---|---|
+| `README.md` | present | Partial | Overstates capability (§1). Quick-start works for synthetic demo. |
+| `LICENSE` | present | Implemented | MIT. |
+| `.env.example` | present | Partial | `AppSettings` (config.py:129) is defined but never instantiated; none of the `UNISHIELD_*` variables except `UNISHIELD_CONFIG_DIR` are read. |
+| `.gitignore` | present | Implemented | No `.dockerignore` exists. |
+| `docker-compose.yml` | present | Partial | `dashboard` service command points at a missing file → restart loop. Obsolete `version:` key. |
+| `Dockerfile` | present | Unverified | Python 3.11 base vs local 3.14 venv (environment drift). Copies whole tree. |
+| `Makefile` | present | Partial | `dashboard` target → missing file; `test-cov` needs pytest-cov; `clean` uses POSIX `find` (fails in cmd.exe). |
+| `requirements.txt` | present | Partial | 15 declared packages never imported (pandas, pyarrow, scipy, xgboost, shap, streamlit, plotly, sqlalchemy, aiosqlite, alembic, psycopg2-binary, structlog, rich, python-dotenv, click). `psutil`, `matplotlib` used by scripts but undeclared. The venv does **not** match it (scapy, pandas, sqlalchemy, xgboost, streamlit, plotly, pytest-cov … not installed). |
+| `pyproject.toml` | present | Implemented | Editable install verified. |
+| `configs/config.yaml` | present | Partial | Read, but most keys are never used: `max_queue_size`, `max_alert_batch`, `max_file_size_mb`, `supported_formats`, `anonymize_ips`, `ip_hash_salt`, `database.*`, `models.*`, `paths.*`. Only `processing.window_size_sec`, `slide_interval_sec`, `max_records_in_memory` and `security.*` have effect. |
+| `configs/thresholds.yaml` | present | Partial | Read by detectors. `encrypted.*` unused (no module); several keys unused (`destination_rarity`, `burst_size_bytes`, `baseline_deviation_sigma`, `min_interval_sec`, `max_interval_sec`, `mad_threshold`, `ngram_anomaly_score`, …). |
+| `configs/logging.yaml` | present | Partial | Applied only via `python -m unishield.main`; launching with `uvicorn …` (README, Dockerfile) skips it. |
+| `data/raw`, `processed`, `samples` | present (empty) | Missing content | No sample PCAP/Zeek/CSV file ships with the repo. |
+| `data/test_scenarios/` | generated on demand | Partial | Created by `scripts/test_traffic_generator.py`; not present now. |
+| `models/saved`, `models/metadata` | present (empty) | Missing content | No model artifact exists. |
+| `notebooks/` | empty | Missing content | — |
+| `.github/workflows` (CI) | — | Missing | — |
+
+### 2.2 Scripts
+
+| Required | Current | Status | Notes |
+|---|---|---|---|
+| `scripts/prepare_dataset.py` | present | Placeholder | `# Implemented in Phase 5` |
+| `scripts/train_models.py` | present | Placeholder | `# Implemented in Phase 5` |
+| `scripts/replay_pcap.py` | present | Placeholder | `# Implemented in Phase 2` |
+| `scripts/replay_stream.py` | present (untracked) | Partial | Has speed-factor pacing and stage timestamps, but **re-implements the pipeline loop** with 4 extractors/4 detectors instead of calling `Pipeline`; same no-flush bug; seeds from `hash()` (randomised per process). |
+| `scripts/benchmark_pipeline.py` | present | Placeholder | A working (flawed) benchmark exists at `src/unishield/scripts/benchmark.py`: ablation compares a 6-detector baseline against 3-detector subsets (confounded), no ground truth. |
+| `scripts/run_demo.py` | present (untracked) | Partial | Criteria 8 and 10 hard-coded `pass: True`; network check is a string literal; static scan uses Windows `findstr` and passes silently on error; "Limitations" and dashboard text are hard-coded and already inaccurate. |
+| `scripts/verify_passive_mode.py` | — | Missing | Logic partly embedded in `run_demo.verify_passive_operation()`. |
+| `scripts/generate_charts.py` | present (untracked) | Implemented | Needs undeclared `matplotlib`. |
+| `scripts/test_traffic_generator.py` | present (untracked) | Partial | Labelled scenarios with metadata; seeds non-reproducible; labels are per-scenario, not per-flow; edited after the reports were generated. |
+| `scripts/run_demo.bat` | present (untracked) | Implemented | Windows only; `run_demo.sh` missing. |
+
+### 2.3 Source package `src/unishield/`
+
+| Required module | Current equivalent | Status | Evidence / notes |
+|---|---|---|---|
+| `main.py` | `main.py` | Implemented | Starts uvicorn with config host/port; `reload=debug` (True by default). |
+| `config.py` | `config.py` | Partial | YAML + security validator work; env settings unused; configs located via `__file__` (works only for editable install). |
+| `logging_config.py` | `logging_config.py` | Partial | See logging.yaml note. |
+| `schemas/flow.py` | `schemas/flow.py` | Partial | Field `source` (spec: `source_type`); IPs are unvalidated strings; epoch input becomes a **naive** datetime while readers emit aware ones; no `event_id` for flows/sessions beyond random UUID. |
+| `schemas/alert.py` | `schemas/alert.py` | Partial | Validation, confidence clamp and MITRE format check work. `flow_id`, `source_ip_hash`, `destination_ip_hash` are **never populated** by any detector. `timestamp` is wall-clock `utcnow` (deprecated). |
+| `schemas/metrics.py` | `schemas/metrics.py` | Partial | `cpu_percent`, `memory_mb`, `queue_size`, `dropped_records`, `malformed_records` are always 0 (verified via `/metrics`). |
+| `ingest/base.py` | `ingest/base.py` | Implemented | — |
+| `ingest/pcap_reader.py` | `ingest/pcap_reader.py` | Partial / not runnable here | `ImportError` in current venv. With scapy: 6 packets → 6 records (one record **per packet**, `packet_count=1`, `duration=0`); DNS name/type extracted correctly; direction always `unknown`. TLS version is read from the **record-layer header**, which modern TLS 1.2/1.3 ClientHellos set to `0x0301`, so it reports `TLSv1.0` for modern clients — a planned "old TLS version" rule would fire on normal traffic. |
+| `ingest/zeek_reader.py` | `ingest/zeek_reader.py` | Partial | conn.log JSON: 20/20 records, counts correct. Zeek default **TSV: 0 records** (2 errors). dns.log `rcode_name: NXDOMAIN` is dropped. ssl.log `version` kept as `TLSv12` (Zeek naming) vs `TLSv1.2` elsewhere. Each log line becomes a separate flow (dns/ssl lines with `byte_count=0`, `packet_count=1`), no join on `uid`. Missing IPs filled with `0.0.0.0` (violates "never fabricate"). Loads the **entire file into memory** before yielding. |
+| `ingest/flow_reader.py` | `ingest/flow_reader.py` | Partial | Project's own CSV/JSON: 50/50 records, but `direction` (and DNS type, TLS fields, label) are **discarded** — all become `unknown`. CICIDS2017-style CSV: timestamps without seconds → **0/2 records**; with seconds: `Flow Duration` (µs) read as seconds (5,000,000 s), packet/byte columns unmapped (`packet_count=1`, `byte_count=0`), `Label` dropped. JSON mode loads whole file. |
+| `processing/normalization.py` | inside readers | Missing | No home-network/CIDR config, so direction is never inferred; no IP anonymisation applied (`to_anonymised()` is never called). |
+| `processing/sessionizer.py` | — | **Missing** | Packet-level PCAP records go straight into windows. This is the root cause of the two-way-traffic port-scan false positive. |
+| `processing/window_manager.py` | `processing/window.py` | Partial | Global sliding window works. Emission is **record-driven** (a window only closes when a later record arrives), **no end-of-stream flush**, per-source windows are filled but never read (retained **all 60,000 records** of a 60k-record test while the global window held 13), "LRU" eviction is FIFO. |
+| `processing/pipeline.py` | `processing/pipeline.py` | Partial | All 6 extractors/detectors wired; dedup wired. Defects: no flush; `latencies_ms`, `features_history`, `alerts` grow unbounded; `_lock` unused; Isolation Forest dominates runtime. |
+| `features/base.py` | `features/base.py` | Implemented | — |
+| `features/traffic_features.py` + `ddos_features.py` | `features/volume.py` | Partial | Rates divided by first-to-last timestamp span clamped to 1 ms, not the window length → one 20-packet flow after 30 s silence = "20,000 pps". |
+| `features/scan_features.py` | `features/scan.py` | Partial | Counts reply traffic's ephemeral ports as scan fan-out; host-scan values taken from the top *port* scanner. |
+| `features/beacon_features.py` | `features/beaconing.py` | Partial | Needs ≥ 5 connections per pair inside one 10 s window → blind to intervals ≥ ~5 s. "FFT periodicity" is actually median-clustering. Destination rarity not implemented. |
+| `features/exfil_features.py` | `features/exfiltration.py` | Partial | Direction is always unknown, so it falls back to a port-number heuristic. No per-source baseline, no destination rarity. |
+| `features/dns_features.py` | `features/dns.py` | Partial | Entropy, length, depth, TXT ratio work. NXDOMAIN read from record type (never populated). No n-gram features. |
+| `features/encrypted_features.py` | — | Missing | — |
+| (extra) | `features/statistical.py` | Partial | Rolling z-scores computed; baseline absorbs attack windows; **output consumed by no detector**. |
+| `detectors/base.py` | `detectors/base.py` | Implemented | — |
+| `detectors/rule_detector.py` | — | Missing (as generic) | Rules are embedded in each detector. |
+| `detectors/statistical_detector.py` | — | **Missing** | Statistical layer has no detector. |
+| `detectors/ml_detector.py` | `detectors/anomaly_detector.py` | Partial | Isolation Forest only. Confidence = `−decision_function/3.0` → measured max **0.035**, always LOW. Fitted once on first 10 windows; 91% of windows flagged on benign traffic with one rate change. `save_model`/`load_model` exist but are never called. ~14 ms per window. |
+| `detectors/ddos_detector.py` | same | Partial | Logic runs; with the project's own synthetic DDoS generator it **never fires** (peak ~290 pps vs 10,000 threshold); fires falsely after traffic gaps (via volume bug). |
+| `detectors/scan_detector.py` | same | Partial | Fires on synthetic scans; false positives on normal bidirectional traffic. |
+| `detectors/beacon_detector.py` | `beaconing_detector.py` | Partial | 2 s beacons detected (13 alerts); 30 s and 60 s beacons: 0. |
+| `detectors/exfil_detector.py` | `exfiltration_detector.py` | Partial | Fires on synthetic exfil; "unusual port" rule also fires on port scans (cross-class FP). |
+| `detectors/dns_detector.py` | same | Partial | Tunnelling score works on synthetic DNS; DGA NXDOMAIN signal dead. |
+| `detectors/encrypted_detector.py` | — | Missing | — |
+| `models/train.py`, `predict.py`, `calibration.py`, `registry.py` | `models/__init__.py` only | **Missing** | — |
+| `correlation/deduplication.py` | `correlation/correlator.py::deduplicate` | Partial | Uses wall-clock alert time → collapses a whole replay to ~1 alert per key (3 episodes 20 min apart → 1 alert). Key ignores destination, so all DDoS/exfil alerts (no source IP) share one key. |
+| `correlation/severity.py` | per-detector code; `correlator.correlate()` | Partial | Incident grouping/escalation exists but is **never called** by the pipeline or API. |
+| `correlation/mitre_mapping.py` | hard-coded per detector | Partial | IDs format-validated; no central mapping. |
+| `storage/database.py`, `repositories.py`, `migrations/` | `storage/__init__.py` only | **Missing** | Alerts live in a Python list; lost on restart. |
+| `api/app.py` | `api/app.py` | Partial | See §6. |
+| `api/routes_alerts.py`, `routes_metrics.py`, `routes_replay.py` | all inside `app.py` | Missing (as split) | — |
+| `dashboard/streamlit_app.py` | — | Missing | Referenced by Makefile, compose, docs. |
+| (extra) | `dashboard/index.html` | Partial | Overview tiles, severity bars, threat list, pipeline-performance panel, alert table, status panel with passive flags, 4 s polling. Missing: timeline, alert-detail/evidence view, traffic analytics, benchmark page, the exact required notice text. "Clear" only clears the browser view (next poll refills it). Stored XSS via `innerHTML`. Loads Google Fonts (falls back offline). |
+| (extra) | `data/sample_generator.py` | Partial | Synthetic scenarios; DDoS too weak for thresholds; benign TCP always `SYN,ACK` (cannot trip SYN-ratio rules); unseeded. |
+
+### 2.4 Tests
+
+| File | Tests | Covers | Gaps / notes |
+|---|---|---|---|
+| `test_alert_schema.py` | 17 | Alert validation, confidence bounds, MITRE format, IDs, JSON round-trip | — |
+| `test_flow_schema.py` | 18 | Flow fields, timestamp parsing, anonymisation helper | Naive-datetime behaviour not asserted |
+| `test_config.py` | 11 | YAML loading, security validator | — |
+| `test_api_health.py` | 10 | `/health`, `/metrics`, `/alerts` basic, `/benchmark/latest` | No `/replay/*` tests |
+| `test_pipeline.py` | 25 | Window, volume/scan/beacon/exfil features, 4 detectors, pipeline smoke | **1 failing.** Detector tests feed a whole scenario as one window and lower DDoS thresholds 100×; they don't test default-config behaviour in the pipeline. |
+| `test_advanced.py` | 15 | Statistical, anomaly, DNS, correlator | Anomaly "detection" test asserts only `windows_analysed >= 11`. |
+| **Readers (PCAP/Zeek/Flow)** | **0** | — | No tests at all |
+| `tests/integration/` | 0 | — | Empty |
+| `tests/performance/` | 0 | — | Empty |
+| Security tests | 0 | — | No malformed-input, path-traversal, auth, oversize tests |
+
+Run: `.venv/Scripts/python.exe -m pytest tests/ -q` → **95 passed, 1 failed, 216 warnings** (mostly `datetime.utcnow()` deprecation on Python 3.14).
+
+### 2.5 Documentation and reports
+
+| Item | Status | Notes |
+|---|---|---|
+| `docs/architecture.md` | Partial | Describes calibration, SQLite/PostgreSQL store, Streamlit + Plotly, XGBoost — none exist. |
+| `docs/threat_model.md` | Implemented | Reasonable; not re-verified line by line. |
+| `docs/dataset.md` | Partial | Recommends CICIDS2017 / CTU-13 / UNSW-NB15; none downloaded or supported by readers. |
+| `docs/model_card.md` | Placeholder | "to be trained in Phase 5". |
+| `docs/evaluation.md` | Placeholder | "To be populated during Phase 5 and Phase 9". |
+| `docs/limitations.md` | Implemented | Honest and useful. |
+| `docs/demo_guide.md` | Partial | Points the dashboard at `localhost:8501` (Streamlit); real dashboard is `127.0.0.1:8000/dashboard`. |
+| `reports/benchmark_report.json` | Stale | 2026-10-01, before the Isolation Forest joined the default pipeline. |
+| `reports/realtime_verdict.md`, `realtime_demo_report.json`, `realtime_raw_results.json`, `figures/*` | Not reliable | See §8.3. |
+
+---
+
+## 3. Ingestion — functional status (answers checklist item 6)
+
+| Input | Works? | Evidence |
+|---|---|---|
+| **PCAP** | **No (current venv)** / Partial (with scapy) | `ImportError: Scapy is required…`. With scapy in an isolated folder: a 6-packet PCAP → 6 per-packet records; DNS fields correct; TLS ClientHello with record version `0x0301` → `TLSv1.0`; 0.6 s capture → **0 windows, 0 alerts** (no flush). Not reachable from the API. |
+| **Zeek JSON conn.log** | Yes | 20/20 records, bytes/packets summed correctly, direction `unknown`. Via API: works only if the file is `.json`/`.jsonl` (Zeek's default name `conn.log` → "Unsupported format"). |
+| **Zeek dns.log / ssl.log JSON** | Partial | Parsed as stand-alone flows; NXDOMAIN dropped; TLS version naming inconsistent. |
+| **Zeek TSV (default format)** | **No** | 0 records, 2 errors. |
+| **CSV (project format)** | Yes (lossy) | 50/50 records; direction discarded. API path works. |
+| **JSON flows (project format)** | Reader yes / **API no** | Direct `FlowReader`: 50/50. `POST /replay/start` picks `ZeekReader` → **0 records**, status "completed". |
+| **Public-dataset CSV (CICIDS2017-style)** | **No** | 0/2 rows (timestamp format); when forced, duration unit wrong by 10⁶, packet/byte counts lost, labels dropped. |
+| **Live input** | Missing | No live capture or tail-follow of Zeek logs. |
+
+## 4. Are detectors connected to the pipeline? (item 7)
+
+Yes. With the current working tree, `Pipeline()` registers extractors `volume, scan, beaconing, exfiltration, dns, statistical` and detectors `ddos, scan, beaconing, exfiltration, dns, anomaly`, and runs `AlertCorrelator.deduplicate()` on each window's alerts. Caveats:
+
+- The statistical extractor's 11 features are not read by any detector.
+- `AlertCorrelator.correlate()` (incident grouping, escalation) is never called.
+- Windows close only when a later record arrives, and the final partial window is never processed.
+- `replay_stream.py` / `run_demo.py` (the source of the realtime reports) do **not** use this pipeline.
+
+## 5. ML models (item 9)
+
+| Question | Answer |
+|---|---|
+| Any trained model artifact on disk? | **No** (`models/saved/` empty). |
+| Supervised model (RF/XGBoost)? | **No.** `xgboost` not installed; no training code. |
+| Isolation Forest | Fitted in-process on the first 10 windows of each run; never refitted, saved or reloaded; confidence mis-scaled (max 0.035); dominates runtime (~14 ms/window, 97% of CPU). |
+| Datasets | None present; readers cannot ingest the recommended public datasets correctly. |
+| Calibration, registry, versioning, preprocessing persistence | Missing. |
+
+## 6. Do the API and dashboard receive real alerts? (item 8)
+
+Yes, for pipeline runs started through the API. Measured via `TestClient`: `POST /replay/demo` (920 flows, 2.55 s) → `/alerts` returned the same 3 alerts; `/metrics` showed 920 records, 3 alerts, P95 13.5 ms. The dashboard polls these endpoints every 4 s. Limitations:
+
+- Store is an in-memory list: lost on restart; grows without bound; no pagination beyond offset/limit.
+- `/health` reports `models_loaded=1` whenever a pipeline object exists, even if the forest is unfitted; `database_connected` is always false.
+- `/benchmark/latest` never returns data (`_benchmark` is never set).
+- `/replay/demo` is `async` but blocks on `thread.join(timeout=30)` → the server cannot answer other requests during a demo.
+- `/replay/stop` reports "stopped", then the worker overwrites it with "completed".
+- No authentication on any endpoint; `/replay/start` accepted a CSV outside the project directory (path not restricted); CORS `*`.
+- Dashboard renders alert fields with `innerHTML` (stored XSS if a crafted Zeek/CSV file supplies a non-IP string as an IP).
+
+## 7. Passive-operation verification
+
+| Check | Result | Evidence |
+|---|---|---|
+| Packet-sending / network-client primitives in `src/` | **None found** | grep for `socket.`, `send(`, `sendp(`, `sr(`, `sr1(`, `requests.`, `urllib`, `httpx.`, `subprocess`, `os.system`: 0 matches. |
+| Readers only read local files | Yes | All readers open files read-only; PCAP uses scapy's offline reader. |
+| Security flags cannot be disabled | Yes | `SecurityConfig(read_only_mode=False)` raises a validation error (tested). |
+| Payload decryption | None | Only plaintext header/metadata fields are read. |
+| Dashboard outbound requests | Google Fonts CSS only | Cosmetic; page works offline with fallback fonts. |
+| Runtime network monitoring during tests | **Not performed by the project** | The "no outbound connections" line in existing reports is a hard-coded string. |
+| Admin endpoint protection | **Missing** | Unauthenticated replay control and arbitrary-path file reads. |
+
+---
+
+## 8. Performance — measured on this machine
+
+### 8.1 Throughput and latency (current default pipeline, 5 runs, 9,050 records each, seeds 1000–1004)
+
+| Metric | Mean | Median | σ | Min | Max |
+|---|---|---|---|---|---|
+| Throughput (records/s) | 706.5 | 706.6 | 1.4 | 704.5 | 708.3 |
+| Per-record wall time P50 (ms) | 0.002 | 0.002 | 0.000 | 0.002 | 0.003 |
+| Per-record wall time P95 (ms) | 13.66 | 13.67 | 0.02 | 13.64 | 13.68 |
+| Per-record wall time P99 (ms) | 13.92 | 13.92 | 0.04 | 13.87 | 13.98 |
+| **Per-window analysis P50 (ms)** | 13.64 | 13.65 | 0.02 | 13.61 | 13.66 |
+| **Per-window analysis P95 (ms)** | 14.15 | 14.16 | 0.04 | 14.09 | 14.18 |
+| Per-window analysis max (ms) | 91.2 | 88.4 | 5.9 | 87.9 | 101.6 |
+| Alerts per run (after dedup) | 5.4 | 6 | 0.9 | 4 | 6 |
+
+Cost breakdown of one run (934 windows, 13.66 s): `anomaly_detector` 13.29 s (14.2 ms/window); all other extractors and detectors combined < 0.4 s. Without the anomaly detector: ~30,000 records/s.
+
+Interpretation:
+
+- Throughput depends on traffic density, because cost is per window, not per record. Sparse traffic (few records per 5 s slide) gives low records/s.
+- Per-window analysis (P95 ≈ 14 ms) is the honest "latency after the window closes". It meets the < 2 s target **if** windows close on time, which they don't when traffic pauses (record-driven emission).
+
+### 8.2 Memory retention (60,000-record benign stream)
+
+| Structure | Retained after run |
+|---|---|
+| `Pipeline._latencies` | 60,000 floats (unbounded) |
+| Per-source windows | 771 windows holding **60,000** flow objects (never read) |
+| Global window | 13 records |
+
+A long-running stream will therefore grow linearly in memory.
+
+### 8.3 Reliability of existing reports
+
+- `realtime_verdict.md` is generated by `replay_stream.py`, which does not use `Pipeline` and runs 4 of 6 detectors.
+- Acceptance criteria 8 and 10 are hard-coded `pass: True`. Criteria 2 and 3 read flags that the validator forces to `True`. Criterion 6 uses per-record append time as "detection latency".
+- "Limitations" and the dashboard description are hard-coded strings. When generated (2026-10-12 22:34), they already contradicted the code changed at 16:46 the same day.
+- Seeds come from `hash(str)`, which Python randomises per process, so the 25 runs cannot be reproduced. Start times are `datetime.now()`.
+- Precision mixes units (true positives counted per class, false positives per alert). There is no per-flow ground truth.
+- `test_traffic_generator.py` was modified at 2026-10-13 00:08, after the reports.
+
+---
+
+## 9. Real-time classification
+
+| Level | Met? | Why |
+|---|---|---|
+| Offline batch only | Exceeded | Records are processed incrementally through windows. |
+| **Accelerated replay** | **Yes — current level** | Files/synthetic streams are replayed as fast as possible through incremental windows. |
+| Near-real-time replay | No | Needs: end-of-stream flush and clock-driven window closing; paced replay through the **real** pipeline; per-alert event/ingest/window/detection/storage timestamps; measured event-to-alert latency. |
+| Live passive monitoring | No | No live input (no interface capture, no Zeek log tailing). |
+| Real-time passive detection | No | — |
+
+---
+
+## 10. Confirmed functional defects (reproduced by script)
+
+| ID | Defect | Location | Reproduction result |
+|---|---|---|---|
+| D1 | No end-of-stream flush | `processing/pipeline.py:229` | 8 s, 20,000-record SYN flood → 0 windows, 0 alerts. With a manual flush the current DDoS scenario goes from 3/5 to 5/5 seeds detected. |
+| D2 | Rate denominator is timestamp span clamped to 1 ms | `features/volume.py:85` (same pattern in `scan.py`, `statistical.py`) | One 20-packet flow after 30 s silence → `DDOS_VOLUMETRIC` HIGH at "20,000 pps". |
+| D3 | Dedup on wall-clock time; key ignores destination | `correlation/correlator.py:54,72` | 3 exfil episodes 20 min apart → 1 alert (39 without dedup). |
+| D4 | Beaconing needs ≥ 5 connections inside one 10 s window | `features/beaconing.py:67`, window config | 2 s interval → 13 alerts; 30 s → 0; 60 s → 0. |
+| D5 | Isolation Forest confidence mis-scaled; fit-once on unvetted windows | `detectors/anomaly_detector.py:157-174` | Max confidence 0.035, all LOW; 91% of benign windows flagged after one rate change. |
+| D6 | Isolation Forest per-window cost | `detectors/anomaly_detector.py:167-168` | 14.2 ms/window, 97% of runtime; throughput 706 rec/s. |
+| D7 | Reply traffic counted as scan fan-out; host-scan misattributed | `features/scan.py:109` | 40 normal HTTPS connections → PORT_SCAN + RECONNAISSANCE against the web server (+2 C2_BEACONING). |
+| D8 | API picks Zeek reader for every `.json` | `api/app.py:305-314` | Flow JSON → 0 records, 50 errors, status "completed". |
+| D9 | `/replay/start` rejects PCAP; scapy not installed | `api/app.py:317`, venv | "Unsupported format: .pcap"; `ImportError`. |
+| D10 | Synthetic DDoS generator cannot reach thresholds | `data/sample_generator.py:132` | Peak ~290 pps and 1,451 SYN vs 10,000 / 5,000 thresholds, even at API maximum. |
+| D11 | Per-source windows retain everything | `processing/window.py:213-231`, `pipeline.py:153` | 60,000 of 60,000 records retained. |
+| D12 | Unbounded latency/feature/alert lists | `processing/pipeline.py:253,278-279` | 60,000 latency entries after 60k records. |
+| D13 | Readers discard direction/labels; units/formats wrong for public CSV | `ingest/flow_reader.py` | See §3. |
+| D14 | Zeek TSV unsupported; rcode dropped | `ingest/zeek_reader.py` | 0 records; NXDOMAIN lost. |
+| D15 | TLS version from record layer | `ingest/pcap_reader.py:222-245` | Modern ClientHello → `TLSv1.0`. |
+| D16 | `/replay/demo` blocks event loop | `api/app.py:375` | Server unresponsive for the duration of the demo (≈2.5 s for 920 flows; up to 30 s). |
+| D17 | Stored XSS in alert table | `dashboard/index.html:1222` | Unescaped `innerHTML` interpolation of alert fields. |
+| D18 | Failing unit test | `tests/unit/test_pipeline.py:464` | Expects 4 detectors, pipeline has 6. |
+
+---
+
+## 11. Prioritized repair plan
+
+Each phase ends with an **exit test** that must pass before the next phase starts. Effort: S ≈ ½ day, M ≈ 1–2 days, L ≈ 3+ days.
+
+### Phase 2 — Baseline, environment, structure (S–M)
+1. Commit the current working tree to a branch (e.g. `audit-baseline`) so all repairs are reviewable diffs.
+2. Create a Python 3.11 or 3.12 venv matching the Dockerfile; split `requirements.txt` into core / ml / dev; remove unused packages; declare `psutil`, `matplotlib`, `scapy`, `pytest-cov`.
+3. Fix the failing test (D18); move `datetime.utcnow()` / `utcfromtimestamp()` to timezone-aware UTC everywhere.
+4. Wire `logging.yaml` into app startup; make config path resolution work outside editable installs; either use or delete `AppSettings`/env vars.
+5. Add `.dockerignore`; remove or fix the compose `dashboard` service and Makefile target.
+6. Add GitHub Actions running `pytest` on push.
+
+**Exit test:** clean venv from `requirements*.txt` → `pytest` 100% green; `uvicorn unishield.api.app:app` serves `/health`.
+
+### Phase 3 — Ingestion, normalisation, sessionization (M–L)
+1. `processing/normalization.py`: home-network CIDRs in config → direction inference; IP validation (`ipaddress`); optional salted hashing applied centrally; `source_type` naming.
+2. `processing/sessionizer.py`: aggregate packet records into bidirectional flows (5-tuple + idle/active timeouts) with per-direction bytes/packets; emit on timeout or FIN/RST (fixes the root of D7).
+3. Readers: Zeek TSV support and `uid` join of conn/dns/ssl; keep `rcode`; stream JSON line by line; flow reader keeps direction/DNS/TLS fields/labels; dataset profiles for CICIDS2017 (column names, µs durations, timestamp formats) (D13, D14). PCAP TLS version from handshake/`supported_versions` (D15).
+4. API: reader selection by content sniffing; accept `.pcap/.pcapng` and Zeek `.log`; restrict `file_path` to an allow-listed data directory (D8, D9).
+5. Ship small fixtures in `tests/fixtures/` (tiny PCAP, Zeek JSON + TSV, CSV, JSON).
+
+**Exit test:** reader unit tests per format + integration test "fixture PCAP → sessionized flows → expected counts", all passing.
+
+### Phase 4 — Windowing + DDoS and scan (M)
+1. Window: end-of-stream flush; clock-driven closing (watermark: close a window when event time passes its end, or after an idle timeout); drop or actually use per-source windows; bounded metric buffers (D1, D11, D12).
+2. Volume/scan features divide by window length (D2); scan features use sessionized flows and count only client-initiated connections; separate top host-scanner (D7).
+3. Synthetic generator: DDoS scenario that is genuinely volumetric, seeded RNG, **per-flow labels** (D10).
+
+**Exit test:** labelled DDoS and scan scenarios detected in ≥ 5/5 seeded runs; benign scenario with traffic gaps and bidirectional HTTPS raises 0 DDoS/scan alerts.
+
+### Phase 5 — Beaconing and exfiltration (M)
+1. Beaconing: per-pair long-horizon state (rolling connection timestamps per src→dst over e.g. 30–60 min, bounded), so intervals of seconds to minutes are measurable; destination rarity (D4).
+2. Exfiltration: use real direction; per-source rolling baseline; destination rarity; remove port-rarity-only cross-firing on scans.
+3. Dedup on window/event time with destination in key (D3).
+
+**Exit test:** 30 s and 60 s beacons with 5% jitter detected; three separate exfil episodes → three alerts; scan scenario raises no exfil alert.
+
+### Phase 6 — Dataset preparation and baseline models (L)
+1. `scripts/prepare_dataset.py`: public dataset subset (decision needed, §12) → normalised, sessionized, windowed feature table with dataset version metadata.
+2. `models/train.py`, `registry.py`: seeded, session/time-aware split; Random Forest, XGBoost, Isolation Forest; saved with preprocessing and version metadata.
+3. Fix Isolation Forest scoring (one `score_samples` call, proper confidence mapping, fit on vetted baseline, persisted) (D5, D6).
+
+**Exit test:** `train_models.py` produces versioned artifacts and a metrics JSON (precision/recall/F1/PR-AUC/FPR/confusion matrix) on a held-out split.
+
+### Phase 7 — Hybrid detection, calibration, correlation (M)
+`statistical_detector.py` (robust z/MAD using the existing features), `ml_detector.py` inference from the registry, calibration (Platt/isotonic on validation), central severity and MITRE mapping, incident correlation actually called.
+
+**Exit test:** hybrid vs rule-only vs ML-only comparison table produced from one command.
+
+### Phase 8 — Persistence and API (M)
+SQLAlchemy store (SQLite default, PostgreSQL by URL) with repositories; alerts carry `flow_id` and stage timestamps; split routers; API-key auth on replay/admin endpoints; non-blocking demo endpoint; pagination; populated `/metrics` (CPU, RSS, queue, drops) and `/benchmark/latest` (D16).
+
+**Exit test:** restart server → alerts still served; replay endpoints reject missing key; integration test "replay → DB → API".
+
+### Phase 9 — Dashboard (M)
+Escape all rendered fields (D17); add timeline, alert-detail/evidence view, traffic analytics, benchmark page, the required notice text; bundle fonts locally for offline use; real server-side clear.
+
+**Exit test:** offline browser run of the demo shows alerts, details and benchmark page; XSS fixture renders as text.
+
+### Phase 10 — Tests, Docker, benchmarking, real-time verification, docs (M–L)
+Integration, security and performance tests; Docker build verified; `benchmark_pipeline.py` and `verify_passive_mode.py` that call the real pipeline with fixed seeds, five runs, mean/median/σ/min/max; paced replay with end-to-end timestamps; regenerate all reports from measurements only; rewrite README/docs to match.
+
+**Exit test:** the acceptance criteria in the project brief, each backed by a generated artifact rather than a literal.
+
+### First end-to-end path to restore (before any new feature)
+`fixture PCAP / Zeek JSON / CSV` → normalisation (direction, validation) → sessionizer → window with flush → volume + scan features → DDoS + scan detectors → dedup on event time → in-memory store (DB arrives in Phase 8) → `/alerts` → dashboard. This is Phases 2–4 above.
+
+---
+
+## 12. Decisions needed before Phase 2
+
+| # | Decision | Options | Recommendation |
+|---|---|---|---|
+| 1 | Dashboard technology | (a) keep the FastAPI-served HTML dashboard and extend it; (b) Streamlit as the brief suggests; (c) both | **(a)** — already wired, single process, works offline; Streamlit adds a second service and dependency without new capability. |
+| 2 | Database | SQLite only; SQLite + PostgreSQL via URL | **SQLite default, PostgreSQL by connection URL** (same SQLAlchemy code). |
+| 3 | PCAP processing | scapy + own sessionizer; PyShark/TShark (needs Wireshark install); Zeek (Linux/WSL/Docker) | **scapy + sessionizer for demo-sized PCAPs; Zeek JSON for large datasets** (offline, no extra installs for the demo). |
+| 4 | Public dataset for supervised baselines | CICIDS2017 (DDoS, PortScan; PCAP + labelled CSV); CTU-13 (botnet C2); UNSW-NB15 | **CICIDS2017 subset (one or two days) + CTU-13 scenario for beaconing**, sized for 7.4 GB RAM. |
+| 5 | Python version | stay on 3.14; move to 3.11/3.12 | **3.11 or 3.12**, matching Docker and the brief; several required packages are not installed in the 3.14 venv. |
+| 6 | Uncommitted work | commit as baseline; discard; keep uncommitted | **Commit to a baseline branch first.** |
