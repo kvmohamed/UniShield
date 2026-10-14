@@ -30,6 +30,8 @@ def main() -> None:
     sample_files.write_sample_flow_csv(out / "flows.csv")
     sample_files.write_sample_flow_jsonl(out / "flows.jsonl")
     sample_files.write_cicids_style_csv(out / "cicids2017_style.csv")
+    sample_files.write_port_scan_pcap(out / "attack_portscan.pcap")
+    sample_files.write_syn_flood_pcap(out / "attack_synflood.pcap")
 
     print(f"Wrote sample inputs to {out.resolve()}:")
     for path in sorted(p for p in out.rglob("*") if p.is_file() and p.name != ".gitkeep"):

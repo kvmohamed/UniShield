@@ -298,3 +298,61 @@ def write_cicids_style_csv(path: Path | str) -> Path:
     ]
     path.write_text(header + "\n" + "\n".join(rows) + "\n", encoding="utf-8")
     return path
+
+
+# ---------------------------------------------------------------------------
+# Attack captures (synthetic, written straight to disk)
+# ---------------------------------------------------------------------------
+
+def _write_packets(path: Path, packets: list) -> Path:
+    from scapy.utils import wrpcap
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wrpcap(str(path), packets)
+    return path
+
+
+def write_port_scan_pcap(path: Path | str, ports: int = 200) -> Path:
+    """
+    TCP SYN scan of ``ports`` ports on 192.168.1.20 from 198.51.100.66, 10 ms
+    apart: closed ports answer RST/ACK, ports 22/80/443 answer SYN/ACK and are
+    reset by the scanner, every 10th port is filtered (no answer).
+    """
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+
+    eth = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02")
+    out, back = eth / IP(src=SCANNER, dst=SCAN_TARGET), eth / IP(src=SCAN_TARGET, dst=SCANNER)
+    packets = []
+
+    def add(pkt, t):
+        pkt.time = BASE_EPOCH + t
+        packets.append(pkt)
+
+    for i, port in enumerate(range(1, ports + 1)):
+        t = 0.010 * i
+        add(out / TCP(sport=61000, dport=port, flags="S"), t)
+        if port in (22, 80, 443):
+            add(back / TCP(sport=port, dport=61000, flags="SA"), t + 0.001)
+            add(out / TCP(sport=61000, dport=port, flags="R"), t + 0.002)
+        elif port % 10:
+            add(back / TCP(sport=port, dport=61000, flags="RA"), t + 0.001)
+    return _write_packets(Path(path), packets)
+
+
+def write_syn_flood_pcap(path: Path | str, packets: int = 3000, rate_per_sec: int = 2500,
+                         target: str = "192.168.1.100") -> Path:
+    """Spoofed-source SYN flood against ``target``:80 at ``rate_per_sec``, unanswered."""
+    import random
+
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+
+    rng = random.Random(7)
+    eth = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02")
+    out = []
+    for i in range(packets):
+        pkt = eth / IP(src=f"198.18.{rng.randint(0, 255)}.{rng.randint(1, 254)}", dst=target) \
+            / TCP(sport=rng.randint(1024, 65535), dport=80, flags="S")
+        pkt.time = BASE_EPOCH + i / rate_per_sec
+        out.append(pkt)
+    return _write_packets(Path(path), out)
