@@ -1,6 +1,6 @@
 """
-Tests for the processing pipeline, window manager, feature extractors,
-and detectors.
+Tests for the processing pipeline, feature extractors and detectors.
+(Window tests: test_window.py; DDoS/scan rules: test_ddos.py, test_scan.py.)
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ from unishield.features.exfiltration import ExfiltrationFeatureExtractor
 from unishield.features.scan import ScanFeatureExtractor
 from unishield.features.volume import VolumeFeatureExtractor
 from unishield.processing.pipeline import Pipeline, PipelineResult
-from unishield.processing.window import SlidingWindow, WindowManager
 from unishield.schemas.flow import (
     FlowDirection,
     InputSource,
@@ -68,88 +67,6 @@ def _make_flow(
         duration=duration,
         source=InputSource.SIMULATED,
     )
-
-
-# ===================================================================
-# Window Manager Tests
-# ===================================================================
-
-class TestSlidingWindow:
-    def test_add_and_size(self):
-        window = SlidingWindow(window_size_sec=10, slide_interval_sec=5)
-        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        for i in range(10):
-            flow = _make_flow(t0 + timedelta(seconds=i))
-            window.add(flow)
-        assert window.size == 10
-        assert window.total_ingested == 10
-
-    def test_emit_evicts_old_records(self):
-        window = SlidingWindow(window_size_sec=5, slide_interval_sec=2)
-        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-        # Add 10 records, 1 second apart
-        for i in range(10):
-            window.add(_make_flow(t0 + timedelta(seconds=i)))
-
-        # Emit at t=9: window covers [4, 9]
-        records = window.emit(t0 + timedelta(seconds=9))
-        assert len(records) >= 5  # At least records from t=4 to t=9
-        assert window.window_count == 1
-
-    def test_should_emit_timing(self):
-        window = SlidingWindow(window_size_sec=5, slide_interval_sec=2)
-        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-        window.add(_make_flow(t0))
-        assert not window.should_emit(t0 + timedelta(seconds=3))
-        assert window.should_emit(t0 + timedelta(seconds=5))
-
-    def test_backpressure_eviction(self):
-        window = SlidingWindow(window_size_sec=100, slide_interval_sec=50, max_records=5)
-        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-        for i in range(10):
-            window.add(_make_flow(t0 + timedelta(seconds=i)))
-
-        assert window.size == 5
-        assert window.total_evicted == 5
-
-    def test_clear(self):
-        window = SlidingWindow()
-        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        window.add(_make_flow(t0))
-        window.clear()
-        assert window.size == 0
-        assert window.window_start is None
-
-
-class TestWindowManager:
-    def test_global_window_tracking(self):
-        mgr = WindowManager(window_size_sec=10, slide_interval_sec=5)
-        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-        for i in range(20):
-            mgr.add(_make_flow(t0 + timedelta(seconds=i)))
-
-        assert mgr.global_window.size == 20
-
-    def test_per_source_windows(self):
-        mgr = WindowManager(
-            window_size_sec=10,
-            slide_interval_sec=5,
-            enable_per_source_windows=True,
-        )
-        t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-        mgr.add(_make_flow(t0, src_ip="10.0.1.1"))
-        mgr.add(_make_flow(t0, src_ip="10.0.1.2"))
-        mgr.add(_make_flow(t0, src_ip="10.0.1.1"))
-
-        assert mgr.get_active_source_count() == 2
-        w1 = mgr.get_source_window("10.0.1.1")
-        assert w1 is not None
-        assert w1.size == 2
 
 
 # ===================================================================

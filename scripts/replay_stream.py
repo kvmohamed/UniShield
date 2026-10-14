@@ -35,7 +35,8 @@ import psutil  # type: ignore
 
 from unishield.config import load_config, reset_config, reset_thresholds
 from unishield.processing.pipeline import Pipeline, PipelineResult
-from unishield.processing.window import SlidingWindow, WindowManager
+from unishield.features.base import WindowContext
+from unishield.processing.window import SlidingWindow
 from unishield.features.volume import VolumeFeatureExtractor
 from unishield.features.scan import ScanFeatureExtractor
 from unishield.features.beaconing import BeaconingFeatureExtractor
@@ -115,11 +116,10 @@ def run_pipeline_with_timestamps(
     ]
     correlator = AlertCorrelator()
 
-    window_manager = WindowManager(
+    window = SlidingWindow(
         window_size_sec=window_size,
         slide_interval_sec=slide_interval,
         max_records=50000,
-        enable_per_source_windows=True,
     )
 
     # Result collection
@@ -143,6 +143,81 @@ def run_pipeline_with_timestamps(
     cpu_samples = []
     mem_samples = []
 
+    def analyse_window(closed, flow, record_wall_start, ingest_timestamp, ingest_delay_ms):
+        nonlocal windows_emitted, errors
+        windows_emitted += 1
+        window_flows, w_start, w_end = closed.records, closed.start, closed.end
+        context = WindowContext(start=w_start, end=w_end, observed_seconds=closed.observed_seconds)
+
+        # Stage 2: Feature extraction
+        feat_start = _utcnow_ms()
+        all_features = {}
+        for ext in extractors:
+            try:
+                features = ext.extract(window_flows, context)
+                all_features.update(features)
+            except Exception as e:
+                errors += 1
+        feat_end = _utcnow_ms()
+        feature_latency_ms = (feat_end - feat_start) * 1000.0
+        feature_latencies.append(feature_latency_ms)
+
+        # Stage 3: Detection
+        det_start = _utcnow_ms()
+        window_alerts = []
+        for det in detectors:
+            try:
+                alerts = det.detect(window_flows, all_features, w_start, w_end)
+                window_alerts.extend(alerts)
+            except Exception as e:
+                errors += 1
+        det_end = _utcnow_ms()
+        detection_latency_ms = (det_end - det_start) * 1000.0
+        detection_latencies.append(detection_latency_ms)
+
+        # Stage 4: Storage (in-memory)
+        store_start = _utcnow_ms()
+        for alert in window_alerts:
+            storage_timestamp = _utcnow_ms()
+            alert_record = {
+                **json.loads(alert.model_dump_json()),
+                "_timestamps": {
+                    "event_timestamp": flow.timestamp.isoformat(),
+                    "ingest_timestamp": datetime.fromtimestamp(ingest_timestamp, tz=timezone.utc).isoformat(),
+                    "window_start": w_start.isoformat() if w_start else None,
+                    "window_end": w_end.isoformat() if w_end else None,
+                    "feature_completion_timestamp": datetime.fromtimestamp(feat_end, tz=timezone.utc).isoformat(),
+                    "detection_timestamp": datetime.fromtimestamp(det_end, tz=timezone.utc).isoformat(),
+                    "storage_timestamp": datetime.fromtimestamp(storage_timestamp, tz=timezone.utc).isoformat(),
+                },
+                "_latencies_ms": {
+                    "ingest_delay": round(ingest_delay_ms, 3),
+                    "feature_processing": round(feature_latency_ms, 3),
+                    "detection": round(detection_latency_ms, 3),
+                    "storage": round((_utcnow_ms() - store_start) * 1000.0, 3),
+                    "end_to_end": round((_utcnow_ms() - record_wall_start) * 1000.0, 3),
+                },
+            }
+            all_alerts.append(alert_record)
+            e2e_ms = (_utcnow_ms() - record_wall_start) * 1000.0
+            e2e_latencies.append(e2e_ms)
+
+        store_end = _utcnow_ms()
+        storage_latencies.append((store_end - store_start) * 1000.0)
+
+        # Processing event log
+        processing_events.append({
+            "window_id": windows_emitted,
+            "window_start": w_start.isoformat() if w_start else None,
+            "window_end": w_end.isoformat() if w_end else None,
+            "records_in_window": len(window_flows),
+            "features_extracted": len(all_features),
+            "alerts_generated": len(window_alerts),
+            "feature_latency_ms": round(feature_latency_ms, 3),
+            "detection_latency_ms": round(detection_latency_ms, 3),
+            "wall_clock": _iso_now(),
+        })
+
     pipeline_start_time = _utcnow_ms()
     prev_event_time = None
 
@@ -163,87 +238,10 @@ def run_pipeline_with_timestamps(
         ingest_delay_ms = (ingest_timestamp - record_wall_start) * 1000.0
         ingest_latencies.append(ingest_delay_ms)
 
-        # Add to window
-        window_manager.add(flow)
+        # Add to window; analyse every window this record closes
         records_processed += 1
-
-        # Check window emission
-        if window_manager.global_window.should_emit(flow.timestamp):
-            window_flows = window_manager.global_window.emit(flow.timestamp)
-
-            if window_flows:
-                windows_emitted += 1
-                w_start = window_manager.global_window.window_start
-                w_end = window_manager.global_window.window_end
-
-                # Stage 2: Feature extraction
-                feat_start = _utcnow_ms()
-                all_features = {}
-                for ext in extractors:
-                    try:
-                        features = ext.extract(window_flows)
-                        all_features.update(features)
-                    except Exception as e:
-                        errors += 1
-                feat_end = _utcnow_ms()
-                feature_latency_ms = (feat_end - feat_start) * 1000.0
-                feature_latencies.append(feature_latency_ms)
-
-                # Stage 3: Detection
-                det_start = _utcnow_ms()
-                window_alerts = []
-                for det in detectors:
-                    try:
-                        alerts = det.detect(window_flows, all_features, w_start, w_end)
-                        window_alerts.extend(alerts)
-                    except Exception as e:
-                        errors += 1
-                det_end = _utcnow_ms()
-                detection_latency_ms = (det_end - det_start) * 1000.0
-                detection_latencies.append(detection_latency_ms)
-
-                # Stage 4: Storage (in-memory)
-                store_start = _utcnow_ms()
-                for alert in window_alerts:
-                    storage_timestamp = _utcnow_ms()
-                    alert_record = {
-                        **json.loads(alert.model_dump_json()),
-                        "_timestamps": {
-                            "event_timestamp": flow.timestamp.isoformat(),
-                            "ingest_timestamp": datetime.fromtimestamp(ingest_timestamp, tz=timezone.utc).isoformat(),
-                            "window_start": w_start.isoformat() if w_start else None,
-                            "window_end": w_end.isoformat() if w_end else None,
-                            "feature_completion_timestamp": datetime.fromtimestamp(feat_end, tz=timezone.utc).isoformat(),
-                            "detection_timestamp": datetime.fromtimestamp(det_end, tz=timezone.utc).isoformat(),
-                            "storage_timestamp": datetime.fromtimestamp(storage_timestamp, tz=timezone.utc).isoformat(),
-                        },
-                        "_latencies_ms": {
-                            "ingest_delay": round(ingest_delay_ms, 3),
-                            "feature_processing": round(feature_latency_ms, 3),
-                            "detection": round(detection_latency_ms, 3),
-                            "storage": round((_utcnow_ms() - store_start) * 1000.0, 3),
-                            "end_to_end": round((_utcnow_ms() - record_wall_start) * 1000.0, 3),
-                        },
-                    }
-                    all_alerts.append(alert_record)
-                    e2e_ms = (_utcnow_ms() - record_wall_start) * 1000.0
-                    e2e_latencies.append(e2e_ms)
-
-                store_end = _utcnow_ms()
-                storage_latencies.append((store_end - store_start) * 1000.0)
-
-                # Processing event log
-                processing_events.append({
-                    "window_id": windows_emitted,
-                    "window_start": w_start.isoformat() if w_start else None,
-                    "window_end": w_end.isoformat() if w_end else None,
-                    "records_in_window": len(window_flows),
-                    "features_extracted": len(all_features),
-                    "alerts_generated": len(window_alerts),
-                    "feature_latency_ms": round(feature_latency_ms, 3),
-                    "detection_latency_ms": round(detection_latency_ms, 3),
-                    "wall_clock": _iso_now(),
-                })
+        for closed in window.add(flow):
+            analyse_window(closed, flow, record_wall_start, ingest_timestamp, ingest_delay_ms)
 
         # Track per-record latency
         record_latency_ms = (_utcnow_ms() - record_wall_start) * 1000.0
@@ -256,6 +254,11 @@ def run_pipeline_with_timestamps(
                 mem_samples.append(process.memory_info().rss / (1024 * 1024))
             except Exception:
                 pass
+
+    # End of input: analyse the windows that are still open
+    flush_start = _utcnow_ms()
+    for closed in window.flush():
+        analyse_window(closed, flows[-1], flush_start, flush_start, 0.0)
 
     pipeline_end_time = _utcnow_ms()
     total_duration = pipeline_end_time - pipeline_start_time

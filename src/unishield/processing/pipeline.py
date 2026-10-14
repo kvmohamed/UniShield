@@ -1,14 +1,17 @@
 """
 UniShield — Pipeline Orchestrator
 
-Connects ingest → windowing → feature extraction → detection into a
-single streaming pipeline.
+Connects ingest → sessionization → normalisation → windowing → feature
+extraction → detection → deduplication into one streaming pipeline.
 
 DESIGN:
-    - Processes records incrementally as they arrive.
-    - Emits alerts without waiting for complete dataset.
-    - Measures and reports detection latency.
-    - Thread-safe for concurrent access from API endpoints.
+    - Processes records incrementally; a window is analysed as soon as
+      traffic time passes its end, and remaining windows are flushed when
+      the input ends.
+    - Memory is bounded: the window holds at most ``max_records_in_memory``
+      records and latency/feature histories keep only recent entries.
+    - A pipeline instance runs one input at a time; the API reads its
+      counters from another thread (plain integer reads).
 
 SECURITY CONSTRAINTS:
     - Read-only: no packets sent, no endpoints probed.
@@ -20,31 +23,29 @@ from __future__ import annotations
 
 import logging
 import time
-import threading
-from datetime import datetime, timezone
-from pathlib import Path
+from collections import deque
 from typing import Any, Optional
 
-from unishield.config import get_config, get_thresholds
+from unishield.config import get_config
 from unishield.correlation.correlator import AlertCorrelator
-from unishield.detectors.base import BaseDetector
-from unishield.detectors.ddos_detector import DDoSDetector
-from unishield.detectors.scan_detector import ScanDetector
-from unishield.detectors.beaconing_detector import BeaconingDetector
-from unishield.detectors.exfiltration_detector import ExfiltrationDetector
-from unishield.detectors.dns_detector import DNSDetector
 from unishield.detectors.anomaly_detector import AnomalyDetector
-from unishield.features.base import BaseFeatureExtractor
-from unishield.features.volume import VolumeFeatureExtractor
-from unishield.features.scan import ScanFeatureExtractor
+from unishield.detectors.base import BaseDetector
+from unishield.detectors.beaconing_detector import BeaconingDetector
+from unishield.detectors.ddos_detector import DDoSDetector
+from unishield.detectors.dns_detector import DNSDetector
+from unishield.detectors.exfiltration_detector import ExfiltrationDetector
+from unishield.detectors.scan_detector import ScanDetector
+from unishield.features.base import BaseFeatureExtractor, WindowContext
 from unishield.features.beaconing import BeaconingFeatureExtractor
-from unishield.features.exfiltration import ExfiltrationFeatureExtractor
 from unishield.features.dns import DNSFeatureExtractor
+from unishield.features.exfiltration import ExfiltrationFeatureExtractor
+from unishield.features.scan import ScanFeatureExtractor
 from unishield.features.statistical import StatisticalFeatureExtractor
+from unishield.features.volume import VolumeFeatureExtractor
 from unishield.ingest.base import BaseReader
 from unishield.processing.normalization import Normalizer
 from unishield.processing.sessionizer import Sessionizer
-from unishield.processing.window import SlidingWindow, WindowManager
+from unishield.processing.window import SlidingWindow, Window
 from unishield.schemas.alert import Alert, SourceType
 from unishield.schemas.flow import InputSource, NormalisedFlow
 from unishield.schemas.metrics import PipelineMetrics
@@ -62,21 +63,43 @@ _ALERT_SOURCE = {
     InputSource.SIMULATED: SourceType.SIMULATED,
 }
 
+_RECORD_LATENCY_HISTORY = 100_000
+_WINDOW_LATENCY_HISTORY = 10_000
+_FEATURE_HISTORY = 1_000
+
+
+def _percentile(values, p: int) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return ordered[min(int(len(ordered) * p / 100), len(ordered) - 1)]
+
 
 class PipelineResult:
-    """Aggregated result of a full pipeline run."""
+    """
+    Aggregated result of a pipeline run.
+
+    Latency percentiles cover the most recent 100k records / 10k windows;
+    ``features_history`` keeps the features of the most recent 1,000 windows.
+    """
 
     def __init__(self):
         self.total_records: int = 0
         self.total_windows: int = 0
         self.total_alerts: int = 0
         self.alerts: list[Alert] = []
-        self.features_history: list[dict[str, Any]] = []
+        self.features_history: deque[dict[str, Any]] = deque(maxlen=_FEATURE_HISTORY)
         self.start_time: Optional[float] = None
         self.end_time: Optional[float] = None
-        self.latencies_ms: list[float] = []
+        self.latencies_ms: deque[float] = deque(maxlen=_RECORD_LATENCY_HISTORY)
+        self.window_latencies_ms: deque[float] = deque(maxlen=_WINDOW_LATENCY_HISTORY)
+        self._latency_sum_ms: float = 0.0
         self.errors: int = 0
         self.ingest: dict[str, Any] = {}
+
+    def record_latency(self, latency_ms: float) -> None:
+        self.latencies_ms.append(latency_ms)
+        self._latency_sum_ms += latency_ms
 
     @property
     def duration_seconds(self) -> float:
@@ -91,27 +114,19 @@ class PipelineResult:
 
     @property
     def latency_avg_ms(self) -> float:
-        return sum(self.latencies_ms) / len(self.latencies_ms) if self.latencies_ms else 0.0
+        return self._latency_sum_ms / self.total_records if self.total_records else 0.0
 
     @property
     def latency_p50_ms(self) -> float:
-        return self._percentile(50)
+        return _percentile(self.latencies_ms, 50)
 
     @property
     def latency_p95_ms(self) -> float:
-        return self._percentile(95)
+        return _percentile(self.latencies_ms, 95)
 
     @property
     def latency_p99_ms(self) -> float:
-        return self._percentile(99)
-
-    def _percentile(self, p: int) -> float:
-        if not self.latencies_ms:
-            return 0.0
-        sorted_l = sorted(self.latencies_ms)
-        idx = int(len(sorted_l) * p / 100)
-        idx = min(idx, len(sorted_l) - 1)
-        return sorted_l[idx]
+        return _percentile(self.latencies_ms, 99)
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -124,6 +139,8 @@ class PipelineResult:
             "latency_p50_ms": round(self.latency_p50_ms, 2),
             "latency_p95_ms": round(self.latency_p95_ms, 2),
             "latency_p99_ms": round(self.latency_p99_ms, 2),
+            "window_processing_p50_ms": round(_percentile(self.window_latencies_ms, 50), 2),
+            "window_processing_p95_ms": round(_percentile(self.window_latencies_ms, 95), 2),
             "errors": self.errors,
             "alerts_by_class": self._alerts_by_class(),
             "ingest": self.ingest,
@@ -142,7 +159,7 @@ class Pipeline:
     Streaming detection pipeline.
 
     Stages: reader → sessionizer (packet-level readers only) → normaliser
-    → sliding window → feature extraction → detectors → deduplication.
+    → event-time sliding window → feature extraction → detectors → deduplication.
 
     Usage:
         pipeline = Pipeline()
@@ -174,14 +191,7 @@ class Pipeline:
 
         self.window_size_sec = window_size_sec or config.processing.window_size_sec
         self.slide_interval_sec = slide_interval_sec or config.processing.slide_interval_sec
-
-        # Windowing
-        self.window_manager = WindowManager(
-            window_size_sec=self.window_size_sec,
-            slide_interval_sec=self.slide_interval_sec,
-            max_records=config.processing.max_records_in_memory,
-            enable_per_source_windows=True,
-        )
+        self.window = self._new_window()
 
         # Feature extractors (default: all built-in including DNS & Statistical)
         self.extractors = extractors or [
@@ -212,7 +222,6 @@ class Pipeline:
         # Metrics callback for live metrics delivery to API
         self._metrics_callback: Any | None = None
 
-        self._lock = threading.Lock()
         self._is_running = False
         self._should_stop = False
 
@@ -220,7 +229,16 @@ class Pipeline:
         self._total_records: int = 0
         self._total_alerts: int = 0
         self._total_windows: int = 0
-        self._latencies: list[float] = []
+        self._latencies: deque[float] = deque(maxlen=10_000)
+
+    def _new_window(self) -> SlidingWindow:
+        p = self._config.processing
+        return SlidingWindow(
+            window_size_sec=self.window_size_sec,
+            slide_interval_sec=self.slide_interval_sec,
+            max_records=p.max_records_in_memory,
+            allowed_lateness_sec=p.allowed_lateness_sec,
+        )
 
     @property
     def is_running(self) -> bool:
@@ -234,8 +252,8 @@ class Pipeline:
         """
         Run the pipeline on a reader (file replay).
 
-        Processes records incrementally through windowing, feature
-        extraction, and detection.
+        Records flow through windowing incrementally; each window is analysed
+        when it closes, and the remaining windows are flushed at end of input.
         """
         result = PipelineResult()
         result.start_time = time.time()
@@ -245,7 +263,8 @@ class Pipeline:
         self._total_records = 0
         self._total_alerts = 0
         self._total_windows = 0
-        self._latencies = []
+        self._latencies = deque(maxlen=10_000)
+        self.window = self._new_window()
 
         logger.info(
             "Pipeline started: window=%ds, slide=%ds, extractors=%d, detectors=%d",
@@ -272,54 +291,15 @@ class Pipeline:
                     logger.info("Pipeline stopped by request")
                     break
 
+                record_start = time.perf_counter()
                 result.total_records += 1
                 self._total_records += 1
-                record_start = time.time()
 
-                # Add to window manager
-                self.window_manager.add(flow)
+                for window in self.window.add(flow):
+                    self._process_window(window, result)
 
-                # Check if we should emit a window
-                if self.window_manager.global_window.should_emit(flow.timestamp):
-                    window_flows = self.window_manager.global_window.emit(flow.timestamp)
-
-                    if window_flows:
-                        result.total_windows += 1
-                        self._total_windows += 1
-                        window_start = self.window_manager.global_window.window_start
-                        window_end = self.window_manager.global_window.window_end
-
-                        # Extract features
-                        all_features = self._extract_features(window_flows)
-                        result.features_history.append(all_features)
-
-                        # Run detectors
-                        window_alerts = self._run_detectors(
-                            window_flows, all_features, window_start, window_end
-                        )
-
-                        # Deduplicate via correlator if enabled
-                        if self._correlator and window_alerts:
-                            window_alerts = self._correlator.deduplicate(window_alerts)
-
-                        # Collect alerts
-                        source = _ALERT_SOURCE.get(window_flows[-1].source_type)
-                        for alert in window_alerts:
-                            if source is not None:
-                                alert.source_type = source
-                            result.alerts.append(alert)
-                            result.total_alerts += 1
-                            self._total_alerts += 1
-
-                            if self._alert_callback:
-                                try:
-                                    self._alert_callback(alert)
-                                except Exception as e:
-                                    logger.error("Alert callback error: %s", e)
-
-                # Track latency
-                latency_ms = (time.time() - record_start) * 1000.0
-                result.latencies_ms.append(latency_ms)
+                latency_ms = (time.perf_counter() - record_start) * 1000.0
+                result.record_latency(latency_ms)
                 self._latencies.append(latency_ms)
 
                 # Publish live metrics periodically (every 500 records)
@@ -328,6 +308,10 @@ class Pipeline:
                         self._metrics_callback(self.get_metrics())
                     except Exception:
                         pass
+
+            if not self._should_stop:
+                for window in self.window.flush():
+                    self._process_window(window, result)
 
         except Exception as e:
             logger.error("Pipeline error: %s", e, exc_info=True)
@@ -341,6 +325,7 @@ class Pipeline:
                 "reader_errors": getattr(reader, "errors", None),
                 "sessionizer": sessionizer.stats() if sessionizer is not None else None,
                 "normalizer": normalizer.stats(),
+                "windowing": self.window.stats(),
             }
             # Push final metrics
             if self._metrics_callback:
@@ -363,14 +348,45 @@ class Pipeline:
         """Signal the pipeline to stop processing."""
         self._should_stop = True
 
-    def _extract_features(self, flows: list[NormalisedFlow]) -> dict[str, Any]:
+    def _process_window(self, window: Window, result: PipelineResult) -> None:
+        """Extract features, run detectors and deliver alerts for one closed window."""
+        started = time.perf_counter()
+        result.total_windows += 1
+        self._total_windows += 1
+
+        context = WindowContext(start=window.start, end=window.end,
+                                observed_seconds=window.observed_seconds)
+        features = self._extract_features(window.records, context)
+        result.features_history.append(features)
+
+        alerts = self._run_detectors(window.records, features, window.start, window.end)
+        if self._correlator and alerts:
+            alerts = self._correlator.deduplicate(alerts)
+
+        source = _ALERT_SOURCE.get(window.records[-1].source_type)
+        for alert in alerts:
+            if source is not None:
+                alert.source_type = source
+            result.alerts.append(alert)
+            result.total_alerts += 1
+            self._total_alerts += 1
+            if self._alert_callback:
+                try:
+                    self._alert_callback(alert)
+                except Exception as e:
+                    logger.error("Alert callback error: %s", e)
+
+        result.window_latencies_ms.append((time.perf_counter() - started) * 1000.0)
+
+    def _extract_features(
+        self, flows: list[NormalisedFlow], window: WindowContext | None = None
+    ) -> dict[str, Any]:
         """Run all feature extractors on a window of flows."""
         all_features: dict[str, Any] = {}
 
         for extractor in self.extractors:
             try:
-                features = extractor.extract(flows)
-                all_features.update(features)
+                all_features.update(extractor.extract(flows, window))
             except Exception as e:
                 logger.error(
                     "Feature extraction error (%s): %s",
@@ -391,10 +407,7 @@ class Pipeline:
 
         for detector in self.detectors:
             try:
-                detector_alerts = detector.detect(
-                    flows, features, window_start, window_end
-                )
-                alerts.extend(detector_alerts)
+                alerts.extend(detector.detect(flows, features, window_start, window_end))
             except Exception as e:
                 logger.error(
                     "Detector error (%s): %s",
@@ -405,36 +418,23 @@ class Pipeline:
 
     def get_metrics(self) -> PipelineMetrics:
         """Return current pipeline metrics."""
-        stats = self.window_manager.stats()
-
-        # Compute live latency percentiles
-        latencies = self._latencies[-10000:]  # last 10k for efficiency
-        p50 = self._percentile(latencies, 50)
-        p95 = self._percentile(latencies, 95)
-        p99 = self._percentile(latencies, 99)
-        avg_lat = sum(latencies) / len(latencies) if latencies else 0.0
-
+        latencies = list(self._latencies)
+        window = self.window
         return PipelineMetrics(
             total_records_ingested=self._total_records,
-            total_records_processed=self._total_records,
+            total_records_processed=self._total_records - window.late_dropped,
             total_alerts_generated=self._total_alerts,
             active_windows=self._total_windows,
             window_size_sec=self.window_size_sec,
             slide_interval_sec=self.slide_interval_sec,
             is_processing=self._is_running,
             detectors_loaded=len(self.detectors),
+            queue_size=window.size,
+            queue_capacity=window.max_records,
+            dropped_records=window.late_dropped + window.overflow_evicted,
             malformed_records=getattr(self._reader, "errors", 0) or 0,
-            latency_p50_ms=round(p50, 3),
-            latency_p95_ms=round(p95, 3),
-            latency_p99_ms=round(p99, 3),
-            latency_avg_ms=round(avg_lat, 3),
+            latency_p50_ms=round(_percentile(latencies, 50), 3),
+            latency_p95_ms=round(_percentile(latencies, 95), 3),
+            latency_p99_ms=round(_percentile(latencies, 99), 3),
+            latency_avg_ms=round(sum(latencies) / len(latencies), 3) if latencies else 0.0,
         )
-
-    @staticmethod
-    def _percentile(values: list[float], p: int) -> float:
-        """Compute the p-th percentile of a list of values."""
-        if not values:
-            return 0.0
-        sorted_v = sorted(values)
-        idx = min(int(len(sorted_v) * p / 100), len(sorted_v) - 1)
-        return sorted_v[idx]

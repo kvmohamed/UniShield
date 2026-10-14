@@ -37,8 +37,11 @@ database:                           # (planned, Phase 8)
   pool_size: 5
 
 processing:
+  # Windows are aligned to a grid in traffic time: every slide_interval_sec a
+  # window covering the previous window_size_sec closes and is analysed.
   window_size_sec: 10
   slide_interval_sec: 5
+  allowed_lateness_sec: 0           # tolerate this much out-of-order input (delays analysis equally)
   max_queue_size: 10000             # (planned)
   max_alert_batch: 100              # (planned)
   max_records_in_memory: 50000

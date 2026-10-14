@@ -117,6 +117,9 @@ class DatabaseConfig(BaseModel):
 class ProcessingConfig(BaseModel):
     window_size_sec: int = 10
     slide_interval_sec: int = 5
+    # Records may arrive this much (traffic time) out of order before they are
+    # dropped as late. Raising it delays every window's analysis by the same amount.
+    allowed_lateness_sec: float = Field(default=0.0, ge=0)
     max_queue_size: int = 10000
     max_alert_batch: int = 100
     max_records_in_memory: int = 50000
