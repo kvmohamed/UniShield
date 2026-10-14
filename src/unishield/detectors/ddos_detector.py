@@ -1,13 +1,21 @@
 """
 UniShield — DDoS / Flood Detector
 
-Detects volumetric DDoS attacks and protocol-level floods:
-    - Volumetric: high packet/byte rates
-    - SYN flood: high SYN rate with SYN/ACK imbalance
-    - UDP flood: high UDP packet rate
-    - Destination concentration: traffic focused on single target
+Detects floods against a single destination, using the per-target
+features of VolumeFeatureExtractor:
 
-Uses features from the VolumeFeatureExtractor.
+    DDOS_VOLUMETRIC — peak packets/s or bytes/s to one destination above threshold
+    SYN_FLOOD       — peak half-open connection attempts/s to one destination above
+                      threshold, and most TCP attempts to it left half-open
+    UDP_FLOOD       — peak UDP packets/s to one destination above threshold, and
+                      most of its traffic UDP
+
+Peak rates are the busiest 1-second interval of the window. The number of
+distinct sources is reported as evidence ("distributed" when it reaches
+``min_unique_sources``); a single-source flood is still reported.
+
+Confidence is a rule score (0.5 at the threshold, 1.0 at twice it), not a
+calibrated probability.
 
 MITRE ATT&CK:
     - T1498: Network Denial of Service
@@ -17,7 +25,6 @@ MITRE ATT&CK:
 from __future__ import annotations
 
 import time
-from datetime import datetime
 from typing import Any
 
 from unishield.config import get_thresholds
@@ -25,16 +32,20 @@ from unishield.detectors.base import BaseDetector
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
 
+_SEVERITY_RANK = {Severity.INFO: 0, Severity.LOW: 1, Severity.MEDIUM: 2, Severity.HIGH: 3, Severity.CRITICAL: 4}
+_MITRE = ["T1498", "T1498.001"]
+
+
+def _at_least(severity: Severity, floor: Severity) -> Severity:
+    return severity if _SEVERITY_RANK[severity] >= _SEVERITY_RANK[floor] else floor
+
 
 class DDoSDetector(BaseDetector):
-    """
-    Detect DDoS/flood attacks based on volume and rate features.
-    """
+    """Detect DDoS/flood attacks against a single destination."""
 
     def __init__(self, thresholds: dict[str, Any] | None = None):
         if thresholds is None:
-            all_thresholds = get_thresholds()
-            thresholds = all_thresholds.get("ddos", {})
+            thresholds = get_thresholds().get("ddos", {})
         super().__init__(thresholds)
 
     @property
@@ -43,16 +54,11 @@ class DDoSDetector(BaseDetector):
 
     @property
     def threat_classes(self) -> list[ThreatClass]:
-        return [
-            ThreatClass.DDOS_VOLUMETRIC,
-            ThreatClass.DDOS_PROTOCOL,
-            ThreatClass.SYN_FLOOD,
-            ThreatClass.UDP_FLOOD,
-        ]
+        return [ThreatClass.DDOS_VOLUMETRIC, ThreatClass.SYN_FLOOD, ThreatClass.UDP_FLOOD]
 
     @property
     def mitre_techniques(self) -> list[str]:
-        return ["T1498", "T1498.001"]
+        return _MITRE
 
     def detect(
         self,
@@ -63,104 +69,97 @@ class DDoSDetector(BaseDetector):
     ) -> list[Alert]:
         start_time = time.time()
         self._windows_analysed += 1
-        alerts: list[Alert] = []
-
         if not flows or not features:
-            return alerts
+            return []
 
         t = self._thresholds
-        severity_levels = t.get("severity_levels", {})
+        levels = t.get("severity_levels", {})
+        min_sources = t.get("min_unique_sources", 20)
+        window_sec = features.get("window_duration_sec")
+        alerts: list[Alert] = []
 
-        # --- Volumetric DDoS ---
-        pps = features.get("packets_per_second", 0)
-        bps = features.get("bytes_per_second", 0)
-        pps_threshold = t.get("packets_per_second", 10000)
-        bps_threshold = t.get("bytes_per_second", 50_000_000)
-
-        if pps > pps_threshold or bps > bps_threshold:
-            severity = self._determine_severity(
-                pps, severity_levels, "packets_per_second"
-            )
-            alert = Alert(
+        def alert(threat: ThreatClass, target: str, sources: int, ratio: float,
+                  severity: Severity, evidence: dict[str, Any]) -> Alert:
+            return Alert(
                 window_start=window_start,
                 window_end=window_end,
-                threat_class=ThreatClass.DDOS_VOLUMETRIC,
+                destination_ip=target,
+                threat_class=threat,
                 severity=severity,
-                confidence=min(1.0, max(pps / pps_threshold, bps / bps_threshold) * 0.5),
+                confidence=round(min(1.0, 0.5 * ratio), 4),
                 detector_name=self.name,
                 model_version=self.version,
                 evidence={
-                    "packets_per_second": pps,
-                    "bytes_per_second": bps,
-                    "pps_threshold": pps_threshold,
-                    "bps_threshold": bps_threshold,
-                    "total_packets": features.get("total_packets", 0),
-                    "total_bytes": features.get("total_bytes", 0),
-                    "unique_source_ips": features.get("unique_source_ips", 0),
-                    "source_ip_entropy": features.get("source_ip_entropy", 0),
-                    "dest_concentration": features.get("dest_concentration", 0),
+                    "target_ip": target,
+                    "unique_sources": sources,
+                    "distributed": sources >= min_sources,
+                    "window_observed_sec": window_sec,
+                    **evidence,
                 },
-                mitre_techniques=["T1498", "T1498.001"],
+                mitre_techniques=_MITRE,
                 detection_latency_ms=self._measure_latency(start_time),
             )
-            alerts.append(alert)
 
-        # --- SYN Flood ---
-        syn_count = features.get("syn_count", 0)
-        syn_ack_ratio = features.get("syn_ack_ratio", 0)
-        syn_threshold = t.get("syn_rate_threshold", 5000)
-        ratio_threshold = t.get("syn_ack_imbalance_ratio", 5.0)
-
-        if syn_count > syn_threshold and syn_ack_ratio > ratio_threshold:
-            severity = self._determine_severity(
-                syn_count, severity_levels, "packets_per_second"
-            )
-            # Bump to at least HIGH for SYN floods
-            if severity == Severity.LOW or severity == Severity.MEDIUM:
-                severity = Severity.HIGH
-
-            alert = Alert(
-                window_start=window_start,
-                window_end=window_end,
-                threat_class=ThreatClass.SYN_FLOOD,
-                severity=severity,
-                confidence=min(1.0, (syn_ack_ratio / ratio_threshold) * 0.6),
-                detector_name=self.name,
-                model_version=self.version,
-                evidence={
-                    "syn_count": syn_count,
-                    "syn_ack_count": features.get("syn_ack_count", 0),
-                    "syn_ack_ratio": syn_ack_ratio,
-                    "syn_threshold": syn_threshold,
-                    "ratio_threshold": ratio_threshold,
+        # --- Volumetric -----------------------------------------------------
+        pps_thr = t.get("packets_per_second", 10000)
+        bps_thr = t.get("bytes_per_second", 50_000_000)
+        pps = features.get("vol_target_pps_peak", 0) or 0
+        bps = features.get("vol_target_bps_peak", 0) or 0
+        target = features.get("vol_target_ip")
+        if target and (pps > pps_thr or bps > bps_thr):
+            sources = features.get("vol_target_unique_sources", 0)
+            severity = _at_least(self._determine_severity(pps, levels, "packets_per_second"), Severity.MEDIUM)
+            alerts.append(alert(
+                ThreatClass.DDOS_VOLUMETRIC, target, sources, max(pps / pps_thr, bps / bps_thr), severity,
+                {
+                    "peak_packets_per_second": pps,
+                    "avg_packets_per_second": features.get("vol_target_pps_avg", 0),
+                    "peak_bytes_per_second": bps,
+                    "pps_threshold": pps_thr,
+                    "bps_threshold": bps_thr,
+                    "target_packets": features.get("vol_target_packets", 0),
+                    "source_ip_entropy": features.get("vol_target_source_entropy", 0),
                 },
-                mitre_techniques=["T1498", "T1498.001"],
-                detection_latency_ms=self._measure_latency(start_time),
-            )
-            alerts.append(alert)
+            ))
 
-        # --- UDP Flood ---
-        udp_ratio = features.get("udp_ratio", 0)
-        udp_flood_pps = t.get("udp_flood_pps", 8000)
-
-        if udp_ratio > 0.7 and pps > udp_flood_pps:
-            alert = Alert(
-                window_start=window_start,
-                window_end=window_end,
-                threat_class=ThreatClass.UDP_FLOOD,
-                severity=Severity.HIGH,
-                confidence=min(1.0, udp_ratio * 0.8),
-                detector_name=self.name,
-                model_version=self.version,
-                evidence={
-                    "udp_ratio": udp_ratio,
-                    "packets_per_second": pps,
-                    "udp_flood_pps_threshold": udp_flood_pps,
+        # --- SYN flood ------------------------------------------------------
+        syn_thr = t.get("syn_rate_threshold", 1000)
+        ratio_thr = t.get("syn_only_ratio", 0.8)
+        syn_rate = features.get("syn_target_rate_peak", 0) or 0
+        syn_ratio = features.get("syn_target_syn_only_ratio", 0) or 0
+        target = features.get("syn_target_ip")
+        if target and syn_rate > syn_thr and syn_ratio >= ratio_thr:
+            sources = features.get("syn_target_unique_sources", 0)
+            severity = _at_least(self._determine_severity(syn_rate, levels, "syn_rate_threshold"), Severity.MEDIUM)
+            alerts.append(alert(
+                ThreatClass.SYN_FLOOD, target, sources, syn_rate / syn_thr, severity,
+                {
+                    "peak_half_open_per_second": syn_rate,
+                    "half_open_attempts": features.get("syn_target_attempts", 0),
+                    "half_open_ratio": syn_ratio,
+                    "syn_rate_threshold": syn_thr,
+                    "syn_only_ratio_threshold": ratio_thr,
                 },
-                mitre_techniques=["T1498", "T1498.001"],
-                detection_latency_ms=self._measure_latency(start_time),
-            )
-            alerts.append(alert)
+            ))
+
+        # --- UDP flood ------------------------------------------------------
+        udp_thr = t.get("udp_flood_pps", 8000)
+        udp_ratio_thr = t.get("udp_ratio", 0.7)
+        udp_pps = features.get("udp_target_pps_peak", 0) or 0
+        udp_ratio = features.get("udp_target_udp_ratio", 0) or 0
+        target = features.get("udp_target_ip")
+        if target and udp_pps > udp_thr and udp_ratio >= udp_ratio_thr:
+            sources = features.get("udp_target_unique_sources", 0)
+            severity = _at_least(self._determine_severity(udp_pps, levels, "packets_per_second"), Severity.MEDIUM)
+            alerts.append(alert(
+                ThreatClass.UDP_FLOOD, target, sources, udp_pps / udp_thr, severity,
+                {
+                    "peak_udp_packets_per_second": udp_pps,
+                    "udp_share_of_target_packets": udp_ratio,
+                    "udp_flood_pps_threshold": udp_thr,
+                    "udp_ratio_threshold": udp_ratio_thr,
+                },
+            ))
 
         self._alerts_generated += len(alerts)
         return alerts

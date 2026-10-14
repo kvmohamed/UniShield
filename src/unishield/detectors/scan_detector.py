@@ -1,22 +1,31 @@
 """
 UniShield — Port/Host Scan Detector
 
-Detects network reconnaissance via port scanning and host sweeping:
-    - Port scan: single source probing many ports on one or more targets
-    - Host scan: single source probing same port across many hosts
-    - Burst scanning: rapid connection attempts in short intervals
+Applies reconnaissance rules to every candidate source from
+ScanFeatureExtractor (connection attempts only), so each scanner in a
+window is reported and attributed to the right source:
 
-Uses features from the ScanFeatureExtractor.
+    PORT_SCAN       — many ports on one host (vertical), or many ports on any
+                      hosts with a high share of failed attempts
+    HOST_SCAN       — many hosts probed on the same port with a high share of
+                      failed attempts, or a very wide sweep regardless of failures
+    RECONNAISSANCE  — a burst of mostly failed attempts from one source that
+                      stays below the port/host scan thresholds
+
+Requiring failures (or a single-host / single-port pattern) keeps busy but
+normal clients — e.g. a browser opening connections to many CDN hosts on
+port 443 — from being reported.
+
+Confidence is a rule score (0.5 at the threshold, 1.0 at twice it, +0.2 for
+a high failure ratio), not a calibrated probability.
 
 MITRE ATT&CK:
-    - T1046: Network Service Scanning
-    - T1595: Active Scanning (detected passively via observed patterns)
+    - T1046: Network Service Discovery
 """
 
 from __future__ import annotations
 
 import time
-from datetime import datetime
 from typing import Any
 
 from unishield.config import get_thresholds
@@ -24,16 +33,15 @@ from unishield.detectors.base import BaseDetector
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
 
+_MITRE = ["T1046"]
+
 
 class ScanDetector(BaseDetector):
-    """
-    Detect port scanning and host scanning activity.
-    """
+    """Detect port scanning, host sweeps and reconnaissance bursts."""
 
     def __init__(self, thresholds: dict[str, Any] | None = None):
         if thresholds is None:
-            all_thresholds = get_thresholds()
-            thresholds = all_thresholds.get("scanning", {})
+            thresholds = get_thresholds().get("scanning", {})
         super().__init__(thresholds)
 
     @property
@@ -42,15 +50,11 @@ class ScanDetector(BaseDetector):
 
     @property
     def threat_classes(self) -> list[ThreatClass]:
-        return [
-            ThreatClass.PORT_SCAN,
-            ThreatClass.HOST_SCAN,
-            ThreatClass.RECONNAISSANCE,
-        ]
+        return [ThreatClass.PORT_SCAN, ThreatClass.HOST_SCAN, ThreatClass.RECONNAISSANCE]
 
     @property
     def mitre_techniques(self) -> list[str]:
-        return ["T1046"]
+        return _MITRE
 
     def detect(
         self,
@@ -61,116 +65,89 @@ class ScanDetector(BaseDetector):
     ) -> list[Alert]:
         start_time = time.time()
         self._windows_analysed += 1
-        alerts: list[Alert] = []
-
         if not flows or not features:
-            return alerts
+            return []
 
         t = self._thresholds
-        severity_levels = t.get("severity_levels", {})
+        levels = t.get("severity_levels", {})
+        port_thr = t.get("unique_dest_ports", 25)
+        failed_thr = t.get("failed_connection_ratio", 0.5)
+        horiz_thr = t.get("horizontal_scan_hosts", 20)
+        horiz_any_thr = t.get("horizontal_scan_hosts_any", 50)
+        burst_thr = t.get("burst_connections", 30)
+        alerts: list[Alert] = []
 
-        # --- Port Scan Detection ---
-        top_port_count = features.get("top_scanner_port_count", 0)
-        port_threshold = t.get("unique_dest_ports", 25)
-        failed_ratio = features.get("failed_connection_ratio", 0)
-        failed_threshold = t.get("failed_connection_ratio", 0.7)
-        fanout = features.get("fanout_score", 0)
-        fanout_threshold = t.get("fanout_score", 0.8)
-
-        if top_port_count >= port_threshold:
-            severity = self._determine_severity(
-                top_port_count, severity_levels, "unique_dest_ports"
-            )
-
-            # Boost confidence if failure ratio is high
-            base_conf = min(1.0, top_port_count / port_threshold * 0.5)
-            if failed_ratio > failed_threshold:
-                base_conf = min(1.0, base_conf + 0.2)
-
-            alert = Alert(
+        def alert(threat: ThreatClass, c: dict[str, Any], severity: Severity, confidence: float,
+                  destination: str | None, evidence: dict[str, Any]) -> Alert:
+            return Alert(
                 window_start=window_start,
                 window_end=window_end,
-                source_ip=features.get("top_scanner_ip"),
-                threat_class=ThreatClass.PORT_SCAN,
+                source_ip=c["source_ip"],
+                destination_ip=destination,
+                threat_class=threat,
                 severity=severity,
-                confidence=round(base_conf, 4),
+                confidence=round(min(1.0, confidence), 4),
                 detector_name=self.name,
                 model_version=self.version,
                 evidence={
-                    "unique_dest_ports": top_port_count,
-                    "port_threshold": port_threshold,
-                    "failed_connection_ratio": failed_ratio,
-                    "fanout_score": fanout,
-                    "connection_rate": features.get("connection_rate", 0),
-                    "max_vertical_ports": features.get("max_vertical_ports", 0),
-                    "scanner_source_ip": features.get("top_scanner_ip"),
+                    "scanner_source_ip": c["source_ip"],
+                    "attempts": c["attempts"],
+                    "failed_attempts": c["failed"],
+                    "failed_connection_ratio": c["failed_ratio"],
+                    "attempts_per_second": c["attempts_per_second"],
+                    **evidence,
                 },
-                mitre_techniques=["T1046"],
+                mitre_techniques=_MITRE,
                 detection_latency_ms=self._measure_latency(start_time),
             )
-            alerts.append(alert)
 
-        # --- Host Scan Detection ---
-        top_host_count = features.get("top_scanner_host_count", 0)
-        host_threshold = t.get("unique_dest_hosts", 10)
-        max_horizontal = features.get("max_horizontal_hosts", 0)
-        horiz_threshold = t.get("horizontal_scan_hosts", 20)
+        for c in features.get("scan_candidates", []):
+            failing = c["failed_ratio"] >= failed_thr
+            bonus = 0.2 if failing else 0.0
+            reported = False
 
-        if top_host_count >= host_threshold or max_horizontal >= horiz_threshold:
-            severity = self._determine_severity(
-                max(top_host_count, max_horizontal),
-                severity_levels,
-                "unique_dest_hosts",
-            )
+            vertical = c["vertical_ports"] >= port_thr
+            if vertical or (c["unique_ports"] >= port_thr and failing):
+                ports = max(c["vertical_ports"], c["unique_ports"])
+                severity = self._determine_severity(ports, levels, "unique_dest_ports")
+                alerts.append(alert(
+                    ThreatClass.PORT_SCAN, c, severity, 0.5 * ports / port_thr + bonus,
+                    c["vertical_host"] if vertical else None,
+                    {
+                        "unique_dest_ports": c["unique_ports"],
+                        "unique_dest_hosts": c["unique_hosts"],
+                        "max_ports_on_one_host": c["vertical_ports"],
+                        "most_probed_host": c["vertical_host"],
+                        "port_threshold": port_thr,
+                    },
+                ))
+                reported = True
 
-            alert = Alert(
-                window_start=window_start,
-                window_end=window_end,
-                source_ip=features.get("top_scanner_ip"),
-                threat_class=ThreatClass.HOST_SCAN,
-                severity=severity,
-                confidence=min(1.0, max(
-                    top_host_count / host_threshold,
-                    max_horizontal / horiz_threshold,
-                ) * 0.5),
-                detector_name=self.name,
-                model_version=self.version,
-                evidence={
-                    "unique_dest_hosts": top_host_count,
-                    "host_threshold": host_threshold,
-                    "max_horizontal_hosts": max_horizontal,
-                    "horiz_threshold": horiz_threshold,
-                    "scanner_source_ip": features.get("top_scanner_ip"),
-                },
-                mitre_techniques=["T1046"],
-                detection_latency_ms=self._measure_latency(start_time),
-            )
-            alerts.append(alert)
+            horizontal = c["horizontal_hosts"]
+            if (horizontal >= horiz_thr and failing) or horizontal >= horiz_any_thr:
+                severity = self._determine_severity(horizontal, levels, "unique_dest_hosts")
+                alerts.append(alert(
+                    ThreatClass.HOST_SCAN, c, severity, 0.5 * horizontal / horiz_thr + bonus, None,
+                    {
+                        "hosts_on_one_port": horizontal,
+                        "swept_port": c["horizontal_port"],
+                        "unique_dest_hosts": c["unique_hosts"],
+                        "horizontal_threshold": horiz_thr,
+                    },
+                ))
+                reported = True
 
-        # --- Burst Scan Detection ---
-        burst = features.get("burst_connections", 0)
-        burst_threshold = t.get("burst_connections", 30)
-
-        if burst >= burst_threshold and (top_port_count >= port_threshold // 2 or top_host_count >= host_threshold // 2):
-            alert = Alert(
-                window_start=window_start,
-                window_end=window_end,
-                source_ip=features.get("top_scanner_ip"),
-                threat_class=ThreatClass.RECONNAISSANCE,
-                severity=Severity.MEDIUM,
-                confidence=min(1.0, burst / burst_threshold * 0.5),
-                detector_name=self.name,
-                model_version=self.version,
-                evidence={
-                    "burst_connections": burst,
-                    "burst_threshold": burst_threshold,
-                    "unique_ports": top_port_count,
-                    "unique_hosts": top_host_count,
-                },
-                mitre_techniques=["T1046"],
-                detection_latency_ms=self._measure_latency(start_time),
-            )
-            alerts.append(alert)
+            if not reported and c["burst"] >= burst_thr and failing:
+                alerts.append(alert(
+                    ThreatClass.RECONNAISSANCE, c, Severity.MEDIUM, 0.5 * c["burst"] / burst_thr + bonus,
+                    None,
+                    {
+                        "burst_attempts": c["burst"],
+                        "burst_threshold": burst_thr,
+                        "unique_dest_ports": c["unique_ports"],
+                        "unique_dest_hosts": c["unique_hosts"],
+                    },
+                ))
 
         self._alerts_generated += len(alerts)
         return alerts
