@@ -461,4 +461,12 @@ class TestPipeline:
         pipeline = Pipeline()
         metrics = pipeline.get_metrics()
         assert metrics.window_size_sec > 0
-        assert metrics.detectors_loaded == 4  # All 4 built-in detectors
+        assert {d.name for d in pipeline.detectors} == {
+            "ddos_detector",
+            "scan_detector",
+            "beaconing_detector",
+            "exfiltration_detector",
+            "dns_detector",
+            "anomaly_detector",
+        }
+        assert metrics.detectors_loaded == len(pipeline.detectors)

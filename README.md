@@ -2,9 +2,14 @@
 
 > **Passive, read-only cybersecurity monitoring for unidirectional IP traffic.**
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)]()
+[![tests](https://github.com/kvmohamed/UniShield/actions/workflows/tests.yml/badge.svg)](https://github.com/kvmohamed/UniShield/actions/workflows/tests.yml)
+
+> **Status:** research prototype under phased repair. The audit in
+> [reports/realtime_readiness_report.md](reports/realtime_readiness_report.md) records what
+> currently works, what does not, and the repair plan. Where this README and the audit
+> disagree, the audit is authoritative.
 
 ---
 
@@ -84,36 +89,40 @@ PCAP / Zeek / CSV ─→ Input Adapters ─→ NormalisedFlow Records
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.12 (the pinned dependencies require 3.12 or newer; Docker uses 3.12)
 - pip
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone <your-repo-url>
-cd unishield
+git clone https://github.com/kvmohamed/UniShield.git
+cd UniShield
 
-# Create virtual environment
-python -m venv .venv
+# Create a Python 3.12 virtual environment
+#   Windows:     py -3.12 -m venv .venv
+#   Linux/macOS: python3.12 -m venv .venv
 
-# Activate (Windows)
-.venv\Scripts\activate
+# Activate
+#   Windows:     .venv\Scripts\activate
+#   Linux/macOS: source .venv/bin/activate
 
-# Activate (Linux/macOS)
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-pip install -e .
+# Install pinned dependencies, then UniShield itself
+pip install -r requirements-dev.txt    # runtime + tests + charts (use requirements.txt for runtime only)
+pip install --no-deps -e .
 ```
+
+All commands below are run from the project root (no `cd src` needed).
 
 ### Start the API + Dashboard
 
 ```bash
-cd src
-python -m uvicorn unishield.api.app:app --host 127.0.0.1 --port 8000
+python -m unishield.main
+# or: uvicorn unishield.api.app:app --host 127.0.0.1 --port 8000
 ```
+
+Settings come from `configs/config.yaml`; the variables in `.env.example` override them
+(copy it to `.env`). Logs go to the console and `logs/unishield.log`.
 
 Then open:
 - **Dashboard**: http://127.0.0.1:8000/dashboard
@@ -139,15 +148,29 @@ Or click **"Run Demo Analysis"** on the dashboard.
 python -m pytest tests/ -v
 
 # With coverage
-python -m pytest tests/ --cov=src/unishield --cov-report=term-missing
+python -m pytest tests/ --cov=unishield --cov-report=term-missing
 ```
+
+The same tests run on GitHub Actions (Ubuntu and Windows, Python 3.12) for every push.
 
 ### Run Benchmarks & Ablation Study
 
 ```bash
-cd src
 python -m unishield.scripts.benchmark
 # Report saved to reports/benchmark_report.json
+```
+
+### Updating dependencies
+
+`pyproject.toml` lists the dependency ranges; `requirements.txt` and `requirements-dev.txt`
+pin exact versions for reproducible installs. After changing `pyproject.toml`, regenerate
+the pins in a fresh Python 3.12 venv:
+
+```bash
+pip install -e .                                  # runtime only
+pip freeze --exclude-editable > runtime.txt       # becomes requirements.txt
+pip install -e ".[dev,reports]"
+pip freeze --exclude-editable > all.txt           # all.txt minus runtime.txt becomes requirements-dev.txt
 ```
 
 ---
@@ -155,15 +178,15 @@ python -m unishield.scripts.benchmark
 ## 🐳 Docker
 
 ```bash
-# Build and start
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
+docker compose up -d --build    # build and start
+docker compose logs -f          # follow logs
+docker compose down             # stop
 ```
+
+The container serves the API and dashboard at http://127.0.0.1:8000/dashboard. The port is
+bound to loopback only because the API has no authentication yet. Configs and data are
+mounted read-only. (The Docker setup has not yet been verified on a machine with Docker
+installed.)
 
 ---
 
@@ -284,15 +307,19 @@ beaconing:
 
 ## 📊 Performance
 
-Benchmarked on synthetic traffic (mixed attack scenarios):
+Figures previously listed here (40,000+ records/sec, sub-millisecond latency) did not
+reflect the current pipeline. Measured on 2026-10-14 (synthetic mixed traffic, 5 runs; see
+audit §8):
 
 | Metric | Value |
 |--------|-------|
-| Throughput | 40,000+ records/sec |
-| P50 Latency | < 0.01 ms |
-| P95 Latency | < 0.2 ms |
-| P99 Latency | < 0.3 ms |
-| Threat Classes | 7+ (DDoS, scan, beacon, exfil, DNS, DGA, anomaly) |
+| Throughput (default pipeline, 6 detectors) | ~706 records/sec (σ 1.4) |
+| Throughput without the Isolation Forest | ~30,000 records/sec |
+| Per-window analysis time, P95 | ~14 ms |
+| Threat classes that can be emitted | 11 (6 detectors) |
+
+Throughput is being repaired in Phase 6 of the plan; this table will be regenerated from
+benchmark output, not edited by hand.
 
 ---
 

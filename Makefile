@@ -1,20 +1,20 @@
 # ============================================================
-# UniShield — Makefile
+# UniShield — Makefile (POSIX shells; Windows commands are in README.md)
 # ============================================================
 
-.PHONY: help install dev test lint run dashboard docker-build docker-up docker-down clean
+.PHONY: help install dev test test-unit test-integration test-performance test-cov lint format run docker-build docker-up docker-down docker-logs clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-install: ## Install dependencies
+install: ## Install pinned runtime dependencies + UniShield
 	pip install -r requirements.txt
-	pip install -e .
+	pip install --no-deps -e .
 
-dev: ## Install with dev dependencies
-	pip install -r requirements.txt
-	pip install -e ".[dev]"
+dev: ## Install pinned runtime, test and report dependencies + UniShield
+	pip install -r requirements-dev.txt
+	pip install --no-deps -e .
 
 test: ## Run all tests
 	pytest tests/ -v --tb=short
@@ -29,7 +29,7 @@ test-performance: ## Run performance tests
 	pytest tests/performance/ -v --tb=short -m performance
 
 test-cov: ## Run tests with coverage
-	pytest tests/ -v --cov=src/unishield --cov-report=html --cov-report=term-missing
+	pytest tests/ -v --cov=unishield --cov-report=html --cov-report=term-missing
 
 lint: ## Run linter
 	ruff check src/ tests/
@@ -38,26 +38,23 @@ lint: ## Run linter
 format: ## Format code
 	ruff format src/ tests/
 
-run: ## Start the API server
+run: ## Start the API server + dashboard (http://127.0.0.1:8000/dashboard)
 	python -m unishield.main
 
-dashboard: ## Start the Streamlit dashboard
-	streamlit run src/unishield/dashboard/streamlit_app.py --server.port 8501
+docker-build: ## Build the Docker image
+	docker compose build
 
-docker-build: ## Build Docker images
-	docker-compose build
+docker-up: ## Start the container
+	docker compose up -d
 
-docker-up: ## Start Docker containers
-	docker-compose up -d
+docker-down: ## Stop the container
+	docker compose down
 
-docker-down: ## Stop Docker containers
-	docker-compose down
-
-docker-logs: ## View Docker logs
-	docker-compose logs -f
+docker-logs: ## Follow container logs
+	docker compose logs -f
 
 clean: ## Clean build artifacts
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name __pycache__ -not -path "./.venv*" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name *.egg-info -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name "*.egg-info" -not -path "./.venv*" -exec rm -rf {} + 2>/dev/null || true
 	rm -rf build/ dist/ htmlcov/ .coverage .ruff_cache/

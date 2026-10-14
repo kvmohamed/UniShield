@@ -11,8 +11,10 @@ SECURITY NOTICE:
 
 from __future__ import annotations
 
+import logging
 import time
-from datetime import datetime
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 from pathlib import Path as _Path
@@ -23,8 +25,11 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from unishield import __app_name__, __version__
 from unishield.config import get_config
+from unishield.logging_config import setup_logging
 from unishield.schemas.alert import Alert, AlertSummary, Severity, ThreatClass
 from unishield.schemas.metrics import BenchmarkResult, HealthStatus, PipelineMetrics
+
+logger = logging.getLogger("unishield.api")
 
 # ---------------------------------------------------------------------------
 # Application startup time (for uptime calculation)
@@ -42,7 +47,22 @@ _benchmark: BenchmarkResult | None = None
 # FastAPI app
 # ---------------------------------------------------------------------------
 
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Configure logging once per server process (works under `uvicorn` and reload)."""
+    config = get_config()
+    setup_logging(log_level=config.log_level)
+    logger.info(
+        "UniShield API starting (env=%s, read_only=%s, no_response_path=%s)",
+        config.environment,
+        config.security.read_only_mode,
+        config.security.no_response_path,
+    )
+    yield
+
+
 app = FastAPI(
+    lifespan=_lifespan,
     title=f"{__app_name__} API",
     description=(
         "Passive, read-only cybersecurity monitoring API for unidirectional networks. "
@@ -98,7 +118,7 @@ async def health_check() -> HealthStatus:
         status="healthy",
         version=__version__,
         uptime_seconds=round(uptime, 2),
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         read_only_mode=config.security.read_only_mode,
         no_payload_decryption=config.security.no_payload_decryption,
         no_active_scanning=config.security.no_active_scanning,

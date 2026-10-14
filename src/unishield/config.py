@@ -1,18 +1,28 @@
 """
 UniShield — Configuration Module
-Loads settings from YAML files and environment variables.
+
+Loads settings from YAML files, then applies environment-variable
+overrides (from the process environment or a ``.env`` file).
 All security constraints are validated at startup.
+
+Precedence (highest first):
+    1. Environment variables listed in ``ENV_OVERRIDES``
+    2. ``configs/config.yaml``
+    3. Model defaults below
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
-from pydantic_settings import BaseSettings
+
+logger = logging.getLogger("unishield.config")
 
 
 # ---------------------------------------------------------------------------
@@ -20,14 +30,31 @@ from pydantic_settings import BaseSettings
 # ---------------------------------------------------------------------------
 
 def _project_root() -> Path:
-    """Return the project root (parent of src/)."""
+    """Return the source-checkout root (parent of src/). Only meaningful for
+    editable installs; packaged installs fall back to the working directory."""
     return Path(__file__).resolve().parent.parent.parent
 
 
+def config_dir() -> Path:
+    """
+    Locate the configs directory.
+
+    Order: ``UNISHIELD_CONFIG_DIR`` → ``./configs`` (working directory) →
+    ``<source checkout>/configs``. Works for editable installs, packaged
+    installs run from the project directory, and the Docker image.
+    """
+    env_dir = os.getenv("UNISHIELD_CONFIG_DIR")
+    if env_dir:
+        return Path(env_dir)
+    for candidate in (Path.cwd() / "configs", _project_root() / "configs"):
+        if candidate.is_dir():
+            return candidate
+    return Path.cwd() / "configs"
+
+
 def _resolve_config_path(filename: str) -> Path:
-    """Resolve a config file path relative to the project root."""
-    config_dir = os.getenv("UNISHIELD_CONFIG_DIR", str(_project_root() / "configs"))
-    return Path(config_dir) / filename
+    """Resolve a file inside the configs directory."""
+    return config_dir() / filename
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -45,7 +72,7 @@ class SecurityConfig(BaseModel):
     Core security constraints. These are ALWAYS enforced.
     read_only_mode, no_payload_decryption, no_active_scanning, and
     no_response_path must all be True. Any attempt to set them to False
-    will raise a validation error.
+    will raise a validation error. They have no environment override.
     """
     read_only_mode: bool = True
     no_payload_decryption: bool = True
@@ -78,11 +105,11 @@ class APIConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8000
     workers: int = 1
-    reload: bool = True
+    reload: bool = False
 
 
 class DatabaseConfig(BaseModel):
-    url: str = "sqlite+aiosqlite:///./data/unishield.db"
+    url: str = "sqlite:///./data/unishield.db"
     echo: bool = False
     pool_size: int = 5
 
@@ -115,27 +142,7 @@ class PathsConfig(BaseModel):
     samples_dir: str = "./data/samples"
     config_dir: str = "./configs"
     reports_dir: str = "./reports"
-
-
-class DashboardConfig(BaseModel):
-    port: int = 8501
-    theme: str = "dark"
-
-
-# ---------------------------------------------------------------------------
-# App-level settings (loaded from env + YAML)
-# ---------------------------------------------------------------------------
-
-class AppSettings(BaseSettings):
-    """Top-level environment-driven settings."""
-    env: str = Field(default="development", alias="UNISHIELD_ENV")
-    debug: bool = Field(default=True, alias="UNISHIELD_DEBUG")
-    log_level: str = Field(default="INFO", alias="UNISHIELD_LOG_LEVEL")
-
-    class Config:
-        env_prefix = "UNISHIELD_"
-        env_file = ".env"
-        extra = "ignore"
+    logs_dir: str = "./logs"
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +155,7 @@ class UnishieldConfig(BaseModel):
     version: str = "0.1.0"
     environment: str = "development"
     debug: bool = True
+    log_level: str = "INFO"
 
     security: SecurityConfig = SecurityConfig()
     api: APIConfig = APIConfig()
@@ -156,7 +164,40 @@ class UnishieldConfig(BaseModel):
     ingest: IngestConfig = IngestConfig()
     models: ModelsConfig = ModelsConfig()
     paths: PathsConfig = PathsConfig()
-    dashboard: DashboardConfig = DashboardConfig()
+
+
+# ---------------------------------------------------------------------------
+# Environment overrides
+# ---------------------------------------------------------------------------
+
+# Supported environment variables → config field path. Security flags are
+# deliberately absent: they cannot be changed from the environment.
+ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
+    "UNISHIELD_ENV": ("environment",),
+    "UNISHIELD_DEBUG": ("debug",),
+    "UNISHIELD_LOG_LEVEL": ("log_level",),
+    "UNISHIELD_API_HOST": ("api", "host"),
+    "UNISHIELD_API_PORT": ("api", "port"),
+    "UNISHIELD_WINDOW_SIZE_SEC": ("processing", "window_size_sec"),
+    "UNISHIELD_SLIDE_INTERVAL_SEC": ("processing", "slide_interval_sec"),
+    "UNISHIELD_ANONYMIZE_IPS": ("security", "anonymize_ips"),
+    "UNISHIELD_IP_HASH_SALT": ("security", "ip_hash_salt"),
+    "UNISHIELD_LOGS_DIR": ("paths", "logs_dir"),
+}
+
+
+def _apply_env_overrides(merged: dict[str, Any]) -> dict[str, Any]:
+    """Overlay supported environment variables onto the merged config dict.
+    Values stay strings; Pydantic coerces them to the field types."""
+    for var, path in ENV_OVERRIDES.items():
+        value = os.getenv(var)
+        if value is None or value == "":
+            continue
+        node = merged
+        for key in path[:-1]:
+            node = node.setdefault(key, {})
+        node[path[-1]] = value
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -179,12 +220,19 @@ def load_config(config_path: Path | None = None) -> UnishieldConfig:
     if _config is not None:
         return _config
 
+    # Pick up a local .env without overriding variables already set.
+    env_file = Path.cwd() / ".env"
+    if env_file.is_file():
+        load_dotenv(env_file, override=False)
+
     if config_path is None:
         config_path = _resolve_config_path("config.yaml")
 
     raw: dict[str, Any] = {}
     if config_path.exists():
         raw = load_yaml(config_path)
+    else:
+        logger.warning("Config file not found at %s; using built-in defaults", config_path)
 
     # Flatten the "app" section to top-level fields
     app_section = raw.pop("app", {})
@@ -193,10 +241,11 @@ def load_config(config_path: Path | None = None) -> UnishieldConfig:
         "version": app_section.get("version", "0.1.0"),
         "environment": app_section.get("environment", "development"),
         "debug": app_section.get("debug", True),
+        "log_level": app_section.get("log_level", "INFO"),
         **raw,
     }
 
-    _config = UnishieldConfig(**merged)
+    _config = UnishieldConfig(**_apply_env_overrides(merged))
     return _config
 
 
@@ -233,6 +282,9 @@ def load_thresholds(path: Path | None = None) -> dict[str, Any]:
     if path.exists():
         _thresholds = load_yaml(path)
     else:
+        logger.warning(
+            "Thresholds file not found at %s; detectors will use built-in defaults", path
+        )
         _thresholds = {}
 
     return _thresholds

@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from unishield.schemas.timeutil import ensure_utc
 
 
 class ProtocolType(str, Enum):
@@ -155,11 +157,13 @@ class NormalisedFlow(BaseModel):
     @field_validator("timestamp", mode="before")
     @classmethod
     def parse_timestamp(cls, v: Any) -> datetime:
-        """Accept ISO strings or epoch floats."""
+        """Accept ISO strings, epoch floats or datetimes; always return aware UTC."""
         if isinstance(v, (int, float)):
-            return datetime.utcfromtimestamp(v)
+            return datetime.fromtimestamp(v, tz=timezone.utc)
         if isinstance(v, str):
-            return datetime.fromisoformat(v.replace("Z", "+00:00"))
+            v = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        if isinstance(v, datetime):
+            return ensure_utc(v)
         return v
 
     def to_anonymised(self, salt: str) -> "NormalisedFlow":
@@ -173,8 +177,8 @@ class NormalisedFlow(BaseModel):
         data["destination_ip"] = _hash_ip(self.destination_ip)
         return NormalisedFlow(**data)
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "event_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 "timestamp": "2026-09-30T10:30:00Z",
@@ -198,3 +202,4 @@ class NormalisedFlow(BaseModel):
                 "source": "pcap",
             }
         }
+    )

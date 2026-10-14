@@ -7,7 +7,7 @@ MITRE technique format, and alert summary generation.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -25,7 +25,7 @@ class TestAlertCreation:
 
     def test_minimal_alert(self):
         """An alert with all required fields should be valid."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         alert = Alert(
             window_start=now - timedelta(seconds=10),
             window_end=now,
@@ -44,7 +44,7 @@ class TestAlertCreation:
 
     def test_all_threat_classes(self):
         """All defined threat classes should be valid."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         for tc in ThreatClass:
             alert = Alert(
                 window_start=now - timedelta(seconds=10),
@@ -58,7 +58,7 @@ class TestAlertCreation:
 
     def test_all_severity_levels(self):
         """All severity levels should be valid."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         for sev in Severity:
             alert = Alert(
                 window_start=now - timedelta(seconds=10),
@@ -72,7 +72,7 @@ class TestAlertCreation:
 
     def test_ddos_alert_with_evidence(self):
         """A DDoS alert should include relevant evidence."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         alert = Alert(
             window_start=now - timedelta(seconds=10),
             window_end=now,
@@ -96,7 +96,7 @@ class TestAlertConfidence:
     """Test confidence validation (must be [0, 1])."""
 
     def test_confidence_zero(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         alert = Alert(
             window_start=now - timedelta(seconds=10),
             window_end=now,
@@ -108,7 +108,7 @@ class TestAlertConfidence:
         assert alert.confidence == 0.0
 
     def test_confidence_one(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         alert = Alert(
             window_start=now - timedelta(seconds=10),
             window_end=now,
@@ -121,7 +121,7 @@ class TestAlertConfidence:
 
     def test_confidence_above_one_clamped(self):
         """Confidence > 1.0 should be clamped to 1.0 by the validator."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         # Pydantic ge/le will reject > 1.0 before our validator runs
         with pytest.raises(Exception):
             Alert(
@@ -134,7 +134,7 @@ class TestAlertConfidence:
             )
 
     def test_confidence_negative_rejected(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with pytest.raises(Exception):
             Alert(
                 window_start=now - timedelta(seconds=10),
@@ -150,7 +150,7 @@ class TestMitreTechniqueValidation:
     """Test MITRE ATT&CK technique ID validation."""
 
     def test_valid_technique_id(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         alert = Alert(
             window_start=now - timedelta(seconds=10),
             window_end=now,
@@ -163,7 +163,7 @@ class TestMitreTechniqueValidation:
         assert alert.mitre_techniques == ["T1046"]
 
     def test_valid_subtechnique_id(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         alert = Alert(
             window_start=now - timedelta(seconds=10),
             window_end=now,
@@ -176,7 +176,7 @@ class TestMitreTechniqueValidation:
         assert len(alert.mitre_techniques) == 2
 
     def test_invalid_technique_id_rejected(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with pytest.raises(Exception):
             Alert(
                 window_start=now - timedelta(seconds=10),
@@ -189,7 +189,7 @@ class TestMitreTechniqueValidation:
             )
 
     def test_empty_mitre_techniques_valid(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         alert = Alert(
             window_start=now - timedelta(seconds=10),
             window_end=now,
@@ -206,7 +206,7 @@ class TestAlertIds:
     """Test alert ID generation."""
 
     def test_alert_id_prefix(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         alert = Alert(
             window_start=now - timedelta(seconds=10),
             window_end=now,
@@ -218,7 +218,7 @@ class TestAlertIds:
         assert alert.alert_id.startswith("US-")
 
     def test_unique_alert_ids(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         ids = set()
         for _ in range(100):
             alert = Alert(
@@ -237,7 +237,7 @@ class TestAlertSerialisation:
     """Test JSON serialisation."""
 
     def test_json_round_trip(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         alert = Alert(
             window_start=now - timedelta(seconds=10),
             window_end=now,
@@ -257,6 +257,36 @@ class TestAlertSerialisation:
         assert restored.threat_class == ThreatClass.SYN_FLOOD
         assert restored.confidence == 0.98
         assert restored.evidence["syn_rate"] == 50000
+
+
+class TestAlertTimezone:
+    """All alert timestamps are stored as timezone-aware UTC."""
+
+    def _alert(self, start, end):
+        return Alert(
+            window_start=start,
+            window_end=end,
+            threat_class=ThreatClass.PORT_SCAN,
+            severity=Severity.LOW,
+            confidence=0.5,
+            detector_name="test",
+        )
+
+    def test_generated_timestamp_is_aware_utc(self):
+        alert = self._alert(datetime(2026, 1, 1), datetime(2026, 1, 1, 0, 0, 10))
+        assert alert.timestamp.tzinfo == timezone.utc
+
+    def test_naive_window_treated_as_utc(self):
+        alert = self._alert(datetime(2026, 1, 1, 12, 0), datetime(2026, 1, 1, 12, 0, 10))
+        assert alert.window_start == datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+        assert alert.window_end.tzinfo == timezone.utc
+
+    def test_offset_window_converted_to_utc(self):
+        ist = timezone(timedelta(hours=5, minutes=30))
+        alert = self._alert(datetime(2026, 1, 1, 17, 30, tzinfo=ist),
+                            datetime(2026, 1, 1, 17, 30, 10, tzinfo=ist))
+        assert alert.window_start == datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+        assert alert.window_start.utcoffset() == timedelta(0)
 
 
 class TestAlertSummary:

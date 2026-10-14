@@ -17,7 +17,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from unishield.schemas.timeutil import ensure_utc, utc_now
 
 
 class ThreatClass(str, Enum):
@@ -76,8 +78,8 @@ class Alert(BaseModel):
         description="Unique alert identifier (e.g. US-A1B2C3D4)",
     )
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
-        description="When the alert was generated",
+        default_factory=utc_now,
+        description="When the alert was generated (UTC)",
     )
     window_start: datetime = Field(
         ...,
@@ -162,6 +164,12 @@ class Alert(BaseModel):
         description="How the traffic was obtained",
     )
 
+    @field_validator("timestamp", "window_start", "window_end")
+    @classmethod
+    def normalise_utc(cls, v: datetime) -> datetime:
+        """Store every alert time as timezone-aware UTC."""
+        return ensure_utc(v)
+
     @field_validator("confidence")
     @classmethod
     def clamp_confidence(cls, v: float) -> float:
@@ -182,8 +190,8 @@ class Alert(BaseModel):
                 )
         return v
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "alert_id": "US-A1B2C3D4",
                 "timestamp": "2026-09-30T10:30:00Z",
@@ -208,6 +216,7 @@ class Alert(BaseModel):
                 "source_type": "pcap_replay",
             }
         }
+    )
 
 
 class AlertSummary(BaseModel):

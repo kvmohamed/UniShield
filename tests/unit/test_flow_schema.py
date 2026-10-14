@@ -7,7 +7,7 @@ timestamp parsing, and IP anonymisation.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -120,15 +120,41 @@ class TestFlowTimestampParsing:
             destination_ip="2.2.2.2",
         )
         assert isinstance(flow.timestamp, datetime)
+        assert flow.timestamp.tzinfo == timezone.utc
+
+    def test_epoch_value_is_utc(self):
+        flow = NormalisedFlow(timestamp=0, source_ip="1.1.1.1", destination_ip="2.2.2.2")
+        assert flow.timestamp == datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+    def test_iso_string_is_aware_utc(self):
+        flow = NormalisedFlow(
+            timestamp="2026-09-30T10:00:00Z", source_ip="1.1.1.1", destination_ip="2.2.2.2"
+        )
+        assert flow.timestamp.tzinfo == timezone.utc
+
+    def test_iso_string_with_offset_converted_to_utc(self):
+        flow = NormalisedFlow(
+            timestamp="2026-09-30T15:30:00+05:30", source_ip="1.1.1.1", destination_ip="2.2.2.2"
+        )
+        assert flow.timestamp == datetime(2026, 9, 30, 10, 0, tzinfo=timezone.utc)
 
     def test_datetime_object(self):
+        """A naive datetime is interpreted as UTC and stored timezone-aware."""
         dt = datetime(2026, 9, 30, 10, 30, 0)
         flow = NormalisedFlow(
             timestamp=dt,
             source_ip="1.1.1.1",
             destination_ip="2.2.2.2",
         )
-        assert flow.timestamp == dt
+        assert flow.timestamp == dt.replace(tzinfo=timezone.utc)
+
+    def test_naive_and_aware_inputs_are_comparable(self):
+        """Mixed inputs must not raise TypeError when windows compare them."""
+        a = NormalisedFlow(timestamp=datetime(2026, 1, 1), source_ip="1.1.1.1",
+                           destination_ip="2.2.2.2")
+        b = NormalisedFlow(timestamp=datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc),
+                           source_ip="1.1.1.1", destination_ip="2.2.2.2")
+        assert a.timestamp < b.timestamp
 
 
 class TestFlowValidation:

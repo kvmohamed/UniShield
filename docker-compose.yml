@@ -1,46 +1,27 @@
 # ============================================================
 # UniShield — Docker Compose
 # ============================================================
-
-version: "3.9"
+# Single service: the FastAPI backend, which also serves the
+# dashboard at http://127.0.0.1:8000/dashboard
 
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
+    image: unishield:0.1.0
     container_name: unishield-api
     ports:
-      - "8000:8000"
+      # Loopback only: the API has no authentication yet (planned, Phase 8)
+      - "127.0.0.1:8000:8000"
     volumes:
-      - ./data:/app/data
-      - ./configs:/app/configs
-      - ./models:/app/models
-      - ./logs:/app/logs
+      # Read-only: the container never writes to host data or config
+      - ./configs:/app/configs:ro
+      - ./data:/app/data:ro
     environment:
-      - UNISHIELD_ENV=development
-      - UNISHIELD_DB_URL=sqlite+aiosqlite:///./data/unishield.db
+      UNISHIELD_ENV: docker
+      UNISHIELD_DEBUG: "false"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; r = httpx.get('http://localhost:8000/health'); assert r.status_code == 200"]
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3
-
-  dashboard:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: unishield-dashboard
-    command: ["streamlit", "run", "src/unishield/dashboard/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
-    ports:
-      - "8501:8501"
-    volumes:
-      - ./data:/app/data
-      - ./configs:/app/configs
-    environment:
-      - UNISHIELD_API_URL=http://api:8000
-    depends_on:
-      api:
-        condition: service_healthy
-    restart: unless-stopped

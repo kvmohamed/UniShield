@@ -1,0 +1,24 @@
+# Keep the Docker build context small and free of local state.
+.git
+.github
+.venv*
+venv
+env
+**/__pycache__
+**/*.py[cod]
+*.egg-info
+build
+dist
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+.env
+logs
+data
+models/saved
+reports
+notebooks
+tests
+docs

@@ -1,6 +1,9 @@
 # ============================================================
 # UniShield — Main Configuration
 # ============================================================
+# Environment variables listed in src/unishield/config.py
+# (ENV_OVERRIDES, see also .env.example) override these values.
+# Keys marked "(planned)" are accepted but not read by the code yet.
 
 app:
   name: "UniShield"
@@ -8,36 +11,39 @@ app:
   description: "AI Security for One-Way Networks"
   environment: "development"
   debug: true
+  log_level: "INFO"
 
 security:
   # CRITICAL: Read-only mode. The system NEVER sends packets,
   # probes endpoints, decrypts payloads, or issues commands.
+  # These four flags cannot be set to false (validation error)
+  # and have no environment override.
   read_only_mode: true
   no_payload_decryption: true
   no_active_scanning: true
   no_response_path: true
-  anonymize_ips: false
-  ip_hash_salt: "change-this-salt"
+  anonymize_ips: false              # (planned, Phase 3)
+  ip_hash_salt: "change-this-salt"  # (planned, Phase 3)
 
 api:
   host: "127.0.0.1"
   port: 8000
   workers: 1
-  reload: true
+  reload: true                      # auto-reload on code change (development only)
 
-database:
-  url: "sqlite+aiosqlite:///./data/unishield.db"
+database:                           # (planned, Phase 8)
+  url: "sqlite:///./data/unishield.db"
   echo: false
   pool_size: 5
 
 processing:
   window_size_sec: 10
   slide_interval_sec: 5
-  max_queue_size: 10000
-  max_alert_batch: 100
+  max_queue_size: 10000             # (planned)
+  max_alert_batch: 100              # (planned)
   max_records_in_memory: 50000
 
-ingest:
+ingest:                             # (planned, Phase 3)
   supported_formats:
     - "pcap"
     - "pcapng"
@@ -46,19 +52,16 @@ ingest:
     - "flow_json"
   max_file_size_mb: 500
 
-models:
+models:                             # (planned, Phase 6)
   default_version: "v1.0.0"
   saved_dir: "./models/saved"
   metadata_dir: "./models/metadata"
 
 paths:
-  data_dir: "./data"
-  raw_dir: "./data/raw"
-  processed_dir: "./data/processed"
-  samples_dir: "./data/samples"
-  config_dir: "./configs"
-  reports_dir: "./reports"
-
-dashboard:
-  port: 8501
-  theme: "dark"
+  data_dir: "./data"                # (planned)
+  raw_dir: "./data/raw"             # (planned)
+  processed_dir: "./data/processed" # (planned)
+  samples_dir: "./data/samples"     # (planned)
+  config_dir: "./configs"           # informational; set UNISHIELD_CONFIG_DIR to relocate
+  reports_dir: "./reports"          # (planned)
+  logs_dir: "./logs"                # log file directory, relative to the working directory

@@ -1,41 +1,38 @@
 # ============================================================
-# UniShield — Dockerfile
-# Multi-stage build for the API server
+# UniShield — Dockerfile (API server + built-in dashboard)
 # ============================================================
 
-FROM python:3.11-slim AS base
+FROM python:3.12-slim
 
-# Prevent Python from writing bytecode and buffering stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies
+# Pinned runtime dependencies first, for layer caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
-# Copy source code
-COPY . .
+# Install UniShield itself (non-editable; dashboard HTML ships as package data)
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-deps .
 
-# Install the package in development mode
-RUN pip install -e .
+# Configuration is read from ./configs relative to the working directory
+COPY configs ./configs
 
-# Create necessary directories
-RUN mkdir -p logs data/raw data/processed data/samples models/saved models/metadata reports
+# Run as an unprivileged user
+RUN useradd --create-home --uid 10001 unishield \
+    && mkdir -p logs data \
+    && chown -R unishield:unishield /app/logs
+USER unishield
 
-# Expose API and dashboard ports
-EXPOSE 8000 8501
+EXPOSE 8000
 
-# Health check
+# Health check against the container's own API (loopback only)
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import httpx; r = httpx.get('http://localhost:8000/health'); assert r.status_code == 200"
+    CMD python -c "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"
 
-# Default: run the API server
 CMD ["uvicorn", "unishield.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

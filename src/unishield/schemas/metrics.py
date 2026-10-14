@@ -12,12 +12,14 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from unishield.schemas.timeutil import utc_now
+
 
 class PipelineMetrics(BaseModel):
     """Real-time pipeline processing statistics."""
 
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=utc_now,
         description="When these metrics were captured",
     )
 
@@ -66,7 +68,7 @@ class HealthStatus(BaseModel):
     )
     version: str = Field(default="0.1.0")
     uptime_seconds: float = Field(default=0.0, ge=0.0)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
 
     # Security status — always True for UniShield
     read_only_mode: bool = Field(
@@ -107,7 +109,7 @@ class BenchmarkResult(BaseModel):
     """Results from a performance benchmark run."""
 
     benchmark_id: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     duration_seconds: float
     total_records: int
     records_per_second: float

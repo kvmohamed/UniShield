@@ -391,3 +391,34 @@ Integration, security and performance tests; Docker build verified; `benchmark_p
 | 4 | Public dataset for supervised baselines | CICIDS2017 (DDoS, PortScan; PCAP + labelled CSV); CTU-13 (botnet C2); UNSW-NB15 | **CICIDS2017 subset (one or two days) + CTU-13 scenario for beaconing**, sized for 7.4 GB RAM. |
 | 5 | Python version | stay on 3.14; move to 3.11/3.12 | **3.11 or 3.12**, matching Docker and the brief; several required packages are not installed in the 3.14 venv. |
 | 6 | Uncommitted work | commit as baseline; discard; keep uncommitted | **Commit to a baseline branch first.** |
+
+---
+
+## 13. Repair log
+
+### Phase 2 — Baseline, environment, structure (2026-10-14) — exit test passed
+
+Baseline committed as `ec4663e` on branch `audit-baseline`; Phase 2 is the next commit on that branch.
+
+| Item | Change | Evidence |
+|---|---|---|
+| Python version | Python 3.12.10 installed per-user; new `.venv` on 3.12. Old 3.14 venv kept at `.venv-py314-old` (git-ignored). `requires-python >=3.12` (numpy 2.5 / scipy 1.18 need it). | `py list` |
+| Dependencies | `pyproject.toml` is the source of truth: runtime deps are only what `src/` imports (+ scapy, psutil); extras `dev`, `reports`. `requirements.txt` / `requirements-dev.txt` are generated exact pins. Removed 15 unused packages and `pydantic-settings`. Phase 6 (ML) and Phase 8 (DB) packages will be added when used. | clean venv `pip check`: no broken requirements |
+| D18 failing test | Asserts the exact default detector set and that the metric matches it. | 115/115 pass |
+| Timezones | New `schemas/timeutil.py`; flows and alerts normalise every timestamp to aware UTC (naive → UTC, offsets converted); `utcnow`/`utcfromtimestamp` removed from `src/` and tests. Pydantic class-based `Config` replaced with `ConfigDict`. | 7 new tests; suite passes with `-W error::DeprecationWarning` |
+| Config | `AppSettings` removed; explicit `ENV_OVERRIDES` table (+ `.env` loading, process env wins); config dir lookup `UNISHIELD_CONFIG_DIR` → `./configs` → source checkout; warnings when config/thresholds files are missing; Streamlit `dashboard:` section removed; unused keys marked "(planned)". Security flags have no override. | 9 new tests |
+| Logging | Configured once in the API startup hook (works under plain `uvicorn` and reload); file handlers follow `paths.logs_dir` / `UNISHIELD_LOGS_DIR`. | 3 new tests; packaged-server run wrote `logs/unishield.log` |
+| Packaging | Dashboard HTML declared as package data (needed for non-editable installs). | non-editable install served `/dashboard` |
+| Docker | Python 3.12 image, pinned install, non-editable package, non-root user, stdlib health check, `.dockerignore`; compose reduced to the API service, port bound to 127.0.0.1, configs/data mounted read-only; Streamlit service removed. | **Not built** — Docker is not installed on this machine |
+| Makefile | Streamlit target removed; install targets use the lock files; coverage target fixed. | — |
+| CI | `.github/workflows/tests.yml`: pytest on Ubuntu + Windows, Python 3.12, pinned deps. | **Not run yet** — runs after the branch is pushed |
+| Docs | README install/run/test/Docker/dependency sections and performance table corrected; `docs/demo_guide.md` dashboard URL fixed. Full documentation rewrite remains Phase 10. | — |
+
+Exit test results:
+
+1. Fresh Python 3.12 venv from `requirements-dev.txt` + `pip install --no-deps -e .` → `pytest tests/` **115 passed** (no warnings with deprecations as errors); coverage command works (69% line coverage).
+2. Fresh venv from `requirements.txt` + non-editable `pip install --no-deps .`, server started with `uvicorn unishield.api.app:app` from a directory containing only `configs/` → `/health` 200 (security flags true), `/dashboard` 200, `/docs` 200, `/replay/demo` 200 (4 alerts), `/alerts` 200, log file created.
+
+New observation for Phase 6: under a real uvicorn server, `/replay/demo` took 8.7 s for 920 records (87 windows, ~100 ms per window) versus ~14 ms per window in-process, so the Isolation Forest bottleneck (D6) is worse in deployment than in §8.1.
+
+Not changed in Phase 2 (by plan): all detection defects D1–D17 except D18.
