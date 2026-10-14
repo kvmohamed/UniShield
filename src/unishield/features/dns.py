@@ -23,7 +23,7 @@ import math
 from collections import Counter, defaultdict
 from typing import Any
 
-from unishield.features.base import BaseFeatureExtractor
+from unishield.features.base import BaseFeatureExtractor, WindowContext
 from unishield.schemas.flow import NormalisedFlow
 
 
@@ -81,7 +81,7 @@ class DNSFeatureExtractor(BaseFeatureExtractor):
             "long_query_domains",
         ]
 
-    def extract(self, flows: list[NormalisedFlow]) -> dict[str, Any]:
+    def extract(self, flows: list[NormalisedFlow], window: WindowContext | None = None) -> dict[str, Any]:
         # Filter to DNS flows only
         dns_flows = [f for f in flows if f.dns_query]
 

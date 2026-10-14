@@ -1,14 +1,24 @@
 """
 UniShield — Scan Feature Extractor
 
-Extracts network scanning pattern features used by port scan
-and host scan detectors.
+Per-source reconnaissance features for port-scan and host-sweep detection.
 
-Features computed:
-    - Per-source port fan-out, host fan-out
-    - Connection rate, failure ratio
-    - Vertical vs. horizontal scan indicators
-    - Burst detection
+Only connection attempts count: flows the source initiated. A flow from a
+well-known port (< 1024) to a high port is treated as a reply and ignored,
+which matters for unidirectional flow exports (sessionized PCAP and Zeek
+records already put the initiator in ``source_ip``).
+
+An attempt has failed when it went unanswered or was rejected:
+connection state S0/REJ, or RST with no more than 4 packets (handshake
+then reset, e.g. a SYN scan of an open port). Without connection state,
+a flow with zero responder packets, or a SYN-only TCP flow of at most two
+packets, counts as failed.
+
+Per source: unique destination ports and hosts, the most ports probed on
+one host (vertical), the most hosts probed on one port (horizontal), the
+failure ratio and the largest burst of attempts within ``burst_window_sec``.
+The strongest sources are returned in ``scan_candidates`` for the detector;
+aggregate features remain for the anomaly model.
 
 SECURITY CONSTRAINTS:
     - Read-only computation over local flow records.
@@ -17,15 +27,59 @@ SECURITY CONSTRAINTS:
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from typing import Any
+from collections import defaultdict
+from dataclasses import asdict, dataclass
+from datetime import timedelta
+from typing import Any, Optional
 
-from unishield.features.base import BaseFeatureExtractor
-from unishield.schemas.flow import NormalisedFlow
+from unishield.features.base import BaseFeatureExtractor, WindowContext, resolve_window
+from unishield.schemas.flow import NormalisedFlow, ProtocolType
+
+_MIN_CANDIDATE_ATTEMPTS = 5
+_MAX_CANDIDATES = 10
+
+
+def is_attempt(flow: NormalisedFlow) -> bool:
+    """False for flows that look like a service replying from a well-known port."""
+    if flow.source_port is None or flow.destination_port is None:
+        return True
+    return not (flow.source_port < 1024 <= flow.destination_port)
+
+
+def is_failed(flow: NormalisedFlow) -> bool:
+    """Connection attempt that was unanswered, rejected, or reset before any exchange."""
+    if flow.conn_state:
+        if flow.conn_state in ("S0", "REJ"):
+            return True
+        return flow.conn_state == "RST" and flow.packet_count <= 4
+    if flow.resp_packets is not None:
+        return flow.resp_packets == 0
+    flags = (flow.tcp_flags or "").upper()
+    return (flow.protocol == ProtocolType.TCP and "SYN" in flags and "ACK" not in flags
+            and flow.packet_count <= 2)
+
+
+@dataclass
+class ScanCandidate:
+    source_ip: str
+    attempts: int
+    failed: int
+    failed_ratio: float
+    unique_ports: int
+    unique_hosts: int
+    vertical_ports: int
+    vertical_host: Optional[str]
+    horizontal_hosts: int
+    horizontal_port: Optional[int]
+    burst: int
+    attempts_per_second: float
 
 
 class ScanFeatureExtractor(BaseFeatureExtractor):
     """Extract scanning-pattern features per source IP."""
+
+    def __init__(self, burst_window_sec: float = 2.0):
+        self.burst_window = timedelta(seconds=burst_window_sec)
 
     @property
     def name(self) -> str:
@@ -46,133 +100,90 @@ class ScanFeatureExtractor(BaseFeatureExtractor):
             "top_scanner_ip",
             "top_scanner_port_count",
             "top_scanner_host_count",
+            "top_host_scanner_ip",
+            "top_host_scanner_horizontal",
+            "scan_candidates",
         ]
 
-    def extract(self, flows: list[NormalisedFlow]) -> dict[str, Any]:
-        if not flows:
-            return {name: 0 for name in self.feature_names}
+    def extract(self, flows: list[NormalisedFlow], window: WindowContext | None = None) -> dict[str, Any]:
+        empty: dict[str, Any] = {name: 0 for name in self.feature_names}
+        empty.update(top_scanner_ip=None, top_host_scanner_ip=None, scan_candidates=[])
+        attempts = [f for f in flows if is_attempt(f)]
+        if not attempts:
+            return empty
 
-        # Group flows by source IP
+        window = resolve_window(flows, window)
         by_source: dict[str, list[NormalisedFlow]] = defaultdict(list)
-        for f in flows:
+        for f in attempts:
             by_source[f.source_ip].append(f)
 
-        # Compute per-source scan metrics
-        source_metrics: list[dict[str, Any]] = []
-        for src_ip, src_flows in by_source.items():
-            dest_ports = set()
-            dest_hosts = set()
-            failed = 0
-            total = len(src_flows)
+        profiles = [self._profile(src, fs, window.observed_seconds) for src, fs in by_source.items()]
+        n = len(profiles)
+        total_failed = sum(p.failed for p in profiles)
+        avg_ports = sum(p.unique_ports for p in profiles) / n
+        fanout = sum((p.unique_ports + p.unique_hosts) / (2 * p.attempts) for p in profiles) / n
 
-            for f in src_flows:
-                if f.destination_port is not None:
-                    dest_ports.add(f.destination_port)
-                dest_hosts.add(f.destination_ip)
-
-                # Heuristic: a "failed" connection has SYN but no
-                # SYN-ACK, or very small packet/byte count
-                if f.tcp_flags:
-                    flags_upper = f.tcp_flags.upper()
-                    if "SYN" in flags_upper and "ACK" not in flags_upper:
-                        if f.packet_count <= 2:
-                            failed += 1
-                elif f.packet_count <= 1 and f.byte_count < 100:
-                    failed += 1
-
-            failed_ratio = failed / max(total, 1)
-
-            # Fan-out score: normalised measure of how spread connections are
-            port_spread = len(dest_ports) / max(total, 1)
-            host_spread = len(dest_hosts) / max(total, 1)
-            fanout = (port_spread + host_spread) / 2.0
-
-            source_metrics.append({
-                "source_ip": src_ip,
-                "unique_ports": len(dest_ports),
-                "unique_hosts": len(dest_hosts),
-                "total_connections": total,
-                "failed_ratio": failed_ratio,
-                "fanout": fanout,
-            })
-
-        # Aggregate across all sources
-        if not source_metrics:
-            return {name: 0 for name in self.feature_names}
-
-        # Window duration for rate calculation
-        timestamps = [f.timestamp for f in flows]
-        duration = (max(timestamps) - min(timestamps)).total_seconds()
-        duration = max(duration, 0.001)
-
-        # Find top scanner (most unique ports)
-        top_scanner = max(source_metrics, key=lambda m: m["unique_ports"])
-
-        # Max vertical scan: most ports on a single host per source
-        max_vert = 0
-        max_horiz = 0
-        for src_ip, src_flows in by_source.items():
-            # Vertical: group by dest_host, count unique ports
-            host_ports: dict[str, set] = defaultdict(set)
-            # Horizontal: group by dest_port, count unique hosts
-            port_hosts: dict[int, set] = defaultdict(set)
-
-            for f in src_flows:
-                if f.destination_port is not None:
-                    host_ports[f.destination_ip].add(f.destination_port)
-                    port_hosts[f.destination_port].add(f.destination_ip)
-
-            if host_ports:
-                max_vert = max(max_vert, max(len(v) for v in host_ports.values()))
-            if port_hosts:
-                max_horiz = max(max_horiz, max(len(v) for v in port_hosts.values()))
-
-        # Burst detection: max connections in a 2-second sub-window
-        burst = self._detect_burst(flows, burst_window_sec=2)
-
-        # Scanner IPs: sources with above-threshold fan-out
-        avg_unique_ports = sum(m["unique_ports"] for m in source_metrics) / len(source_metrics)
-        scanner_threshold = max(avg_unique_ports * 2, 10)
-        scanner_ips = [m["source_ip"] for m in source_metrics if m["unique_ports"] > scanner_threshold]
-
-        avg_ports = sum(m["unique_ports"] for m in source_metrics) / len(source_metrics)
-        avg_hosts = sum(m["unique_hosts"] for m in source_metrics) / len(source_metrics)
-        avg_failed = sum(m["failed_ratio"] for m in source_metrics) / len(source_metrics)
-        avg_fanout = sum(m["fanout"] for m in source_metrics) / len(source_metrics)
+        top_port = max(profiles, key=lambda p: (p.unique_ports, p.vertical_ports))
+        top_host = max(profiles, key=lambda p: (p.horizontal_hosts, p.unique_hosts))
+        candidates = sorted(
+            (p for p in profiles if p.attempts >= _MIN_CANDIDATE_ATTEMPTS),
+            key=lambda p: max(p.unique_ports, p.horizontal_hosts, p.burst),
+            reverse=True,
+        )[:_MAX_CANDIDATES]
 
         return {
             "unique_dest_ports_per_source": round(avg_ports, 2),
-            "unique_dest_hosts_per_source": round(avg_hosts, 2),
-            "connection_rate": round(len(flows) / duration, 2),
-            "failed_connection_ratio": round(avg_failed, 4),
-            "fanout_score": round(avg_fanout, 4),
-            "max_vertical_ports": max_vert,
-            "max_horizontal_hosts": max_horiz,
-            "burst_connections": burst,
-            "scanner_source_ips": len(scanner_ips),
-            "top_scanner_ip": top_scanner["source_ip"],
-            "top_scanner_port_count": top_scanner["unique_ports"],
-            "top_scanner_host_count": top_scanner["unique_hosts"],
+            "unique_dest_hosts_per_source": round(sum(p.unique_hosts for p in profiles) / n, 2),
+            "connection_rate": round(len(attempts) / window.observed_seconds, 2),
+            "failed_connection_ratio": round(total_failed / len(attempts), 4),
+            "fanout_score": round(fanout, 4),
+            "max_vertical_ports": max(p.vertical_ports for p in profiles),
+            "max_horizontal_hosts": max(p.horizontal_hosts for p in profiles),
+            "burst_connections": max(p.burst for p in profiles),
+            "scanner_source_ips": sum(1 for p in profiles if p.unique_ports > max(avg_ports * 2, 10)),
+            "top_scanner_ip": top_port.source_ip,
+            "top_scanner_port_count": top_port.unique_ports,
+            "top_scanner_host_count": top_port.unique_hosts,
+            "top_host_scanner_ip": top_host.source_ip,
+            "top_host_scanner_horizontal": top_host.horizontal_hosts,
+            "scan_candidates": [asdict(c) for c in candidates],
         }
 
-    @staticmethod
-    def _detect_burst(flows: list[NormalisedFlow], burst_window_sec: int = 2) -> int:
-        """Find the maximum number of connections within any burst_window_sec interval."""
-        if not flows:
-            return 0
+    def _profile(self, source_ip: str, flows: list[NormalisedFlow], duration: float) -> ScanCandidate:
+        host_ports: dict[str, set] = defaultdict(set)
+        port_hosts: dict[Optional[int], set] = defaultdict(set)
+        ports: set = set()
+        for f in flows:
+            port_hosts[f.destination_port].add(f.destination_ip)
+            if f.destination_port is not None:
+                ports.add(f.destination_port)
+                host_ports[f.destination_ip].add(f.destination_port)
+        failed = sum(1 for f in flows if is_failed(f))
+        vertical_host, vertical = max(((h, len(p)) for h, p in host_ports.items()),
+                                      key=lambda hp: hp[1], default=(None, 0))
+        horizontal_port, horizontal = max(((p, len(h)) for p, h in port_hosts.items()),
+                                          key=lambda ph: ph[1], default=(None, 0))
+        return ScanCandidate(
+            source_ip=source_ip,
+            attempts=len(flows),
+            failed=failed,
+            failed_ratio=round(failed / len(flows), 4),
+            unique_ports=len(ports),
+            unique_hosts=len({f.destination_ip for f in flows}),
+            vertical_ports=vertical,
+            vertical_host=vertical_host,
+            horizontal_hosts=horizontal,
+            horizontal_port=horizontal_port,
+            burst=self._burst(flows),
+            attempts_per_second=round(len(flows) / duration, 2),
+        )
 
-        sorted_flows = sorted(flows, key=lambda f: f.timestamp)
-        max_burst = 0
-        start_idx = 0
-
-        for end_idx in range(len(sorted_flows)):
-            # Slide start forward until within burst window
-            while start_idx < end_idx:
-                delta = (sorted_flows[end_idx].timestamp - sorted_flows[start_idx].timestamp).total_seconds()
-                if delta <= burst_window_sec:
-                    break
-                start_idx += 1
-            burst_size = end_idx - start_idx + 1
-            max_burst = max(max_burst, burst_size)
-
-        return max_burst
+    def _burst(self, flows: list[NormalisedFlow]) -> int:
+        """Largest number of attempts that start within burst_window of each other."""
+        times = sorted(f.timestamp for f in flows)
+        best = start = 0
+        for end, t in enumerate(times):
+            while t - times[start] > self.burst_window:
+                start += 1
+            best = max(best, end - start + 1)
+        return best

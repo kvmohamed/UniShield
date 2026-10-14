@@ -21,7 +21,7 @@ import math
 from collections import deque
 from typing import Any
 
-from unishield.features.base import BaseFeatureExtractor
+from unishield.features.base import BaseFeatureExtractor, WindowContext, resolve_window
 from unishield.schemas.flow import NormalisedFlow, ProtocolType
 
 
@@ -60,7 +60,7 @@ class StatisticalFeatureExtractor(BaseFeatureExtractor):
             "baseline_samples",
         ]
 
-    def extract(self, flows: list[NormalisedFlow]) -> dict[str, Any]:
+    def extract(self, flows: list[NormalisedFlow], window: WindowContext | None = None) -> dict[str, Any]:
         if not flows:
             return {name: 0.0 for name in self.feature_names}
 
@@ -69,8 +69,7 @@ class StatisticalFeatureExtractor(BaseFeatureExtractor):
         total_bytes = sum(f.byte_count for f in flows)
         total_flows = len(flows)
 
-        timestamps = [f.timestamp for f in flows]
-        duration = max((max(timestamps) - min(timestamps)).total_seconds(), 0.001)
+        duration = resolve_window(flows, window).observed_seconds
 
         pps = total_packets / duration
         bps = total_bytes / duration

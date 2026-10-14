@@ -22,7 +22,7 @@ import math
 from collections import Counter, defaultdict
 from typing import Any
 
-from unishield.features.base import BaseFeatureExtractor
+from unishield.features.base import BaseFeatureExtractor, WindowContext
 from unishield.schemas.flow import NormalisedFlow
 
 
@@ -52,7 +52,7 @@ class BeaconingFeatureExtractor(BaseFeatureExtractor):
             "min_beacon_cv",
         ]
 
-    def extract(self, flows: list[NormalisedFlow]) -> dict[str, Any]:
+    def extract(self, flows: list[NormalisedFlow], window: WindowContext | None = None) -> dict[str, Any]:
         if not flows:
             return {name: 0 for name in self.feature_names}
 
