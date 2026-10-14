@@ -19,7 +19,7 @@ from typing import Any
 
 from pathlib import Path as _Path
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -262,10 +262,11 @@ from unishield.data.sample_generator import (
     SimulatedReader,
     generate_mixed_scenario,
 )
+from unishield.ingest.detect import UnsupportedFormatError, open_reader
 from unishield.processing.pipeline import Pipeline, PipelineResult
 
 # Replay state
-_replay_state: dict = {
+_IDLE_REPLAY_STATE: dict = {
     "status": "idle",
     "file_path": None,
     "progress": 0.0,
@@ -274,8 +275,17 @@ _replay_state: dict = {
     "result": None,
     "thread": None,
 }
+_replay_state: dict = dict(_IDLE_REPLAY_STATE)
 
 _pipeline: Pipeline | None = None
+
+
+def reset_replay_state() -> None:
+    """Return replay state to idle (for testing)."""
+    global _pipeline
+    _replay_state.clear()
+    _replay_state.update(_IDLE_REPLAY_STATE)
+    _pipeline = None
 
 
 def _run_replay_in_background(reader, file_path: str) -> None:
@@ -292,60 +302,85 @@ def _run_replay_in_background(reader, file_path: str) -> None:
         _replay_state["records_processed"] = result.total_records
         _replay_state["alerts_generated"] = result.total_alerts
         _replay_state["progress"] = 100.0
-        _replay_state["status"] = "completed"
+        _replay_state["status"] = "stopped" if _pipeline._should_stop else "completed"
     except Exception as e:
         _replay_state["status"] = f"error: {e}"
+
+
+def _allowed_replay_roots() -> list[Path]:
+    """Directories the replay API may read: paths.data_dir + ingest.allowed_dirs."""
+    config = get_config()
+    roots = [config.paths.data_dir, *config.ingest.allowed_dirs]
+    return [Path(root).expanduser().resolve() for root in roots]
+
+
+def _input_size_bytes(path: Path) -> int:
+    if path.is_dir():
+        return sum(p.stat().st_size for p in path.glob("*.log") if p.is_file())
+    return path.stat().st_size
+
+
+def _resolve_replay_path(file_path: str) -> Path:
+    """
+    Resolve a requested input path and enforce the allow-list and size limit.
+    The allow-list is checked before existence so the API does not reveal
+    which files exist elsewhere on disk.
+    """
+    resolved = Path(file_path).expanduser().resolve()
+    roots = _allowed_replay_roots()
+    if not any(resolved == root or resolved.is_relative_to(root) for root in roots):
+        raise HTTPException(
+            status_code=403,
+            detail="Path is outside the allowed data directories "
+                   "(paths.data_dir / ingest.allowed_dirs in configs/config.yaml)",
+        )
+    if not resolved.exists():
+        raise HTTPException(status_code=404, detail=f"Not found: {file_path}")
+    limit_mb = get_config().ingest.max_file_size_mb
+    if _input_size_bytes(resolved) > limit_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"Input exceeds {limit_mb} MB limit")
+    return resolved
 
 
 @app.post(
     "/replay/start",
     tags=["replay"],
     summary="Start traffic replay",
-    description="Start replaying a PCAP or log file. Does NOT send packets — processes locally only.",
+    description=(
+        "Analyse a PCAP/PCAPNG file, a Zeek log (JSON or TSV) or Zeek log directory, "
+        "or a flow CSV/JSON file located under the configured data directory. "
+        "The format is detected from the file content. Does NOT send packets — "
+        "the file is read locally."
+    ),
 )
-async def replay_start(file_path: str = Query(..., description="Path to PCAP/log file")) -> dict:
+async def replay_start(
+    file_path: str = Query(..., description="Path under the data directory, e.g. data/samples/sample.pcap"),
+) -> dict:
     """
     Start replay of a traffic file for analysis.
     NOTE: This does NOT send any packets. It reads the file locally.
     """
     if _replay_state["status"] == "running":
-        return {"status": "error", "message": "Replay already running"}
+        raise HTTPException(status_code=409, detail="Replay already running")
+
+    path = _resolve_replay_path(file_path)
+    try:
+        reader, fmt = open_reader(path)
+    except UnsupportedFormatError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     clear_alerts()
-
-    p = Path(file_path)
-    if not p.exists():
-        return {"status": "error", "message": f"File not found: {file_path}"}
-
-    # Detect reader based on extension
-    from unishield.ingest.flow_reader import FlowReader
-    from unishield.ingest.zeek_reader import ZeekReader
-
-    suffix = p.suffix.lower()
-    if suffix in (".json", ".jsonl"):
-        # Try Zeek first, fall back to flow JSON
-        try:
-            reader = ZeekReader(p)
-            if reader.validate_source():
-                pass
-            else:
-                reader = FlowReader(p)
-        except Exception:
-            reader = FlowReader(p)
-    elif suffix == ".csv":
-        reader = FlowReader(p)
-    else:
-        return {"status": "error", "message": f"Unsupported format: {suffix}"}
-
+    _replay_state.update(status="running", file_path=str(path), progress=0.0,
+                         records_processed=0, alerts_generated=0, result=None)
     thread = threading.Thread(
         target=_run_replay_in_background,
-        args=(reader, file_path),
+        args=(reader, str(path)),
         daemon=True,
     )
     _replay_state["thread"] = thread
     thread.start()
 
-    return {"status": "started", "file_path": file_path}
+    return {"status": "started", "file_path": str(path), "format": fmt}
 
 
 # ===================================================================

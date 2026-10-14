@@ -33,7 +33,7 @@ class TestNormalisedFlowCreation:
         assert flow.destination_ip == "10.0.0.1"
         assert flow.protocol == ProtocolType.OTHER
         assert flow.direction == FlowDirection.UNKNOWN
-        assert flow.source == InputSource.PCAP
+        assert flow.source_type == InputSource.PCAP
         assert flow.packet_count == 1
         assert flow.byte_count == 0
         assert flow.event_id is not None
@@ -288,3 +288,49 @@ class TestFlowSerialisation:
             destination_ip="2.2.2.2",
         )
         assert flow1.event_id != flow2.event_id
+
+
+class TestFlowAddressValidation:
+    """IPs must be real addresses (or anonymised hashes): blocks junk/markup in IP fields."""
+
+    def _flow(self, src, dst="10.0.0.1", **kw):
+        return NormalisedFlow(timestamp=datetime(2026, 1, 1), source_ip=src, destination_ip=dst, **kw)
+
+    @pytest.mark.parametrize("bad", ["not-an-ip", "<img src=x onerror=alert(1)>", "999.1.1.1", "", "0.0.0"])
+    def test_invalid_addresses_rejected(self, bad):
+        with pytest.raises(ValueError, match="not a valid IP address"):
+            self._flow(bad)
+
+    def test_ipv6_is_canonicalised(self):
+        assert self._flow("2001:DB8:0:0::0001").source_ip == "2001:db8::1"
+
+    def test_whitespace_trimmed(self):
+        assert self._flow(" 192.168.1.1 ").source_ip == "192.168.1.1"
+
+    def test_anonymised_hash_accepted(self):
+        assert self._flow("0123456789abcdef").source_ip == "0123456789abcdef"
+
+    def test_anonymised_copy_is_valid(self):
+        anon = self._flow("192.168.1.1").to_anonymised("salt")
+        assert NormalisedFlow(**anon.model_dump()).source_ip == anon.source_ip
+
+
+class TestFlowNewFields:
+    def test_legacy_source_keyword_still_accepted(self):
+        flow = NormalisedFlow(timestamp=datetime(2026, 1, 1), source_ip="10.0.0.1",
+                              destination_ip="10.0.0.2", source=InputSource.SIMULATED)
+        assert flow.source_type == InputSource.SIMULATED
+        assert flow.model_dump()["source_type"] == InputSource.SIMULATED
+
+    def test_end_time(self):
+        flow = NormalisedFlow(timestamp=datetime(2026, 1, 1), source_ip="10.0.0.1",
+                              destination_ip="10.0.0.2", duration=2.5)
+        assert flow.end_time == datetime(2026, 1, 1, 0, 0, 2, 500000, tzinfo=timezone.utc)
+        no_duration = flow.model_copy(update={"duration": None})
+        assert no_duration.end_time == no_duration.timestamp
+
+    def test_optional_fields_default_to_none(self):
+        flow = NormalisedFlow(timestamp=datetime(2026, 1, 1), source_ip="10.0.0.1", destination_ip="10.0.0.2")
+        for name in ("flow_id", "orig_packets", "resp_packets", "orig_bytes", "resp_bytes",
+                     "conn_state", "dns_rcode", "label"):
+            assert getattr(flow, name) is None

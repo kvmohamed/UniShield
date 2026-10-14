@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import AsyncIterator, Iterator
+from typing import Iterable, Iterator
 
 from unishield.schemas.flow import NormalisedFlow
 
@@ -69,3 +69,9 @@ class BaseReader(ABC):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(source={self.source_path}, read={self._records_read})"
+
+
+def chain_first(first: str, rest: Iterable[str]) -> Iterator[str]:
+    """Yield an already-read first line, then the remaining lines of a file."""
+    yield first
+    yield from rest

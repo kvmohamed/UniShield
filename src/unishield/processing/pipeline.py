@@ -42,12 +42,25 @@ from unishield.features.exfiltration import ExfiltrationFeatureExtractor
 from unishield.features.dns import DNSFeatureExtractor
 from unishield.features.statistical import StatisticalFeatureExtractor
 from unishield.ingest.base import BaseReader
+from unishield.processing.normalization import Normalizer
+from unishield.processing.sessionizer import Sessionizer
 from unishield.processing.window import SlidingWindow, WindowManager
-from unishield.schemas.alert import Alert
-from unishield.schemas.flow import NormalisedFlow
+from unishield.schemas.alert import Alert, SourceType
+from unishield.schemas.flow import InputSource, NormalisedFlow
 from unishield.schemas.metrics import PipelineMetrics
 
 logger = logging.getLogger("unishield.processing.pipeline")
+
+# Provenance of flows → provenance reported on alerts
+_ALERT_SOURCE = {
+    InputSource.PCAP: SourceType.PCAP_FILE,
+    InputSource.PCAP_REPLAY: SourceType.PCAP_REPLAY,
+    InputSource.ZEEK_JSON: SourceType.ZEEK_LOG,
+    InputSource.ZEEK_TSV: SourceType.ZEEK_LOG,
+    InputSource.FLOW_CSV: SourceType.FLOW_CSV,
+    InputSource.FLOW_JSON: SourceType.FLOW_JSON,
+    InputSource.SIMULATED: SourceType.SIMULATED,
+}
 
 
 class PipelineResult:
@@ -63,6 +76,7 @@ class PipelineResult:
         self.end_time: Optional[float] = None
         self.latencies_ms: list[float] = []
         self.errors: int = 0
+        self.ingest: dict[str, Any] = {}
 
     @property
     def duration_seconds(self) -> float:
@@ -112,6 +126,7 @@ class PipelineResult:
             "latency_p99_ms": round(self.latency_p99_ms, 2),
             "errors": self.errors,
             "alerts_by_class": self._alerts_by_class(),
+            "ingest": self.ingest,
         }
 
     def _alerts_by_class(self) -> dict[str, int]:
@@ -126,6 +141,9 @@ class Pipeline:
     """
     Streaming detection pipeline.
 
+    Stages: reader → sessionizer (packet-level readers only) → normaliser
+    → sliding window → feature extraction → detectors → deduplication.
+
     Usage:
         pipeline = Pipeline()
         result = pipeline.run(reader)
@@ -139,8 +157,20 @@ class Pipeline:
         detectors: list[BaseDetector] | None = None,
         alert_callback: Any | None = None,
         enable_correlation: bool = True,
+        normalizer: Normalizer | None = None,
+        sessionize: bool | None = None,
     ):
+        """
+        Args:
+            normalizer: Custom normaliser; default is built from config per run.
+            sessionize: Force sessionization on/off; default follows the
+                reader's ``packet_level`` attribute (True for PCAP).
+        """
         config = get_config()
+        self._config = config
+        self._normalizer_override = normalizer
+        self._sessionize = sessionize
+        self._reader: BaseReader | None = None
 
         self.window_size_sec = window_size_sec or config.processing.window_size_sec
         self.slide_interval_sec = slide_interval_sec or config.processing.slide_interval_sec
@@ -225,8 +255,19 @@ class Pipeline:
             len(self.detectors),
         )
 
+        self._reader = reader
+        normalizer = self._normalizer_override or Normalizer.from_config(self._config)
+        packet_level = getattr(reader, "packet_level", False) if self._sessionize is None \
+            else self._sessionize
+        sessionizer = Sessionizer.from_config(self._config) if packet_level else None
+
+        records = reader.read()
+        if sessionizer is not None:
+            records = sessionizer.process(records)
+        records = normalizer.normalize_stream(records)
+
         try:
-            for flow in reader.read():
+            for flow in records:
                 if self._should_stop:
                     logger.info("Pipeline stopped by request")
                     break
@@ -262,7 +303,10 @@ class Pipeline:
                             window_alerts = self._correlator.deduplicate(window_alerts)
 
                         # Collect alerts
+                        source = _ALERT_SOURCE.get(window_flows[-1].source_type)
                         for alert in window_alerts:
+                            if source is not None:
+                                alert.source_type = source
                             result.alerts.append(alert)
                             result.total_alerts += 1
                             self._total_alerts += 1
@@ -291,6 +335,13 @@ class Pipeline:
         finally:
             self._is_running = False
             result.end_time = time.time()
+            result.ingest = {
+                "reader": type(reader).__name__,
+                "records_read": getattr(reader, "records_read", None),
+                "reader_errors": getattr(reader, "errors", None),
+                "sessionizer": sessionizer.stats() if sessionizer is not None else None,
+                "normalizer": normalizer.stats(),
+            }
             # Push final metrics
             if self._metrics_callback:
                 try:
@@ -372,6 +423,7 @@ class Pipeline:
             slide_interval_sec=self.slide_interval_sec,
             is_processing=self._is_running,
             detectors_loaded=len(self.detectors),
+            malformed_records=getattr(self._reader, "errors", 0) or 0,
             latency_p50_ms=round(p50, 3),
             latency_p95_ms=round(p95, 3),
             latency_p99_ms=round(p99, 3),

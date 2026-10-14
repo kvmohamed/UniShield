@@ -31,7 +31,17 @@ curl -X POST "http://127.0.0.1:8000/replay/demo?normal=300&ddos=400&scan=150&bea
 Currently this produces a small number of scan and exfiltration alerts; DDoS and beaconing
 alerts do not appear in the demo yet (audit defects D4, D10).
 
-### 5. Run Tests
+### 5. Replay sample traffic files
+```bash
+python scripts/make_samples.py
+curl -X POST "http://127.0.0.1:8000/replay/start?file_path=data/samples/sample.pcap"
+curl http://127.0.0.1:8000/replay/status
+```
+The sample PCAP (26 packets) is grouped into 10 flows; `/replay/status` shows the
+reader, sessionizer and normaliser counts. It is too short to fill a 10-second
+analysis window, so it produces no alerts yet (audit defect D1, fixed in Phase 4).
+
+### 6. Run Tests
 ```bash
 python -m pytest tests/ -q
 ```

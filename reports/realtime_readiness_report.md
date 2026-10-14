@@ -422,3 +422,34 @@ Exit test results:
 New observation for Phase 6: under a real uvicorn server, `/replay/demo` took 8.7 s for 920 records (87 windows, ~100 ms per window) versus ~14 ms per window in-process, so the Isolation Forest bottleneck (D6) is worse in deployment than in §8.1.
 
 Not changed in Phase 2 (by plan): all detection defects D1–D17 except D18.
+
+### Phase 3 — Ingestion, normalisation, sessionization (2026-10-14) — exit test passed
+
+Branch `phase-3-ingestion` (on top of `audit-baseline`).
+
+| Item | Change | Evidence |
+|---|---|---|
+| Flow schema | Strict IP validation (IPv4/IPv6 canonicalised, or 16-hex anonymised hash) — also closes the IP-field route to the dashboard XSS (D17 remains for other fields until Phase 9). New optional fields: `flow_id`, `orig/resp_packets`, `orig/resp_bytes`, `conn_state`, `dns_rcode`, `label` (evaluation only). `source` renamed `source_type` per spec (old name still accepted). `end_time` property. | `test_flow_schema.py` |
+| Normalisation (`processing/normalization.py`) | Direction from `network.home_networks` (default RFC 1918 + ULA) unless the source gave one; TLS version names unified; DNS query length filled; optional salted IP hashing applied last (after direction inference). | `test_normalization.py` (25 tests) |
+| Sessionizer (`processing/sessionizer.py`) | Packet → bidirectional flow aggregation: originator detection, per-direction counts, Zeek-style `conn_state`, originator-only `tcp_flags`, idle/active timeouts, FIN/RST closing grace, `max_active_flows` memory bound. Output released in start-time order (lag = active + idle + 1 s of traffic time). | `test_sessionizer.py` (13 tests), 99% line coverage |
+| PCAP reader (D9, D15) | IPv6; TLS version/cipher parsed from ClientHello/ServerHello `supported_versions` (`ingest/tls.py`) instead of the record header; no port-443 assumption; DNS rcode from responses; `wirelen` used for byte counts. scapy now installed. | sample capture: 26 packets → exactly the 10 ground-truth flows (PCAP and PCAPNG) |
+| Zeek reader (D14) | TSV format; JSON lines streamed; directory mode joins `conn.log` with `dns.log`/`ssl.log` on `uid`; rcode, labels, per-direction counts, `local_orig/local_resp` direction kept; records without IPs counted as errors (no `0.0.0.0`); port 0 kept. | `test_readers.py` |
+| Flow reader (D13) | Keeps direction, DNS/TLS fields, flow id, per-direction counts, labels; JSON lines streamed; CIC-IDS2017 profile auto-detected (µs → s, forward/backward counts, dd/mm/yyyy timestamps without seconds); invalid rows counted, never fabricated; negative durations → null. | `test_readers.py` |
+| Format detection (D8) | `ingest/detect.py` picks the reader from file content (magic bytes / headers / JSON keys), independent of extension. | `test_detect.py` |
+| Replay API (D8, D9) | Accepts PCAP/PCAPNG/Zeek file or directory/flow files; only under `paths.data_dir` + `ingest.allowed_dirs` (403 otherwise, checked before existence); 404/413/400/409 status codes; status reports reader/sessionizer/normaliser counts; "stopped" no longer overwritten by "completed". | `tests/integration/test_ingest_pipeline.py`; live server run below |
+| Pipeline | Stages reader → sessionizer (packet-level readers) → normaliser → window; alerts carry the real input source (`source_type`); `/metrics` `malformed_records` reports reader errors. | integration tests |
+| Samples | `unishield/data/sample_files.py` + `scripts/make_samples.py` write deterministic PCAP/PCAPNG, Zeek JSON dir, Zeek TSV, flow CSV/JSONL and CIC-IDS2017-style files to `data/samples/` (git-ignored). | — |
+
+Exit test results:
+
+- `pytest tests/` → **222 passed** (107 new), no warnings with deprecations as errors; line coverage 88% (sessionizer 99%, detection 97%, TLS 95%, readers 86–93%).
+- Integration: sample PCAP → reader → sessionizer → normaliser matches every ground-truth flow (counts, bytes, connection state, direction, TLS, DNS rcode); output in timestamp order.
+- Live uvicorn server, `POST /replay/start` on each generated sample: `sample.pcap` and `sample.pcapng` → 26 packets → 10 flows; Zeek directory → 4; Zeek TSV → 4; `flows.jsonl` → 3 (was 0, D8); `README.md` and `data/samples/../../README.md` → 403; missing file → 404.
+
+Notes and remaining limitations:
+
+- The sample PCAP spans < 3 s, so it fills no 10-second window and yields no alerts — D1 (no end-of-stream flush) is Phase 4 work.
+- Sessionized flows reach the window 16 s (traffic time) after they start; Phase 4 window rework should account for this when measuring detection delay.
+- Detectors still use their pre-Phase-3 features: e.g. the scan features do not yet use `conn_state`, so D7 is not fixed until Phase 4.
+- TLS hellos split across TCP segments are not reassembled (version left empty); JA3/JA4 are not computed from PCAP (Phase F).
+- CIC-IDS2017 timestamps are local lab time and some files use 12-hour times without AM/PM; they are read as UTC as-is.

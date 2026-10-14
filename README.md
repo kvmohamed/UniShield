@@ -44,7 +44,10 @@ UniShield operates in **read-only mode only**. It:
 
 ### Detection Architecture
 ```
-PCAP / Zeek / CSV ─→ Input Adapters ─→ NormalisedFlow Records
+PCAP / Zeek / CSV ─→ Input Adapters ─→ Sessionizer (PCAP only) ─→ Normaliser
+                     (format detected     (packets → bidirectional   (direction,
+                      from content)        flows, conn state)         naming, optional
+                                                                       IP hashing)
                                               │
                                     ┌─────────▼─────────┐
                                     │  Sliding Windows   │
@@ -140,6 +143,30 @@ curl http://127.0.0.1:8000/alerts/summary
 ```
 
 Or click **"Run Demo Analysis"** on the dashboard.
+
+### Replay a Traffic File
+
+`POST /replay/start` analyses a file or Zeek log directory located under the data
+directory (`paths.data_dir`, default `./data`; extra folders via `ingest.allowed_dirs`).
+The format is detected from the content:
+
+| Input | Notes |
+|---|---|
+| PCAP / PCAPNG | One record per IPv4/IPv6 packet, then grouped into bidirectional flows (per-direction counts, connection state S0/REJ/S1/SF/RST/OTH). TLS version/cipher from plaintext handshake fields; DNS question and response code. |
+| Zeek logs | JSON lines, JSON array or default TSV. A directory with `conn.log` (+ optional `dns.log`, `ssl.log`) is joined on `uid`. |
+| Flow CSV / JSON | Flexible column names; CIC-IDS2017 CSVs detected automatically (µs durations, forward/backward counts, labels). |
+
+Sample files with known contents:
+
+```bash
+python scripts/make_samples.py          # writes data/samples/
+curl -X POST "http://127.0.0.1:8000/replay/start?file_path=data/samples/sample.pcap"
+curl http://127.0.0.1:8000/replay/status
+```
+
+Paths outside the data directory are refused (HTTP 403). Inputs over
+`ingest.max_file_size_mb` are refused (413). Direction (inbound/outbound/internal) is
+inferred from `network.home_networks`.
 
 ### Run Tests
 
@@ -261,7 +288,7 @@ unishield/
 | GET | `/alerts/{id}` | Get alert by ID |
 | GET | `/alerts/summary` | Alert summary statistics |
 | GET | `/threats/{class}` | Alerts by threat class |
-| POST | `/replay/start` | Replay a PCAP/JSON/CSV file |
+| POST | `/replay/start` | Analyse a PCAP/PCAPNG, Zeek or flow file under the data directory |
 | POST | `/replay/demo` | Run demo with synthetic attack traffic |
 | POST | `/replay/stop` | Stop active replay |
 | GET | `/replay/status` | Replay progress + results |

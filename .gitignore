@@ -32,8 +32,10 @@ build/
 data/raw/*
 data/processed/*
 data/test_scenarios/
+data/samples/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/samples/.gitkeep
 
 # Models
 models/saved/*.joblib

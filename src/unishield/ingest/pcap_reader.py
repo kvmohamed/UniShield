@@ -1,11 +1,16 @@
 """
 UniShield — PCAP Reader
 
-Reads PCAP/PCAPNG files using Scapy and produces NormalisedFlow records.
+Reads PCAP/PCAPNG files using Scapy and produces one NormalisedFlow record
+per IP packet. These packet-level records are aggregated into
+bidirectional flows by ``processing.sessionizer`` (the pipeline does this
+automatically because ``packet_level`` is True).
 
 SECURITY CONSTRAINTS:
-    - READ-ONLY: Only reads from local files. Never sends packets.
-    - NO DECRYPTION: Extracts metadata only (IPs, ports, sizes, flags).
+    - READ-ONLY: Only reads from local files with Scapy's offline reader.
+      Never sends packets.
+    - NO DECRYPTION: Extracts metadata only (IPs, ports, sizes, flags, DNS
+      question/response code, plaintext TLS hello fields).
     - NO ACTIVE SCANNING: Never probes any address found in captures.
 """
 
@@ -17,6 +22,7 @@ from pathlib import Path
 from typing import Iterator
 
 from unishield.ingest.base import BaseReader
+from unishield.ingest.tls import parse_tls_hello
 from unishield.schemas.flow import (
     FlowDirection,
     InputSource,
@@ -27,8 +33,18 @@ from unishield.schemas.flow import (
 logger = logging.getLogger("unishield.ingest.pcap")
 
 
+def quiet_scapy_import_warnings() -> None:
+    """Scapy warns at import when no live-capture driver (Npcap/libpcap) is
+    installed. Reading files offline does not need one, so hide the notice."""
+    for name in ("scapy.loading", "scapy.runtime"):
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+
+quiet_scapy_import_warnings()
+
+
 # ---------------------------------------------------------------------------
-# TCP flag helpers
+# Field helpers
 # ---------------------------------------------------------------------------
 
 _TCP_FLAGS = {
@@ -42,57 +58,56 @@ _TCP_FLAGS = {
     0x80: "CWR",
 }
 
+_DNS_TYPES = {
+    1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 12: "PTR",
+    15: "MX", 16: "TXT", 28: "AAAA", 33: "SRV", 65: "HTTPS", 255: "ANY",
+}
+
+_DNS_RCODES = {
+    0: "NOERROR", 1: "FORMERR", 2: "SERVFAIL", 3: "NXDOMAIN", 4: "NOTIMP", 5: "REFUSED",
+}
+
 
 def _flags_to_str(flags_int: int) -> str:
     """Convert a TCP flags integer to a comma-separated string."""
     parts = [name for bit, name in _TCP_FLAGS.items() if flags_int & bit]
-    return ",".join(parts) if parts else ""
+    return ",".join(parts)
 
 
-def _protocol_from_number(proto_num: int) -> ProtocolType:
-    """Map IP protocol number to ProtocolType enum."""
-    if proto_num == 6:
-        return ProtocolType.TCP
-    elif proto_num == 17:
-        return ProtocolType.UDP
-    elif proto_num == 1:
-        return ProtocolType.ICMP
-    return ProtocolType.OTHER
+def _dns_type_str(qtype: int) -> str:
+    """Convert DNS query type number to string."""
+    return _DNS_TYPES.get(qtype, f"TYPE{qtype}")
 
 
 class PcapReader(BaseReader):
     """
     Read-only PCAP/PCAPNG file reader.
 
-    Uses Scapy's PcapReader for memory-efficient streaming.
-    Extracts only metadata — never inspects or decrypts payload content.
+    Streams packets with Scapy (memory use does not grow with file size).
+    Non-IP frames are skipped and counted in ``skipped``.
     """
+
+    #: Records are individual packets; the pipeline sessionizes them.
+    packet_level = True
 
     def __init__(self, source_path: Path | str):
         super().__init__(source_path)
+        self.skipped: int = 0
 
     def validate_source(self) -> bool:
         """Check that the PCAP file exists and is readable."""
         if self.source_path is None:
             return False
         p = Path(self.source_path)
-        if not p.exists():
+        if not p.is_file():
             logger.error("PCAP file not found: %s", p)
             return False
-        if not p.is_file():
-            logger.error("Path is not a file: %s", p)
-            return False
-        suffix = p.suffix.lower()
-        if suffix not in (".pcap", ".pcapng", ".cap"):
-            logger.warning("Unexpected file extension: %s", suffix)
         return True
 
     def read(self) -> Iterator[NormalisedFlow]:
         """
-        Stream packets from a PCAP file, yielding NormalisedFlow records.
-
-        Each IP-layer packet is converted to one flow record.
-        Non-IP packets are skipped with a warning counter.
+        Stream packets from a PCAP/PCAPNG file, yielding one record per
+        IPv4/IPv6 packet.
 
         SECURITY: This method only READS. It never sends packets,
         performs lookups, or contacts external systems.
@@ -101,145 +116,99 @@ class PcapReader(BaseReader):
             raise FileNotFoundError(f"Invalid PCAP source: {self.source_path}")
 
         try:
-            from scapy.all import PcapReader as ScapyPcapReader, IP, TCP, UDP, ICMP, DNS
-        except ImportError:
+            from scapy.layers.dns import DNS
+            from scapy.layers.inet import ICMP, IP, TCP, UDP
+            from scapy.layers.inet6 import IPv6
+            from scapy.utils import PcapReader as ScapyPcapReader
+        except ImportError as exc:
             raise ImportError(
-                "Scapy is required for PCAP reading. "
-                "Install it with: pip install scapy"
-            )
+                "Scapy is required for PCAP reading. Install it with: pip install scapy"
+            ) from exc
 
         logger.info("Reading PCAP file: %s", self.source_path)
-        skipped = 0
 
         with ScapyPcapReader(str(self.source_path)) as reader:
             for pkt in reader:
                 try:
-                    # Only process IP packets
-                    if not pkt.haslayer(IP):
-                        skipped += 1
+                    if pkt.haslayer(IP):
+                        ip_layer = pkt[IP]
+                    elif pkt.haslayer(IPv6):
+                        ip_layer = pkt[IPv6]
+                    else:
+                        self.skipped += 1
                         continue
 
-                    ip_layer = pkt[IP]
-                    timestamp = datetime.fromtimestamp(
-                        float(pkt.time), tz=timezone.utc
-                    )
-
-                    # Base fields
-                    src_ip = ip_layer.src
-                    dst_ip = ip_layer.dst
-                    protocol = _protocol_from_number(ip_layer.proto)
-                    byte_count = len(pkt)
-
-                    # Transport-layer metadata
-                    src_port = None
-                    dst_port = None
-                    tcp_flags = None
-
-                    if pkt.haslayer(TCP):
-                        tcp_layer = pkt[TCP]
-                        src_port = tcp_layer.sport
-                        dst_port = tcp_layer.dport
-                        tcp_flags = _flags_to_str(int(tcp_layer.flags))
-                    elif pkt.haslayer(UDP):
-                        udp_layer = pkt[UDP]
-                        src_port = udp_layer.sport
-                        dst_port = udp_layer.dport
-
-                    # DNS metadata (from query name only — no payload decryption)
-                    dns_query = None
-                    dns_query_length = None
-                    dns_record_type = None
-
-                    if pkt.haslayer(DNS):
-                        dns_layer = pkt[DNS]
-                        if dns_layer.qd:  # DNS question section
-                            qname = dns_layer.qd.qname
-                            if isinstance(qname, bytes):
-                                qname = qname.decode("utf-8", errors="replace")
-                            # Remove trailing dot
-                            dns_query = qname.rstrip(".")
-                            dns_query_length = len(dns_query)
-                            # Map qtype number to string
-                            dns_record_type = _dns_type_str(dns_layer.qd.qtype)
-
-                    # TLS metadata — extract from ClientHello if present
-                    # We do NOT decrypt. We only read the version from the
-                    # TLS record header if it's visible in plaintext.
-                    tls_version = None
-                    if dst_port == 443 or src_port == 443:
-                        tls_version = _extract_tls_version(pkt)
-
-                    flow = NormalisedFlow(
-                        timestamp=timestamp,
-                        source_ip=src_ip,
-                        destination_ip=dst_ip,
-                        source_port=src_port,
-                        destination_port=dst_port,
-                        protocol=protocol,
-                        packet_count=1,
-                        byte_count=byte_count,
-                        duration=0.0,
-                        tcp_flags=tcp_flags,
-                        direction=FlowDirection.UNKNOWN,
-                        dns_query=dns_query,
-                        dns_query_length=dns_query_length,
-                        dns_record_type=dns_record_type,
-                        tls_version=tls_version,
-                        source=InputSource.PCAP,
-                    )
-
+                    flow = self._packet_to_flow(pkt, ip_layer, TCP, UDP, ICMP, DNS)
                     self._records_read += 1
                     yield flow
-
                 except Exception as e:
                     self._errors += 1
                     logger.debug("Error processing packet: %s", e)
-                    continue
 
         logger.info(
             "PCAP read complete: %d records, %d errors, %d non-IP skipped",
             self._records_read,
             self._errors,
-            skipped,
+            self.skipped,
         )
 
+    @staticmethod
+    def _packet_to_flow(pkt, ip_layer, TCP, UDP, ICMP, DNS) -> NormalisedFlow:
+        """Convert one IP packet to a packet-level NormalisedFlow."""
+        src_port = dst_port = None
+        tcp_flags = None
+        tls_version = tls_cipher = None
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+        if pkt.haslayer(TCP):
+            protocol = ProtocolType.TCP
+            tcp_layer = pkt[TCP]
+            src_port, dst_port = int(tcp_layer.sport), int(tcp_layer.dport)
+            tcp_flags = _flags_to_str(int(tcp_layer.flags))
+            payload = bytes(tcp_layer.payload)
+            if len(payload) > 5 and payload[0] == 0x16 and payload[1] == 0x03:
+                hello = parse_tls_hello(payload)
+                if hello is not None:
+                    tls_version, tls_cipher = hello.version, hello.cipher
+        elif pkt.haslayer(UDP):
+            protocol = ProtocolType.UDP
+            src_port, dst_port = int(pkt[UDP].sport), int(pkt[UDP].dport)
+        elif pkt.haslayer(ICMP) or getattr(ip_layer, "nh", None) == 58:
+            protocol = ProtocolType.ICMP
+        else:
+            protocol = ProtocolType.OTHER
 
-_DNS_TYPES = {
-    1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 12: "PTR",
-    15: "MX", 16: "TXT", 28: "AAAA", 33: "SRV", 255: "ANY",
-}
+        # DNS metadata: question name/type and, for responses, the rcode.
+        dns_query = dns_record_type = dns_rcode = None
+        if pkt.haslayer(DNS):
+            dns_layer = pkt[DNS]
+            qd = dns_layer.qd
+            question = (qd[0] if qd else None) if isinstance(qd, list) else qd
+            if question is not None:
+                qname = question.qname
+                if isinstance(qname, bytes):
+                    qname = qname.decode("utf-8", errors="replace")
+                dns_query = qname.rstrip(".") or None
+                dns_record_type = _dns_type_str(int(question.qtype))
+            if int(dns_layer.qr) == 1:
+                dns_rcode = _DNS_RCODES.get(int(dns_layer.rcode), f"RCODE{int(dns_layer.rcode)}")
 
-
-def _dns_type_str(qtype: int) -> str:
-    """Convert DNS query type number to string."""
-    return _DNS_TYPES.get(qtype, f"TYPE{qtype}")
-
-
-def _extract_tls_version(pkt) -> str | None:
-    """
-    Attempt to extract TLS version from the record header.
-    This reads ONLY the unencrypted TLS record header — no decryption.
-    Returns None if TLS layer is not present or not parseable.
-    """
-    try:
-        # Check raw payload for TLS record header (type 0x16 = Handshake)
-        raw = bytes(pkt.payload.payload.payload) if hasattr(pkt, 'payload') else b""
-        if len(raw) < 5:
-            return None
-        if raw[0] == 0x16:  # TLS Handshake
-            major, minor = raw[1], raw[2]
-            versions = {
-                (3, 0): "SSLv3",
-                (3, 1): "TLSv1.0",
-                (3, 2): "TLSv1.1",
-                (3, 3): "TLSv1.2",
-                (3, 4): "TLSv1.3",
-            }
-            return versions.get((major, minor))
-    except Exception:
-        pass
-    return None
+        return NormalisedFlow(
+            timestamp=datetime.fromtimestamp(float(pkt.time), tz=timezone.utc),
+            source_ip=ip_layer.src,
+            destination_ip=ip_layer.dst,
+            source_port=src_port,
+            destination_port=dst_port,
+            protocol=protocol,
+            packet_count=1,
+            byte_count=int(getattr(pkt, "wirelen", None) or len(pkt)),
+            duration=0.0,
+            tcp_flags=tcp_flags,
+            direction=FlowDirection.UNKNOWN,
+            dns_query=dns_query,
+            dns_query_length=len(dns_query) if dns_query else None,
+            dns_record_type=dns_record_type,
+            dns_rcode=dns_rcode,
+            tls_version=tls_version,
+            tls_cipher=tls_cipher,
+            source_type=InputSource.PCAP,
+        )

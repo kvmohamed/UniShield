@@ -124,9 +124,27 @@ class ProcessingConfig(BaseModel):
 
 class IngestConfig(BaseModel):
     supported_formats: list[str] = Field(
-        default=["pcap", "pcapng", "zeek_json", "flow_csv", "flow_json"]
+        default=["pcap", "pcapng", "zeek_json", "zeek_tsv", "flow_csv", "flow_json"]
     )
     max_file_size_mb: int = 500
+    # The replay API only opens files inside these directories (relative paths
+    # are resolved against the working directory). paths.data_dir is always allowed.
+    allowed_dirs: list[str] = Field(default_factory=list)
+
+
+class NetworkConfig(BaseModel):
+    """Which addresses belong to the monitored network (used for direction)."""
+    home_networks: list[str] = Field(
+        default=["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"]
+    )
+
+
+class SessionizerConfig(BaseModel):
+    """Packet → bidirectional flow aggregation (PCAP input)."""
+    idle_timeout_sec: float = Field(default=5.0, gt=0)
+    active_timeout_sec: float = Field(default=10.0, gt=0)
+    closing_grace_sec: float = Field(default=1.0, ge=0)
+    max_active_flows: int = Field(default=100_000, gt=0)
 
 
 class ModelsConfig(BaseModel):
@@ -162,6 +180,8 @@ class UnishieldConfig(BaseModel):
     database: DatabaseConfig = DatabaseConfig()
     processing: ProcessingConfig = ProcessingConfig()
     ingest: IngestConfig = IngestConfig()
+    network: NetworkConfig = NetworkConfig()
+    sessionizer: SessionizerConfig = SessionizerConfig()
     models: ModelsConfig = ModelsConfig()
     paths: PathsConfig = PathsConfig()
 
@@ -183,6 +203,7 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_ANONYMIZE_IPS": ("security", "anonymize_ips"),
     "UNISHIELD_IP_HASH_SALT": ("security", "ip_hash_salt"),
     "UNISHIELD_LOGS_DIR": ("paths", "logs_dir"),
+    "UNISHIELD_DATA_DIR": ("paths", "data_dir"),
 }
 
 
