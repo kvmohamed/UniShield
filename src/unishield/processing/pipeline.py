@@ -156,6 +156,43 @@ class PipelineResult:
         return counts
 
 
+DETECTION_MODES = ("rules", "hybrid", "ml")
+
+
+def default_detectors(mode: str = "rules") -> list[BaseDetector]:
+    """
+    Default detector set for a detection mode:
+
+        rules  — rule detectors + statistical (robust z) + Isolation Forest
+        hybrid — ``rules`` + the supervised window model for windows no rule
+                 explained (falls back to ``rules`` when no model is saved)
+        ml     — the supervised window model alone (evaluation/ablation)
+    """
+    if mode not in DETECTION_MODES:
+        raise ValueError(f"Unknown detection mode {mode!r}; choose from {DETECTION_MODES}")
+    rules: list[BaseDetector] = [
+        DDoSDetector(),
+        ScanDetector(),
+        BeaconingDetector(),
+        ExfiltrationDetector(),
+        DNSDetector(),
+        EncryptedSessionDetector(),
+        StatisticalDetector(),
+        AnomalyDetector(),
+    ]
+    if mode == "rules":
+        return rules
+    from unishield.detectors.ml_detector import MLDetector
+
+    ml = MLDetector.from_registry(require_unexplained=(mode == "hybrid"))
+    if ml is None:
+        if mode == "ml":
+            raise RuntimeError("Detection mode 'ml' needs a trained model (scripts/train_models.py)")
+        logger.warning("No trained window model found; hybrid mode falls back to rules")
+        return rules
+    return rules + [ml] if mode == "hybrid" else [ml]
+
+
 class Pipeline:
     """
     Streaming detection pipeline.
@@ -178,12 +215,21 @@ class Pipeline:
         enable_correlation: bool = True,
         normalizer: Normalizer | None = None,
         sessionize: bool | None = None,
+        window_observer: Any | None = None,
+        detection_mode: str | None = None,
     ):
         """
         Args:
             normalizer: Custom normaliser; default is built from config per run.
             sessionize: Force sessionization on/off; default follows the
                 reader's ``packet_level`` attribute (True for PCAP).
+            window_observer: Called after each window as
+                ``observer(window, features, alerts, rule_classes)`` with the
+                alerts before deduplication and the classes the rule stage
+                raised or suppressed (dataset building and evaluation).
+            detection_mode: ``rules``, ``hybrid`` or ``ml`` for the default
+                detector set (see ``default_detectors``); defaults to
+                ``models.detection_mode`` in the config.
         """
         config = get_config()
         self._config = config
@@ -206,17 +252,11 @@ class Pipeline:
         ]
 
         # Detectors: rule detectors first; detectors with runs_after_rules
-        # (statistical, anomaly) then see which classes the rules raised.
-        self.detectors = detectors or [
-            DDoSDetector(),
-            ScanDetector(),
-            BeaconingDetector(),
-            ExfiltrationDetector(),
-            DNSDetector(),
-            EncryptedSessionDetector(),
-            StatisticalDetector(),
-            AnomalyDetector(),
-        ]
+        # (statistical, anomaly, ML) then see which classes the rules raised.
+        self.detection_mode = detection_mode or config.models.detection_mode
+        self.detectors = detectors or default_detectors(self.detection_mode)
+        self._window_observer = window_observer
+        self._last_rule_classes: set[str] = set()
 
         # Alert correlation engine
         self._correlator = AlertCorrelator() if enable_correlation else None
@@ -365,6 +405,11 @@ class Pipeline:
         result.features_history.append(features)
 
         alerts = self._run_detectors(window.records, features, window.start, window.end)
+        if self._window_observer is not None:
+            try:
+                self._window_observer(window, features, list(alerts), set(self._last_rule_classes))
+            except Exception as e:
+                logger.error("Window observer error: %s", e)
         if self._correlator and alerts:
             alerts = self._correlator.deduplicate(alerts)
 
@@ -419,8 +464,9 @@ class Pipeline:
         for detector in first:
             alerts.extend(self._safe_detect(detector, flows, features, window_start, window_end))
             explained |= {c.value for c in getattr(detector, "suppressed_classes", ())}
+        explained |= {a.threat_class.value for a in alerts}
+        self._last_rule_classes = explained
         if after:
-            explained |= {a.threat_class.value for a in alerts}
             staged = dict(features, rule_alert_classes=sorted(explained))
             for detector in after:
                 alerts.extend(self._safe_detect(detector, flows, staged, window_start, window_end))

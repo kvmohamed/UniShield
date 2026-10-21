@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -154,6 +154,10 @@ class ModelsConfig(BaseModel):
     default_version: str = "v1.0.0"
     saved_dir: str = "./models/saved"
     metadata_dir: str = "./models/metadata"
+    # rules | hybrid | ml — see processing.pipeline.default_detectors
+    detection_mode: Literal["rules", "hybrid", "ml"] = "rules"
+    window_model: str = "window_rf"         # registry name used by hybrid / ml modes
+    ml_alert_probability: float = Field(default=0.9, gt=0, le=1)
 
 
 class PathsConfig(BaseModel):
@@ -207,6 +211,7 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_IP_HASH_SALT": ("security", "ip_hash_salt"),
     "UNISHIELD_LOGS_DIR": ("paths", "logs_dir"),
     "UNISHIELD_DATA_DIR": ("paths", "data_dir"),
+    "UNISHIELD_DETECTION_MODE": ("models", "detection_mode"),
 }
 
 

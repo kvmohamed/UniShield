@@ -75,10 +75,16 @@ sessionizer:
   closing_grace_sec: 1              # after FIN/RST, absorb trailing packets for this long
   max_active_flows: 100000          # memory bound; oldest flows are ended early beyond this
 
-models:                             # (planned, Phase 6)
+models:
   default_version: "v1.0.0"
-  saved_dir: "./models/saved"
-  metadata_dir: "./models/metadata"
+  saved_dir: "./models/saved"       # model artifacts (joblib; load only files you trained)
+  metadata_dir: "./models/metadata" # JSON metadata: features, metrics, SHA-256 of the artifact
+  # rules  — rule detectors + robust-z statistics + Isolation Forest (default)
+  # hybrid — rules + supervised window model on windows no rule explained
+  # ml     — supervised window model alone (evaluation)
+  detection_mode: "rules"
+  window_model: "window_rf"
+  ml_alert_probability: 0.9         # calibrated P(attack) needed for an ML alert
 
 paths:
   data_dir: "./data"                # replay API input directory
