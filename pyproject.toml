@@ -60,6 +60,9 @@ unishield = ["dashboard/*.html"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Performance tests take longer and depend on the machine: run them with
+#   pytest -m performance
+addopts = "-m 'not performance'"
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
