@@ -1,15 +1,17 @@
 """
 UniShield — Alert Correlation Engine
 
-Correlates and deduplicates alerts to reduce noise and group
-related detections into coherent incidents.
+Deduplicates alerts and groups related alerts into incidents.
 
 DESIGN:
-    - Temporal deduplication: identical (threat_class, source_ip, detector)
-      alerts within a configurable time window are merged.
-    - Cross-detector correlation: alerts from different detectors about
-      the same source are grouped into incidents.
-    - Severity escalation: correlated alerts may upgrade severity.
+    - Deduplication runs in traffic (event) time: an alert is suppressed when
+      an alert with the same threat class, source, destination and detector
+      ended within ``dedup_window_sec`` before it (window end times). This
+      gives the same result whether traffic is replayed fast or arrives live.
+    - Incidents group alerts by the entity involved — the source, or the
+      destination for alerts without a single source (e.g. a distributed
+      flood) — within ``correlation_window_sec``. Several threat classes for
+      one entity escalate the incident's severity.
 
 SECURITY CONSTRAINTS:
     - Read-only: operates on alert objects only.
@@ -18,157 +20,123 @@ SECURITY CONSTRAINTS:
 
 from __future__ import annotations
 
+import hashlib
 import logging
-import uuid
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from collections import OrderedDict, defaultdict
+from datetime import datetime, timedelta
+from typing import Any, Iterable
 
-from unishield.schemas.alert import Alert, Severity, ThreatClass
+from unishield.correlation import severity as sev
+from unishield.schemas.alert import Alert, Severity
 
 logger = logging.getLogger("unishield.correlation")
 
+_DEDUP_CACHE_LIMIT = 100_000
+
 
 class AlertCorrelator:
-    """
-    Correlate and deduplicate alerts to reduce noise.
-    """
+    """Correlate and deduplicate alerts to reduce noise."""
 
     def __init__(
         self,
         dedup_window_sec: int = 60,
         correlation_window_sec: int = 300,
-        min_alerts_for_incident: int = 3,
+        min_alerts_for_incident: int = 2,
     ):
         self.dedup_window = timedelta(seconds=dedup_window_sec)
         self.correlation_window = timedelta(seconds=correlation_window_sec)
         self.min_alerts_for_incident = min_alerts_for_incident
 
-        # Dedup state: key → last alert timestamp
-        self._dedup_cache: dict[str, datetime] = {}
+        # Dedup state: key → window_end of the last alert kept (bounded LRU)
+        self._dedup_cache: OrderedDict[str, datetime] = OrderedDict()
         self._suppressed_count: int = 0
         self._total_processed: int = 0
 
-    def _dedup_key(self, alert: Alert) -> str:
-        """Generate a deduplication key for an alert."""
-        return f"{alert.threat_class.value}|{alert.source_ip or 'any'}|{alert.detector_name}"
+    @staticmethod
+    def dedup_key(alert: Alert) -> str:
+        return "|".join((
+            alert.threat_class.value,
+            alert.source_ip or "*",
+            alert.destination_ip or "*",
+            alert.detector_name,
+        ))
 
-    def deduplicate(self, alerts: list[Alert]) -> list[Alert]:
-        """
-        Remove duplicate alerts that have the same threat class, source IP,
-        and detector within the dedup window.
-
-        Returns:
-            List of unique alerts after deduplication.
-        """
+    def deduplicate(self, alerts: Iterable[Alert]) -> list[Alert]:
+        """Drop alerts repeating an alert kept within the dedup window (event time)."""
         unique: list[Alert] = []
-
         for alert in alerts:
             self._total_processed += 1
-            key = self._dedup_key(alert)
-            last_seen = self._dedup_cache.get(key)
-
-            if last_seen is not None:
-                time_since = alert.timestamp - last_seen
-                if time_since < self.dedup_window:
-                    self._suppressed_count += 1
-                    continue
-
-            self._dedup_cache[key] = alert.timestamp
+            key = self.dedup_key(alert)
+            last_end = self._dedup_cache.get(key)
+            if last_end is not None and timedelta(0) <= alert.window_end - last_end < self.dedup_window:
+                self._suppressed_count += 1
+                continue
+            self._dedup_cache[key] = alert.window_end
+            self._dedup_cache.move_to_end(key)
+            if len(self._dedup_cache) > _DEDUP_CACHE_LIMIT:
+                self._dedup_cache.popitem(last=False)
             unique.append(alert)
-
         return unique
 
-    def correlate(self, alerts: list[Alert]) -> list[dict[str, Any]]:
+    def correlate(self, alerts: Iterable[Alert]) -> list[dict[str, Any]]:
         """
-        Group related alerts into correlated incidents.
-
-        Groups alerts by source IP within the correlation window.
-        If multiple threat classes appear from the same source,
-        this may indicate a coordinated attack.
-
-        Returns:
-            List of incident dictionaries.
+        Group alerts into incidents per entity, splitting an entity's alerts
+        wherever consecutive alerts are more than ``correlation_window`` apart.
         """
-        if not alerts:
-            return []
-
-        # Group by source IP
-        by_source: dict[str, list[Alert]] = defaultdict(list)
+        by_entity: dict[str, list[Alert]] = defaultdict(list)
         for alert in alerts:
-            key = alert.source_ip or "unknown"
-            by_source[key].append(alert)
+            entity = alert.source_ip or alert.destination_ip or "unknown"
+            by_entity[entity].append(alert)
 
         incidents: list[dict[str, Any]] = []
+        for entity, entity_alerts in by_entity.items():
+            entity_alerts.sort(key=lambda a: a.window_end)
+            group: list[Alert] = []
+            for alert in entity_alerts:
+                if group and alert.window_start - group[-1].window_end > self.correlation_window:
+                    self._emit_incident(entity, group, incidents)
+                    group = []
+                group.append(alert)
+            self._emit_incident(entity, group, incidents)
 
-        for source_ip, source_alerts in by_source.items():
-            if len(source_alerts) < self.min_alerts_for_incident:
-                continue
-
-            # Sort by timestamp
-            source_alerts.sort(key=lambda a: a.timestamp)
-
-            # Check if alerts span multiple threat classes or detectors
-            threat_classes = set(a.threat_class.value for a in source_alerts)
-            detectors = set(a.detector_name for a in source_alerts)
-            severities = [a.severity for a in source_alerts]
-
-            # Determine incident severity (escalate if multi-class)
-            max_severity = max(severities, key=lambda s: _SEVERITY_ORDER.get(s, 0))
-            if len(threat_classes) >= 3:
-                # Multi-vector attack — escalate to CRITICAL
-                incident_severity = Severity.CRITICAL
-            elif len(threat_classes) >= 2:
-                # Multi-stage attack — escalate by one level
-                incident_severity = _escalate_severity(max_severity)
-            else:
-                incident_severity = max_severity
-
-            # Compute time span
-            time_span = (
-                source_alerts[-1].timestamp - source_alerts[0].timestamp
-            ).total_seconds()
-
-            incident = {
-                "incident_id": f"INC-{uuid.uuid4().hex[:8].upper()}",
-                "source_ip": source_ip,
-                "alert_count": len(source_alerts),
-                "alert_ids": [a.alert_id for a in source_alerts],
-                "threat_classes": sorted(threat_classes),
-                "detectors": sorted(detectors),
-                "severity": incident_severity.value,
-                "first_seen": source_alerts[0].timestamp.isoformat(),
-                "last_seen": source_alerts[-1].timestamp.isoformat(),
-                "time_span_sec": round(time_span, 2),
-                "avg_confidence": round(
-                    sum(a.confidence for a in source_alerts) / len(source_alerts), 4
-                ),
-                "is_multi_stage": len(threat_classes) >= 2,
-                "is_multi_vector": len(threat_classes) >= 3,
-                "mitre_techniques": sorted(set(
-                    t for a in source_alerts for t in a.mitre_techniques
-                )),
-            }
-            incidents.append(incident)
-
-        # Sort incidents by severity (most severe first)
-        incidents.sort(
-            key=lambda i: _SEVERITY_ORDER.get(Severity(i["severity"]), 0),
-            reverse=True,
-        )
-
+        incidents.sort(key=lambda i: (sev.RANK[Severity(i["severity"])], i["last_seen"]), reverse=True)
         return incidents
 
-    def process(self, alerts: list[Alert]) -> tuple[list[Alert], list[dict[str, Any]]]:
-        """
-        Full correlation pipeline: deduplicate then correlate.
+    def _emit_incident(self, entity: str, group: list[Alert], out: list[dict[str, Any]]) -> None:
+        if len(group) < self.min_alerts_for_incident:
+            return
+        classes = sorted({a.threat_class.value for a in group})
+        highest = sev.max_severity(a.severity for a in group)
+        if len(classes) >= 3:
+            incident_severity = Severity.CRITICAL          # multi-vector
+        elif len(classes) == 2:
+            incident_severity = sev.escalate(highest)      # multi-stage
+        else:
+            incident_severity = highest
+        first, last = group[0], group[-1]
+        digest = hashlib.sha1(f"{entity}|{first.window_start.isoformat()}".encode()).hexdigest()[:8]
+        out.append({
+            "incident_id": f"INC-{digest.upper()}",
+            "entity": entity,
+            "source_ip": entity if any(a.source_ip == entity for a in group) else None,
+            "alert_count": len(group),
+            "alert_ids": [a.alert_id for a in group],
+            "threat_classes": classes,
+            "detectors": sorted({a.detector_name for a in group}),
+            "severity": incident_severity.value,
+            "first_seen": first.window_start.isoformat(),
+            "last_seen": last.window_end.isoformat(),
+            "time_span_sec": round((last.window_end - first.window_start).total_seconds(), 2),
+            "avg_confidence": round(sum(a.confidence for a in group) / len(group), 4),
+            "is_multi_stage": len(classes) >= 2,
+            "is_multi_vector": len(classes) >= 3,
+            "mitre_techniques": sorted({t for a in group for t in a.mitre_techniques}),
+        })
 
-        Returns:
-            Tuple of (deduplicated_alerts, incidents).
-        """
+    def process(self, alerts: list[Alert]) -> tuple[list[Alert], list[dict[str, Any]]]:
+        """Deduplicate then correlate."""
         deduped = self.deduplicate(alerts)
-        incidents = self.correlate(deduped)
-        return deduped, incidents
+        return deduped, self.correlate(deduped)
 
     @property
     def suppressed_count(self) -> int:
@@ -183,9 +151,7 @@ class AlertCorrelator:
             "total_processed": self._total_processed,
             "suppressed": self._suppressed_count,
             "dedup_cache_size": len(self._dedup_cache),
-            "suppression_rate": round(
-                self._suppressed_count / max(self._total_processed, 1), 4
-            ),
+            "suppression_rate": round(self._suppressed_count / max(self._total_processed, 1), 4),
         }
 
     def clear(self) -> None:
@@ -193,23 +159,3 @@ class AlertCorrelator:
         self._dedup_cache.clear()
         self._suppressed_count = 0
         self._total_processed = 0
-
-
-# ---------------------------------------------------------------------------
-# Severity helpers
-# ---------------------------------------------------------------------------
-
-_SEVERITY_ORDER = {
-    Severity.INFO: 0,
-    Severity.LOW: 1,
-    Severity.MEDIUM: 2,
-    Severity.HIGH: 3,
-    Severity.CRITICAL: 4,
-}
-
-
-def _escalate_severity(severity: Severity) -> Severity:
-    """Escalate severity by one level."""
-    order = [Severity.INFO, Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
-    idx = order.index(severity) if severity in order else 0
-    return order[min(idx + 1, len(order) - 1)]

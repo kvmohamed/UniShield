@@ -17,6 +17,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
+from unishield.correlation.severity import from_levels as severity_from_levels
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
 
@@ -89,12 +90,7 @@ class BaseDetector(ABC):
 
         Checks critical → high → medium → low in order.
         """
-        for level_name in ["critical", "high", "medium"]:
-            level = severity_levels.get(level_name, {})
-            threshold = level.get(metric_key)
-            if threshold is not None and metric_value >= threshold:
-                return Severity(level_name.upper())
-        return Severity.LOW
+        return severity_from_levels(metric_value, severity_levels, metric_key)
 
     def _measure_latency(self, start_time: float) -> float:
         """Compute detection latency in milliseconds."""

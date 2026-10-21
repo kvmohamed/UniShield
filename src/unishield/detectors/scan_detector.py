@@ -19,8 +19,7 @@ port 443 — from being reported.
 Confidence is a rule score (0.5 at the threshold, 1.0 at twice it, +0.2 for
 a high failure ratio), not a calibrated probability.
 
-MITRE ATT&CK:
-    - T1046: Network Service Discovery
+MITRE ATT&CK: see correlation/mitre_mapping.py (T1046, T1595.001).
 """
 
 from __future__ import annotations
@@ -29,11 +28,11 @@ import time
 from typing import Any
 
 from unishield.config import get_thresholds
+from unishield.correlation.mitre_mapping import techniques_for
 from unishield.detectors.base import BaseDetector
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
 
-_MITRE = ["T1046"]
 
 
 class ScanDetector(BaseDetector):
@@ -54,7 +53,7 @@ class ScanDetector(BaseDetector):
 
     @property
     def mitre_techniques(self) -> list[str]:
-        return _MITRE
+        return sorted({t for c in self.threat_classes for t in techniques_for(c)})
 
     def detect(
         self,
@@ -97,7 +96,7 @@ class ScanDetector(BaseDetector):
                     "attempts_per_second": c["attempts_per_second"],
                     **evidence,
                 },
-                mitre_techniques=_MITRE,
+                mitre_techniques=techniques_for(threat),
                 detection_latency_ms=self._measure_latency(start_time),
             )
 

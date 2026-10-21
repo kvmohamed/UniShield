@@ -17,9 +17,7 @@ distinct sources is reported as evidence ("distributed" when it reaches
 Confidence is a rule score (0.5 at the threshold, 1.0 at twice it), not a
 calibrated probability.
 
-MITRE ATT&CK:
-    - T1498: Network Denial of Service
-    - T1498.001: Direct Network Flood
+MITRE ATT&CK: see correlation/mitre_mapping.py (T1498, T1498.001, T1499.001).
 """
 
 from __future__ import annotations
@@ -28,16 +26,11 @@ import time
 from typing import Any
 
 from unishield.config import get_thresholds
+from unishield.correlation.mitre_mapping import techniques_for
+from unishield.correlation.severity import at_least as _at_least
 from unishield.detectors.base import BaseDetector
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
-
-_SEVERITY_RANK = {Severity.INFO: 0, Severity.LOW: 1, Severity.MEDIUM: 2, Severity.HIGH: 3, Severity.CRITICAL: 4}
-_MITRE = ["T1498", "T1498.001"]
-
-
-def _at_least(severity: Severity, floor: Severity) -> Severity:
-    return severity if _SEVERITY_RANK[severity] >= _SEVERITY_RANK[floor] else floor
 
 
 class DDoSDetector(BaseDetector):
@@ -58,7 +51,7 @@ class DDoSDetector(BaseDetector):
 
     @property
     def mitre_techniques(self) -> list[str]:
-        return _MITRE
+        return sorted({t for c in self.threat_classes for t in techniques_for(c)})
 
     def detect(
         self,
@@ -96,7 +89,7 @@ class DDoSDetector(BaseDetector):
                     "window_observed_sec": window_sec,
                     **evidence,
                 },
-                mitre_techniques=_MITRE,
+                mitre_techniques=techniques_for(threat),
                 detection_latency_ms=self._measure_latency(start_time),
             )
 
