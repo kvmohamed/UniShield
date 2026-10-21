@@ -2,7 +2,7 @@
 # UniShield — Makefile (POSIX shells; Windows commands are in README.md)
 # ============================================================
 
-.PHONY: help install dev test test-unit test-integration test-performance test-cov lint format run docker-build docker-up docker-down docker-logs clean
+.PHONY: help install dev test test-unit test-integration test-performance test-security test-cov lint format run demo demo-quick benchmark verify-passive models docker-build docker-up docker-down docker-logs clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -25,8 +25,28 @@ test-unit: ## Run unit tests only
 test-integration: ## Run integration tests
 	pytest tests/integration/ -v --tb=short
 
-test-performance: ## Run performance tests
+test-performance: ## Run performance tests (excluded from the default run)
 	pytest tests/performance/ -v --tb=short -m performance
+
+test-security: ## Run security tests
+	pytest tests/security/ -v --tb=short
+
+demo: ## One-command offline demo (writes reports/)
+	python scripts/run_demo.py
+
+demo-quick: ## Shorter offline demo
+	python scripts/run_demo.py --quick
+
+benchmark: ## Throughput / latency benchmark (reports/benchmark.md)
+	python scripts/benchmark_pipeline.py
+
+verify-passive: ## Static + runtime passive-mode verification
+	python scripts/verify_passive_mode.py
+
+models: ## Build dataset, train and evaluate models
+	python scripts/prepare_dataset.py --synthetic --seeds 1-20
+	python scripts/train_models.py
+	python scripts/evaluate_models.py
 
 test-cov: ## Run tests with coverage
 	pytest tests/ -v --cov=unishield --cov-report=html --cov-report=term-missing

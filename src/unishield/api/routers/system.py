@@ -150,9 +150,9 @@ def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     }
 
 
-@router.get("/benchmark/latest", summary="Latest measured benchmark (reports/benchmark_results/latest.json)")
+@router.get("/benchmark/latest", summary="Latest measured benchmark (reports/benchmark.json)")
 def benchmark_latest() -> dict[str, Any]:
-    data = _read_json(_reports_dir() / "benchmark_results" / "latest.json")
+    data = _read_json(_reports_dir() / "benchmark.json")
     if data is None:
         return {"status": "no_benchmark_available",
                 "message": "Run python scripts/benchmark_pipeline.py to produce one"}

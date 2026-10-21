@@ -1,1 +1,0 @@
-"""UniShield scripts package."""

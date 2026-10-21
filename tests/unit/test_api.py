@@ -203,8 +203,7 @@ def test_reports_endpoints(api_client, monkeypatch, tmp_path):
     monkeypatch.setattr(get_config().paths, "reports_dir", str(tmp_path))
     assert client.get("/benchmark/latest").json()["status"] == "no_benchmark_available"
     assert client.get("/evaluation/latest").json()["status"] == "no_evaluation_available"
-    (tmp_path / "benchmark_results").mkdir()
-    (tmp_path / "benchmark_results" / "latest.json").write_text(json.dumps({"records_per_second": 1234.5}))
+    (tmp_path / "benchmark.json").write_text(json.dumps({"records_per_second": 1234.5}))
     (tmp_path / "model_evaluation.json").write_text(json.dumps(
         {"context": {"dataset": "x"}, "results": {"windows": {"test": 3}, "threshold": 0.9,
                                                   "approaches": {"rules": {"f1": 0.5, "extra": 1}}}}))

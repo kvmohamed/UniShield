@@ -1,61 +1,19 @@
 @echo off
 :: ================================================================
-:: UniShield — One-Command Demo Launcher (Windows)
+:: UniShield - one-command offline demo (Windows)
 ::
-:: Usage:
-::   scripts\run_demo.bat              Full verification (5 runs each)
-::   scripts\run_demo.bat --quick      Quick verification (1 run each)
-::   scripts\run_demo.bat --scenario beacon   Single scenario demo
+::   scripts\run_demo.bat            full demo (several minutes)
+::   scripts\run_demo.bat --quick    shorter demo (about a minute)
+::   scripts\run_demo.bat --serve    then start the dashboard
 ::
-:: SAFETY: All traffic is synthetic. No external systems contacted.
+:: All data is synthetic or written locally. Nothing is sent on any network.
 :: ================================================================
-
-echo.
-echo  ============================================================
-echo   UniShield — AI Security for One-Way Networks
-echo   Automated Real-Time Verification Suite
-echo  ============================================================
-echo.
-
-:: Activate virtual environment if it exists
-if exist "%~dp0..\\.venv\\Scripts\\activate.bat" (
-    call "%~dp0..\\.venv\\Scripts\\activate.bat"
-    echo  [OK] Virtual environment activated
-) else (
-    echo  [WARN] No virtual environment found. Using system Python.
-)
-
-:: Navigate to project root
+setlocal
 cd /d "%~dp0.."
-echo  [OK] Working directory: %CD%
-echo.
 
-:: Run the full verification
-echo  Starting verification...
-echo  ──────────────────────────────────────────────────────────
-echo.
+set "PY=python"
+if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
 
-python scripts/run_demo.py %*
-
-echo.
-echo  ──────────────────────────────────────────────────────────
-
-:: Generate charts if matplotlib is available
-echo.
-echo  Generating visual evidence charts...
-python scripts/generate_charts.py --auto 2>nul
-if errorlevel 1 (
-    echo  [WARN] Charts skipped (install matplotlib for visual evidence)
-) else (
-    echo  [OK] Charts generated in reports/figures/
-)
-
-echo.
-echo  ============================================================
-echo   Verification complete!
-echo   Reports: reports/
-echo   Charts:  reports/figures/
-echo  ============================================================
-echo.
-
-pause
+"%PY%" scripts\run_demo.py %*
+set "RC=%ERRORLEVEL%"
+endlocal & exit /b %RC%
