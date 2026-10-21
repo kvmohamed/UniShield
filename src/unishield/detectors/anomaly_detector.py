@@ -1,97 +1,103 @@
 """
 UniShield — Isolation Forest Anomaly Detector
 
-Uses scikit-learn's Isolation Forest to detect statistical anomalies
-in network traffic that don't match known rule-based patterns.
+Flags windows whose overall traffic profile is unlike the windows the model
+was trained on, to catch activity no rule describes.
 
 DESIGN:
-    - Online learning: the model is fit on an initial baseline of
-      normal-looking windows, then used to score new windows.
-    - Feature vector is constructed from volume, scan, and statistical
-      feature extractors.
-    - Anomaly scores are mapped to confidence values in [0, 1].
+    - Runs after the rule detectors and reports only windows no rule alert
+      explained; explained windows are also never used for training.
+      Windows with fewer than ``min_window_flows`` flows are skipped.
+    - Model source: a saved model (``load_model`` / ``models/saved``), or —
+      if none is loaded — online warm-up on the first
+      ``min_training_windows`` unexplained windows of the run.
+    - Features: ~25 window-level counts and rates, log-scaled (log1p) so
+      that a few huge values do not dominate.
+    - One ``score_samples`` call per window. The anomaly score is
+      ``-score_samples`` (≈0.5 typical, → 1 isolated). An alert needs the
+      score to be at least ``min_score`` and above the ``quantile`` of the
+      training scores.
+    - Confidence is the window's percentile among the training scores — how
+      unusual it is relative to the baseline — not a probability of attack.
+    - Evidence lists the features furthest from their training medians.
 
 SECURITY CONSTRAINTS:
     - Read-only: no packets sent, no decryption.
-    - Model operates only on extracted feature vectors.
-
-MITRE ATT&CK:
-    - T1071: Application Layer Protocol (generic anomaly)
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import time
-import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 
 from unishield.config import get_thresholds
+from unishield.correlation.mitre_mapping import techniques_for
 from unishield.detectors.base import BaseDetector
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
 
 logger = logging.getLogger("unishield.detectors.anomaly")
 
-# Feature keys used to build the feature vector for the model
-_FEATURE_KEYS = [
-    "total_packets",
-    "total_bytes",
-    "total_flows",
-    "packets_per_second",
-    "bytes_per_second",
-    "flows_per_second",
-    "unique_source_ips",
-    "unique_dest_ips",
-    "unique_dest_ports",
-    "source_ip_entropy",
-    "dest_ip_entropy",
-    "tcp_ratio",
-    "udp_ratio",
-    "syn_count",
-    "syn_ack_ratio",
-    "dest_concentration",
-    "connection_rate",
-    "failed_connection_ratio",
-    "fanout_score",
-    "max_vertical_ports",
-    "max_horizontal_hosts",
-    "burst_connections",
+ANOMALY_FEATURE_KEYS = [
+    "total_packets", "total_bytes", "total_flows",
+    "packets_per_second", "bytes_per_second", "flows_per_second",
+    "unique_source_ips", "unique_dest_ips", "unique_dest_ports",
+    "source_ip_entropy", "dest_ip_entropy", "dest_port_entropy",
+    "tcp_ratio", "udp_ratio", "icmp_ratio",
+    "syn_count", "syn_ack_ratio", "dest_concentration", "peak_flows_per_second",
+    "connection_rate", "failed_connection_ratio", "max_vertical_ports", "max_horizontal_hosts",
+    "burst_connections", "total_outbound_bytes", "dns_query_count",
 ]
 
 
-class AnomalyDetector(BaseDetector):
-    """
-    Isolation-Forest-based anomaly detector.
+def anomaly_vector(features: dict[str, Any], keys: list[str] = ANOMALY_FEATURE_KEYS) -> list[float]:
+    """Log-scaled numeric feature vector for the model."""
+    values = []
+    for key in keys:
+        try:
+            v = float(features.get(key) or 0.0)
+        except (TypeError, ValueError):
+            v = 0.0
+        values.append(math.log1p(max(v, 0.0)))
+    return values
 
-    The model learns "normal" traffic patterns from an initial set
-    of windows and then flags windows whose feature vector is
-    anomalous. This catches novel attacks not covered by rule-based
-    detectors.
-    """
+
+class AnomalyDetector(BaseDetector):
+    """Isolation-Forest detector for windows no rule explains."""
+
+    runs_after_rules = True
 
     def __init__(
         self,
         thresholds: dict[str, Any] | None = None,
-        contamination: float = 0.05,
         n_estimators: int = 100,
-        min_training_windows: int = 10,
+        min_training_windows: int | None = None,
+        model_path: Path | str | None = None,
+        random_state: int = 42,
+        contamination: Any = None,          # accepted for backward compatibility; unused
     ):
         if thresholds is None:
-            all_thresholds = get_thresholds()
-            thresholds = all_thresholds.get("statistical", {})
+            thresholds = get_thresholds().get("anomaly", {})
         super().__init__(thresholds)
-
-        self._contamination = contamination
         self._n_estimators = n_estimators
-        self._min_training_windows = min_training_windows
-        self._model = None  # Lazy import to avoid slow startup
+        self._min_training_windows = min_training_windows or thresholds.get("min_training_windows", 30)
+        self._random_state = random_state
+        self._feature_keys = list(ANOMALY_FEATURE_KEYS)
+        self._model = None
+        self._train_scores: Optional[np.ndarray] = None
+        self._medians: Optional[np.ndarray] = None
+        self._scales: Optional[np.ndarray] = None
+        self._training: list[list[float]] = []
         self._is_fitted = False
-        self._training_data: list[list[float]] = []
-        self._feature_keys = _FEATURE_KEYS
+        self.model_info: dict[str, Any] = {"source": "online warm-up"}
+        if model_path is not None:
+            self.load_model(model_path)
 
     @property
     def name(self) -> str:
@@ -103,39 +109,75 @@ class AnomalyDetector(BaseDetector):
 
     @property
     def mitre_techniques(self) -> list[str]:
-        return ["T1071"]
+        return techniques_for(ThreatClass.STATISTICAL_ANOMALY)
 
     @property
     def is_fitted(self) -> bool:
         return self._is_fitted
 
-    def _build_feature_vector(self, features: dict[str, Any]) -> list[float]:
-        """Extract numeric values in a fixed order for the model."""
-        return [float(features.get(k, 0)) for k in self._feature_keys]
+    @property
+    def version(self) -> str:
+        return self.model_info.get("version", f"v1.1.0-IF{self._n_estimators}-online")
 
-    def _ensure_model(self) -> None:
-        """Lazy-init the Isolation Forest model."""
-        if self._model is None:
-            from sklearn.ensemble import IsolationForest
-            self._model = IsolationForest(
-                n_estimators=self._n_estimators,
-                contamination=self._contamination,
-                random_state=42,
-                n_jobs=1,
-            )
+    # ------------------------------------------------------------- training
 
     def fit(self, feature_matrix: list[list[float]]) -> None:
-        """
-        Fit the model on a baseline of feature vectors.
+        """Fit on log-scaled feature vectors (one per window)."""
+        from sklearn.ensemble import IsolationForest
 
-        Args:
-            feature_matrix: List of feature vectors (one per window).
-        """
-        self._ensure_model()
-        X = np.array(feature_matrix)
+        X = np.asarray(feature_matrix, dtype=float)
+        self._model = IsolationForest(n_estimators=self._n_estimators, contamination="auto",
+                                      random_state=self._random_state, n_jobs=1)
         self._model.fit(X)
+        self._train_scores = np.sort(-self._model.score_samples(X))
+        self._medians = np.median(X, axis=0)
+        mad = np.median(np.abs(X - self._medians), axis=0)
+        self._scales = np.maximum(1.4826 * mad, 0.1)
         self._is_fitted = True
-        logger.info("Anomaly detector fitted on %d windows", len(feature_matrix))
+        logger.info("Anomaly detector fitted on %d windows", len(X))
+
+    def save_model(self, path: Path | str, extra: dict[str, Any] | None = None) -> None:
+        """Save the fitted model with its score distribution and feature statistics."""
+        import joblib
+
+        if not self._is_fitted:
+            raise RuntimeError("model is not fitted")
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump({
+            "model": self._model,
+            "train_scores": self._train_scores,
+            "medians": self._medians,
+            "scales": self._scales,
+            "feature_keys": self._feature_keys,
+            "info": {"trained_at": datetime.now(timezone.utc).isoformat(),
+                     "n_training": int(len(self._train_scores)), **(extra or {})},
+        }, str(path))
+        logger.info("Anomaly model saved to %s", path)
+
+    def load_model(self, path: Path | str) -> None:
+        import joblib
+
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Model file not found: {path}")
+        bundle = joblib.load(str(path))
+        if bundle.get("feature_keys") != self._feature_keys:
+            raise ValueError(f"Model {path} was trained on different features")
+        self._model = bundle["model"]
+        self._train_scores = bundle["train_scores"]
+        self._medians, self._scales = bundle["medians"], bundle["scales"]
+        self._is_fitted = True
+        self.model_info = {"source": str(path), **bundle.get("info", {})}
+        logger.info("Anomaly model loaded from %s", path)
+
+    # ------------------------------------------------------------ detection
+
+    def score(self, vector: list[float]) -> tuple[float, float]:
+        """(anomaly score, percentile among training scores) for one window."""
+        s = float(-self._model.score_samples(np.asarray([vector], dtype=float))[0])
+        percentile = float(np.searchsorted(self._train_scores, s, side="right") / len(self._train_scores))
+        return s, percentile
 
     def detect(
         self,
@@ -146,88 +188,50 @@ class AnomalyDetector(BaseDetector):
     ) -> list[Alert]:
         start_time = time.time()
         self._windows_analysed += 1
-        alerts: list[Alert] = []
+        if not flows or not features or features.get("rule_alert_classes"):
+            return []
+        if len(flows) < self._thresholds.get("min_window_flows", 10):
+            return []          # too few flows for a meaningful traffic profile
 
-        if not flows or not features:
-            return alerts
-
-        vec = self._build_feature_vector(features)
-
-        # Phase 1: Collect training data
+        vec = anomaly_vector(features, self._feature_keys)
         if not self._is_fitted:
-            self._training_data.append(vec)
-            if len(self._training_data) >= self._min_training_windows:
-                self.fit(self._training_data)
-                self._training_data.clear()
-            return alerts
+            self._training.append(vec)
+            if len(self._training) >= self._min_training_windows:
+                self.fit(self._training)
+                self._training = []
+            return []
 
-        # Phase 2: Score the window
-        self._ensure_model()
-        X = np.array([vec])
-        prediction = self._model.predict(X)[0]        # -1 = anomaly, 1 = normal
-        raw_score = self._model.decision_function(X)[0]  # More negative = more anomalous
+        quantile = self._thresholds.get("quantile", 0.995)
+        min_score = self._thresholds.get("min_score", 0.6)
+        s, percentile = self.score(vec)
+        if percentile < quantile or s < min_score:
+            return []
 
-        if prediction == -1:
-            # Convert raw score to confidence in [0, 1]
-            # decision_function returns negative for anomalies; more negative = stronger
-            z_threshold = self._thresholds.get("z_score_threshold", 3.0)
-            confidence = min(1.0, max(0.0, -raw_score / z_threshold))
-
-            # Determine severity
-            if confidence >= 0.8:
-                severity = Severity.HIGH
-            elif confidence >= 0.5:
-                severity = Severity.MEDIUM
-            else:
-                severity = Severity.LOW
-
-            # Build evidence with top anomalous features
-            evidence = {
-                "anomaly_score": round(float(raw_score), 4),
-                "confidence": round(confidence, 4),
-                "prediction": int(prediction),
-                "model_type": "IsolationForest",
-                "n_estimators": self._n_estimators,
-                "contamination": self._contamination,
-            }
-
-            # Add the most extreme feature values
-            for key in self._feature_keys[:8]:
-                evidence[f"feat_{key}"] = features.get(key, 0)
-
-            alert = Alert(
-                window_start=window_start,
-                window_end=window_end,
-                threat_class=ThreatClass.STATISTICAL_ANOMALY,
-                severity=severity,
-                confidence=round(confidence, 4),
-                detector_name=self.name,
-                model_version=f"v1.0.0-IF{self._n_estimators}",
-                evidence=evidence,
-                mitre_techniques=["T1071"],
-                detection_latency_ms=self._measure_latency(start_time),
-            )
-            alerts.append(alert)
-            self._alerts_generated += 1
-
-        return alerts
-
-    def save_model(self, path: Path | str) -> None:
-        """Save the fitted model to disk."""
-        import joblib
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if self._is_fitted and self._model is not None:
-            joblib.dump(self._model, str(path))
-            logger.info("Model saved to %s", path)
-
-    def load_model(self, path: Path | str) -> None:
-        """Load a previously fitted model from disk."""
-        import joblib
-        path = Path(path)
-        if path.exists():
-            self._model = joblib.load(str(path))
-            self._is_fitted = True
-            logger.info("Model loaded from %s", path)
-        else:
-            raise FileNotFoundError(f"Model file not found: {path}")
+        deviation = (np.asarray(vec) - self._medians) / self._scales
+        top = np.argsort(-np.abs(deviation))[:3]
+        alert = Alert(
+            window_start=window_start,
+            window_end=window_end,
+            threat_class=ThreatClass.STATISTICAL_ANOMALY,
+            severity=Severity.MEDIUM if s >= self._thresholds.get("medium_score", 0.7) else Severity.LOW,
+            confidence=round(percentile, 4),
+            detector_name=self.name,
+            model_version=self.version,
+            evidence={
+                "anomaly_score": round(s, 4),
+                "training_percentile": round(percentile, 4),
+                "min_score": min_score,
+                "quantile": quantile,
+                "training_windows": int(len(self._train_scores)),
+                "model_source": self.model_info.get("source"),
+                "most_unusual_features": {
+                    self._feature_keys[i]: {"value": features.get(self._feature_keys[i]),
+                                            "deviation": round(float(deviation[i]), 2)}
+                    for i in top
+                },
+            },
+            mitre_techniques=techniques_for(ThreatClass.STATISTICAL_ANOMALY),
+            detection_latency_ms=self._measure_latency(start_time),
+        )
+        self._alerts_generated += 1
+        return [alert]

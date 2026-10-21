@@ -100,8 +100,18 @@ encrypted:
   burst_pattern_score: 0.7
 
 statistical:
-  # General statistical anomaly thresholds
-  z_score_threshold: 3.0
-  mad_threshold: 3.5
-  baseline_window_records: 1000
-  min_samples_for_baseline: 50
+  # Robust z-score detector: window metrics vs a rolling baseline of windows
+  # that no rule explained (median / MAD).
+  mad_threshold: 3.5                 # robust z needed per metric
+  min_deviating_metrics: 2           # metrics that must deviate together
+  min_samples_for_baseline: 30       # baseline windows before alerting
+  baseline_windows: 120              # rolling baseline length
+
+anomaly:
+  # Isolation Forest over log-scaled window features; reports only windows
+  # no rule explained, and trains only on such windows.
+  min_training_windows: 100          # online warm-up when no saved model is loaded
+  min_window_flows: 10               # skip windows too small for a meaningful profile
+  quantile: 0.995                    # score must exceed this share of training windows...
+  min_score: 0.6                     # ...and this absolute anomaly score (0.5 typical, 1 isolated)
+  medium_score: 0.7                  # MEDIUM severity from this score

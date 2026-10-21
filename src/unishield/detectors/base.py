@@ -32,8 +32,16 @@ class BaseDetector(ABC):
     3. Returns a list of Alert objects (empty if no threats detected).
     """
 
+    #: When True the pipeline runs this detector after the rule detectors and
+    #: passes the classes they raised in ``features["rule_alert_classes"]``.
+    runs_after_rules: bool = False
+
     def __init__(self, thresholds: dict[str, Any] | None = None):
         self._thresholds = thresholds or {}
+        #: Classes this detector matched in its last call but did not report
+        #: because the same finding was reported recently (re-alert suppression).
+        #: The pipeline treats such windows as explained.
+        self.suppressed_classes: set[ThreatClass] = set()
         self._alerts_generated: int = 0
         self._windows_analysed: int = 0
 

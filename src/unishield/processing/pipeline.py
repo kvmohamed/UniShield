@@ -35,12 +35,12 @@ from unishield.detectors.ddos_detector import DDoSDetector
 from unishield.detectors.dns_detector import DNSDetector
 from unishield.detectors.exfiltration_detector import ExfiltrationDetector
 from unishield.detectors.scan_detector import ScanDetector
+from unishield.detectors.statistical_detector import StatisticalDetector
 from unishield.features.base import BaseFeatureExtractor, WindowContext
 from unishield.features.beaconing import BeaconingFeatureExtractor
 from unishield.features.dns import DNSFeatureExtractor
 from unishield.features.exfiltration import ExfiltrationFeatureExtractor
 from unishield.features.scan import ScanFeatureExtractor
-from unishield.features.statistical import StatisticalFeatureExtractor
 from unishield.features.volume import VolumeFeatureExtractor
 from unishield.ingest.base import BaseReader
 from unishield.processing.normalization import Normalizer
@@ -193,23 +193,24 @@ class Pipeline:
         self.slide_interval_sec = slide_interval_sec or config.processing.slide_interval_sec
         self.window = self._new_window()
 
-        # Feature extractors (default: all built-in including DNS & Statistical)
+        # Feature extractors
         self.extractors = extractors or [
             VolumeFeatureExtractor(),
             ScanFeatureExtractor(),
             BeaconingFeatureExtractor(),
             ExfiltrationFeatureExtractor(),
             DNSFeatureExtractor(),
-            StatisticalFeatureExtractor(),
         ]
 
-        # Detectors (default: all built-in including DNS & Anomaly)
+        # Detectors: rule detectors first; detectors with runs_after_rules
+        # (statistical, anomaly) then see which classes the rules raised.
         self.detectors = detectors or [
             DDoSDetector(),
             ScanDetector(),
             BeaconingDetector(),
             ExfiltrationDetector(),
             DNSDetector(),
+            StatisticalDetector(),
             AnomalyDetector(),
         ]
 
@@ -402,19 +403,32 @@ class Pipeline:
         window_start: Any,
         window_end: Any,
     ) -> list[Alert]:
-        """Run all detectors on extracted features."""
+        """
+        Run rule detectors, then detectors marked ``runs_after_rules`` with
+        ``features["rule_alert_classes"]`` set to the classes the rules raised.
+        """
         alerts: list[Alert] = []
+        first = [d for d in self.detectors if not getattr(d, "runs_after_rules", False)]
+        after = [d for d in self.detectors if getattr(d, "runs_after_rules", False)]
 
-        for detector in self.detectors:
-            try:
-                alerts.extend(detector.detect(flows, features, window_start, window_end))
-            except Exception as e:
-                logger.error(
-                    "Detector error (%s): %s",
-                    detector.name, e, exc_info=True,
-                )
-
+        explained: set[str] = set()
+        for detector in first:
+            alerts.extend(self._safe_detect(detector, flows, features, window_start, window_end))
+            explained |= {c.value for c in getattr(detector, "suppressed_classes", ())}
+        if after:
+            explained |= {a.threat_class.value for a in alerts}
+            staged = dict(features, rule_alert_classes=sorted(explained))
+            for detector in after:
+                alerts.extend(self._safe_detect(detector, flows, staged, window_start, window_end))
         return alerts
+
+    @staticmethod
+    def _safe_detect(detector, flows, features, window_start, window_end) -> list[Alert]:
+        try:
+            return detector.detect(flows, features, window_start, window_end)
+        except Exception as e:
+            logger.error("Detector error (%s): %s", detector.name, e, exc_info=True)
+            return []
 
     def get_metrics(self) -> PipelineMetrics:
         """Return current pipeline metrics."""

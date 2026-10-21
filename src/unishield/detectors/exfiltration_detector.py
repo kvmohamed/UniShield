@@ -70,6 +70,7 @@ class ExfiltrationDetector(BaseDetector):
     ) -> list[Alert]:
         start_time = time.time()
         self._windows_analysed += 1
+        self.suppressed_classes = set()
         if not flows or not features:
             return []
 
@@ -116,6 +117,7 @@ class ExfiltrationDetector(BaseDetector):
             previous = self._last_reported.get(key)
             if previous is not None and window_end - previous[0] < realert \
                     and sev.RANK[severity] <= sev.RANK[previous[1]]:
+                self.suppressed_classes.add(ThreatClass.DATA_EXFILTRATION)
                 continue
             self._last_reported[key] = (window_end, severity)
 

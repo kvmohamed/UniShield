@@ -384,6 +384,7 @@ class TestPipeline:
             "beaconing_detector",
             "exfiltration_detector",
             "dns_detector",
+            "statistical_detector",
             "anomaly_detector",
         }
         assert metrics.detectors_loaded == len(pipeline.detectors)
