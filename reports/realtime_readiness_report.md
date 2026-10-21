@@ -499,3 +499,28 @@ Remaining issues observed (not Phase 4 scope):
 - DGA false positives on many unique benign subdomains (optional DNS module, Phase E).
 - Isolation Forest: 4–14 anomaly alerts per benign scenario and still the throughput bottleneck (D5, D6 — Phase 6); throughput remains just under the 1,000 records/s target.
 - Deduplication still uses wall-clock time (D3, Phase 5), so repeated alerts for one attack collapse during fast replay.
+
+### Phases 5–10 and optional modules E/F (2026-10-21/22) — completed in one run
+
+Branch `complete-phases-5-10` (on top of `main`). Detailed results live in the generated reports; this log records what changed and where the evidence is.
+
+| Phase | Change | Evidence |
+|---|---|---|
+| 5 — Beaconing, exfiltration, correlation (D3, D4) | Deduplication in traffic time keyed on class/source/destination/detector; one module for severities and one for MITRE mappings. Beaconing keeps a bounded rolling inter-arrival history per (src, dst, port) across windows (≥ 10 connections, 5 s–1 h mean, CV ≤ 0.3, destination fan-in ≤ 3, re-alert after 900 s). Exfiltration uses per-source upload baselines (robust z), upload/download ratio, long upload sessions and destination rarity. | `test_beaconing.py`, `test_exfiltration.py`, `test_correlation.py`, `test_phase5_scenarios.py`; beacons at 30/60 s detected for every seed, three exfiltration episodes → three alerts, no beacon/exfiltration false positives |
+| 5/6 — Anomaly (D5, D6) | Isolation Forest runs after the rules, trains and reports only on unexplained windows with ≥ 10 flows, one `score_samples` call per window, percentile confidence; new robust-z statistical detector over a vetted baseline (≥ 5 flows per reported window). | `test_anomaly.py`; throughput 937 → ~25,800 records/s |
+| E — DNS | DGA per client (generated-looking registrable domains + NXDOMAIN), tunnelling per base domain (unique long/high-entropy subdomains, TXT share). | `test_dns.py`; `benign_hard` DGA false positives gone |
+| F — Encrypted sessions | JA3 from ClientHello carried through the sessionizer; ENCRYPTED_SESSION_ANOMALY for outdated TLS, operator JA3 blocklist and long low-rate sessions on unusual ports; cautious wording. | `test_encrypted.py`, `test_tls.py` |
+| 6 — Datasets and models | Window dataset built by the real pipeline (labels + what each stage concluded), run-level splits, random forest / XGBoost / benign-only Isolation Forest, isotonic calibration, SHA-256-checked registry. A label leak (only attack flows carried TLS metadata) was found by ablation and fixed in the generator. | `test_models.py`, `test_model_workflow.py`; `reports/model_evaluation.md` |
+| 7 — Hybrid and evaluation | `rules` / `hybrid` / `ml` detection modes; ML detector alerts only on unexplained windows at calibrated P ≥ 0.9; comparison of all approaches with episode recall, detection delay, calibration, feature-group ablation and leave-one-attack-out. | `reports/model_evaluation.md` (window F1: rules 0.594, rules+stats 0.662, RF 0.813, XGBoost 0.859, hybrid 0.821; 48/48 episodes except IF) |
+| 8 — Persistence and API (D16) | SQLAlchemy storage (SQLite default, PostgreSQL by URL), alert stage timestamps and related flow id, split routers, admin key / loopback-only admin endpoints, non-blocking demo, pagination with `X-Total-Count`, process metrics, traffic analytics, incidents, architecture and report endpoints, hardening headers. | `test_api.py`, `tests/security/test_api_security.py` |
+| 9 — Dashboard (D17) | Rewritten offline page with overview, alerts + timeline + details, traffic, benchmark/evaluation and architecture tabs and the required notice; all data inserted with `textContent`; CSP. | `tests/security/test_dashboard.py`; live check: hostile alert fields rendered as text, no script executed |
+| 10 — Verification and docs | `evaluation/benchmark.py`, `realtime.py` (paced replay, window end → API), `passive.py` (AST scan + runtime tripwire); scripts `benchmark_pipeline.py`, `replay_stream.py`, `verify_passive_mode.py`, `run_demo.py` (+ `.sh`/`.bat`), `generate_charts.py`; performance tests (`pytest -m performance`); Docker hardening and state volume; documentation rewritten. Stale reports from the pre-audit scripts removed. | `reports/benchmark.md`, `reports/realtime_verdict.md`, `reports/passive_mode_verification.md`, `reports/demo_detection.json` |
+
+Exit results on the development machine (Windows 10, 12 logical CPUs, Python 3.12.10):
+
+- `pytest` → **525 passed** (6 performance tests deselected); `pytest -m performance` → 6 passed.
+- `python scripts/run_demo.py` → scenarios 11/11, models ok, benchmark targets met, real-time ok, passive PASSED, charts ok.
+- Throughput 25,829 records/s mean (min 25,214) over 5 runs; P95 alert latency after window close 51.8 ms mean (max 55.0); PCAP path 3,881 packets/s.
+- Paced replay at 20×: median 90.5 ms from window end to the alert being returned by the API (max 218 ms), 27/27 alerts seen.
+
+Not verified: Docker build (Docker not installed on this machine); evaluation on public datasets (not downloaded); CI on the new commits until they are pushed.

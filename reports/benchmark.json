@@ -1,0 +1,233 @@
+{
+  "generated_at": "2026-10-21T19:10:43+00:00",
+  "machine": {
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.12.10",
+    "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
+    "logical_cpus": 12,
+    "memory_gb": 7.4
+  },
+  "workload": "synthetic: dense benign (~100 flows/s traffic time) + SYN/UDP flood, port scan, DGA, DNS tunnel, exfiltration, 30 s beacon; default rules detectors; alerts stored in in-memory SQLite",
+  "records": 20000,
+  "runs": 5,
+  "per_run": [
+    {
+      "records": 19610,
+      "windows": 453,
+      "alerts": 12,
+      "alerts_by_class": {
+        "DDOS_VOLUMETRIC": 1,
+        "SYN_FLOOD": 1,
+        "UDP_FLOOD": 1,
+        "PORT_SCAN": 2,
+        "DGA_DETECTED": 1,
+        "DNS_TUNNELLING": 1,
+        "DATA_EXFILTRATION": 4,
+        "C2_BEACONING": 1
+      },
+      "wall_seconds": 0.7406,
+      "records_per_second": 26480.0,
+      "window_processing_ms": {
+        "p50": 0.235,
+        "p95": 13.219,
+        "max": 58.185
+      },
+      "alert_latency_after_close_ms": {
+        "p50": 20.004,
+        "p95": 51.11,
+        "max": 51.11
+      },
+      "peak_rss_mb": 125.1,
+      "cpu_percent_of_one_core": 99.2,
+      "errors": 0,
+      "seed": 1000
+    },
+    {
+      "records": 19610,
+      "windows": 464,
+      "alerts": 12,
+      "alerts_by_class": {
+        "DDOS_VOLUMETRIC": 1,
+        "SYN_FLOOD": 1,
+        "UDP_FLOOD": 1,
+        "PORT_SCAN": 2,
+        "DGA_DETECTED": 1,
+        "DNS_TUNNELLING": 1,
+        "DATA_EXFILTRATION": 4,
+        "C2_BEACONING": 1
+      },
+      "wall_seconds": 0.7516,
+      "records_per_second": 26090.3,
+      "window_processing_ms": {
+        "p50": 0.228,
+        "p95": 13.174,
+        "max": 61.252
+      },
+      "alert_latency_after_close_ms": {
+        "p50": 21.005,
+        "p95": 50.015,
+        "max": 50.015
+      },
+      "peak_rss_mb": 128.4,
+      "cpu_percent_of_one_core": 99.8,
+      "errors": 0,
+      "seed": 1001
+    },
+    {
+      "records": 19610,
+      "windows": 446,
+      "alerts": 12,
+      "alerts_by_class": {
+        "DDOS_VOLUMETRIC": 1,
+        "SYN_FLOOD": 1,
+        "UDP_FLOOD": 1,
+        "PORT_SCAN": 2,
+        "DGA_DETECTED": 1,
+        "DNS_TUNNELLING": 1,
+        "DATA_EXFILTRATION": 4,
+        "C2_BEACONING": 1
+      },
+      "wall_seconds": 0.7594,
+      "records_per_second": 25824.2,
+      "window_processing_ms": {
+        "p50": 0.231,
+        "p95": 14.158,
+        "max": 65.031
+      },
+      "alert_latency_after_close_ms": {
+        "p50": 19.004,
+        "p95": 55.013,
+        "max": 55.013
+      },
+      "peak_rss_mb": 131.7,
+      "cpu_percent_of_one_core": 100.8,
+      "errors": 0,
+      "seed": 1002
+    },
+    {
+      "records": 19610,
+      "windows": 468,
+      "alerts": 13,
+      "alerts_by_class": {
+        "DDOS_VOLUMETRIC": 1,
+        "SYN_FLOOD": 1,
+        "UDP_FLOOD": 1,
+        "PORT_SCAN": 3,
+        "DGA_DETECTED": 1,
+        "DNS_TUNNELLING": 1,
+        "DATA_EXFILTRATION": 4,
+        "C2_BEACONING": 1
+      },
+      "wall_seconds": 0.7679,
+      "records_per_second": 25535.9,
+      "window_processing_ms": {
+        "p50": 0.23,
+        "p95": 13.294,
+        "max": 63.032
+      },
+      "alert_latency_after_close_ms": {
+        "p50": 15.005,
+        "p95": 51.012,
+        "max": 51.012
+      },
+      "peak_rss_mb": 133.0,
+      "cpu_percent_of_one_core": 99.7,
+      "errors": 0,
+      "seed": 1003
+    },
+    {
+      "records": 19610,
+      "windows": 456,
+      "alerts": 12,
+      "alerts_by_class": {
+        "DDOS_VOLUMETRIC": 1,
+        "SYN_FLOOD": 1,
+        "UDP_FLOOD": 1,
+        "PORT_SCAN": 2,
+        "DGA_DETECTED": 1,
+        "DNS_TUNNELLING": 1,
+        "DATA_EXFILTRATION": 4,
+        "C2_BEACONING": 1
+      },
+      "wall_seconds": 0.7778,
+      "records_per_second": 25213.6,
+      "window_processing_ms": {
+        "p50": 0.227,
+        "p95": 13.536,
+        "max": 65.275
+      },
+      "alert_latency_after_close_ms": {
+        "p50": 21.005,
+        "p95": 52.012,
+        "max": 52.012
+      },
+      "peak_rss_mb": 137.2,
+      "cpu_percent_of_one_core": 100.4,
+      "errors": 0,
+      "seed": 1004
+    }
+  ],
+  "statistics": {
+    "throughput_records_per_sec": {
+      "mean": 25828.8,
+      "median": 25824.2,
+      "stdev": 489.062,
+      "min": 25213.6,
+      "max": 26480.0
+    },
+    "window_processing_p95_ms": {
+      "mean": 13.476,
+      "median": 13.294,
+      "stdev": 0.406,
+      "min": 13.174,
+      "max": 14.158
+    },
+    "alert_latency_after_close_p95_ms": {
+      "mean": 51.832,
+      "median": 51.11,
+      "stdev": 1.914,
+      "min": 50.015,
+      "max": 55.013
+    },
+    "peak_rss_mb": {
+      "mean": 131.08,
+      "median": 131.7,
+      "stdev": 4.595,
+      "min": 125.1,
+      "max": 137.2
+    },
+    "cpu_percent_of_one_core": {
+      "mean": 99.98,
+      "median": 99.8,
+      "stdev": 0.626,
+      "min": 99.2,
+      "max": 100.8
+    }
+  },
+  "pcap": {
+    "packets": 10000,
+    "runs": 3,
+    "packets_per_second": {
+      "mean": 3880.864,
+      "median": 3958.563,
+      "stdev": 138.424,
+      "min": 3721.045,
+      "max": 3962.982
+    },
+    "alerts_by_class": {
+      "SYN_FLOOD": 1
+    }
+  },
+  "targets": {
+    "throughput": {
+      "description": ">= 1000 records/s in every run",
+      "worst": 25213.6,
+      "met": true
+    },
+    "alert_latency": {
+      "description": "P95 alert latency after window close < 2000 ms in every run",
+      "worst": 55.013,
+      "met": true
+    }
+  }
+}

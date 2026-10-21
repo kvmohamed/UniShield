@@ -8,7 +8,7 @@
       "Results on real traffic (e.g. CICIDS2017, CTU-13) require running `scripts/prepare_dataset.py --input <files>` on those datasets; they are not included.",
       "Probabilities are calibrated on the calibration split of the same distribution and may be miscalibrated on other networks."
     ],
-    "generated_at": "2026-10-21 18:36 UTC"
+    "generated_at": "2026-10-21 19:10 UTC"
   },
   "results": {
     "threshold": 0.9,

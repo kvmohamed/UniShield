@@ -1,148 +1,50 @@
-# UniShield Real-Time Verification Verdict
+# UniShield — Real-Time Verification
 
-**Generated**: 2026-10-12T17:04:07.937503+00:00  
-**System**: Windows-10-10.0.19045-SP0  
-**Python**: 3.14.7  
-**CPU**: AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD (12 cores)
+Generated 2026-10-21T19:12:57+00:00 by `scripts/replay_stream.py`.
 
----
+## Classification
 
-## Overall Classification
+**Near-real-time, event-time stream processing of replayed traffic.**
 
-**Near-real-time replay**
+Records are processed one at a time as they arrive; each 10 s window (sliding every 5 s) is analysed as soon as it closes, and alerts are stored and served by the API immediately. UniShield does not capture from a live interface: input is a file or a replayed stream, so it is not claimed to be a live network sensor.
 
-UniShield processes network flow records incrementally through a sliding-window
-pipeline with configurable window sizes. Records are consumed one at a time,
-accumulated into time-based windows, and analysed by rule-based and ML detectors
-when windows slide. The system does not perform live interface capture.
+## Method
 
----
+- 5 paced replays at 20.0x real time (generate_mixed_scenario(normal 200, SYN/UDP flood 3000, port scan 120, beacon 8, exfiltration 20), ~8 min of traffic per run).
+- The API was polled every 0.1 s through an in-process client; an alert counts as visible at the first poll that returned it.
+- Machine: Windows-10-10.0.19045-SP0, 12 logical CPUs, Python 3.12.10.
+- Delays measured in wall time. Close delay is converted from traffic time; at 20.0x, 1 s of wall time is 20.0 s of traffic.
 
-## Evidence
+## Per-alert latency across all runs (ms of wall time)
 
-- Pipeline processes records **incrementally** (not batch-load-then-analyse)
-- Sliding window with configurable size (10s) and slide interval (5s)
-- Each record is timestamped at ingestion, feature extraction, detection, and storage
-- 25 test runs completed across 5 scenario types
-- All security constraints enforced (read-only, no decryption, no active scanning)
-- No prohibited network connections detected
-
----
-
-## Detection Latency (per-record, across all runs)
-
-| Metric | Value |
-|---|---|
-| Mean | 0.0405 ms |
-| Median | 0.0036 ms |
-| P95 | 0.1799 ms |
-| P99 | 0.3909 ms |
-| Maximum | 10.3099 ms |
-
----
-
-## Throughput
-
-| Metric | Value |
-|---|---|
-| Mean | 34901 records/sec |
-| Median | 29186 records/sec |
-| Minimum | 10815 records/sec |
-| Maximum | 104697 records/sec |
-
----
-
-## Detection Quality
-
-| Scenario | Runs | Passes | Pass Rate | Avg Alerts | Detected Classes |
+| Stage | Mean | Median | SD | Min | Max |
 |---|---|---|---|---|---|
-| benign | 5 | 5 | 100% | 0.0 | — |
-| ddos | 5 | 0 | 0% | 0.0 | — |
-| scan | 5 | 5 | 100% | 11.0 | DATA_EXFILTRATION, HOST_SCAN, PORT_SCAN, RECONNAISSANCE |
-| beacon | 5 | 5 | 100% | 27.4 | C2_BEACONING |
-| exfil | 5 | 5 | 100% | 161.0 | C2_BEACONING, DATA_EXFILTRATION |
+| Window close delay (window end → window closed) | 40.137 | 40.2 | 27.925 | 2.5 | 135.9 |
+| Processing (window closed → alert stored) | 21.185 | 26.4 | 19.461 | 0.0 | 42.02 |
+| API visibility (stored → first returned by API) | 30.578 | 16.0 | 26.023 | 4.0 | 106.0 |
+| End to end (window end → visible in API) | 91.896 | 90.5 | 44.837 | 13.7 | 218.1 |
 
----
+P95 end-to-end latency per run: mean 109.7 ms, median 101.2 ms, SD 23.65, min 82.2, max 143.8 (n = 5 runs).
 
-## Passive-Operation Verification
+Alerts never returned by the API: 0.
 
-| Check | Result |
-|---|---|
-| Security config enforced | True |
-| read_only_mode | True |
-| no_payload_decryption | True |
-| no_active_scanning | True |
-| no_response_path | True |
-| Can disable read-only | False |
-| Static analysis clean | True |
-| Outbound connections | None (localhost only) |
+## Per run
 
-The system generated **no prohibited network activity** during testing.
+| Seed | Records | Windows | Alerts | Traffic (s) | Wall (s) |
+|---|---|---|---|---|---|
+| 2000 | 3,348 | 57 | 5 | 483.3 | 24.17 |
+| 2001 | 3,348 | 58 | 5 | 479.0 | 23.95 |
+| 2002 | 3,348 | 55 | 5 | 483.7 | 24.19 |
+| 2003 | 3,348 | 56 | 6 | 480.4 | 24.02 |
+| 2004 | 3,348 | 58 | 6 | 485.8 | 24.3 |
 
----
+## Throughput headroom (from reports/benchmark.md)
 
-## Dashboard Verification
+Unpaced, the pipeline processed 25,828.8 records/s on average (min 25,213.6) with P95 alert latency after window close of 51.832 ms, so at these replay rates it is idle most of the time.
 
-- **Refresh mechanism**: HTTP polling (health every 10s, alerts on user action only)
-- **No WebSocket or SSE** — alerts do not push to the dashboard automatically
-- **Alert display delay**: Depends on manual refresh or demo button click
-- **Limitation**: The dashboard is a replay visualiser; for continuous monitoring, the polling interval must be shortened and applied to the `/alerts` endpoint
+## Interpretation
 
----
-
-## Acceptance Criteria
-
-| # | Criterion | Expected | Actual | Result |
-|---|---|---|---|---|
-| 1 | Record processing rate ≥ 95% | ≥ 95% | 100.0% | ✅ |
-| 2 | No payload decryption | True | True | ✅ |
-| 3 | No outbound monitoring command | True | True | ✅ |
-| 4 | ≥ 4 threat scenarios generate alerts | ≥ 4 | 3 | ❌ |
-| 5 | Benign: low false positives | ≤ 10 high-severity FP across all runs | 0 | ✅ |
-| 6 | P95 detection latency < 2000ms | < 2000ms | 0.335ms | ✅ |
-| 7 | Throughput ≥ 1000 rps | ≥ 1000 | 10815 | ✅ |
-| 8 | Alert schema has required fields | timestamp, threat_class, confidence, severity, evidence, flow_id | All fields present in Alert schema | ✅ |
-| 9 | ≥ 5 repeated runs per scenario | ≥ 5 | 25 total runs | ✅ |
-| 10 | Dashboard/API alerts correspond to stored alerts | Consistent | In-memory store — API serves same list | ✅ |
-
-**Result: 9/10 criteria passed.**
-
----
-
-## Limitations
-
-1. **No live capture**: The system replays files or synthetic flows — it does not capture from a live network interface.
-2. **Dashboard is not push-based**: Alerts must be manually refreshed or fetched via API polling.
-3. **DNS and Anomaly detectors not in default pipeline**: These must be explicitly enabled.
-4. **Alert correlation not integrated**: The `AlertCorrelator` exists but is not called by the default pipeline.
-5. **No persistent storage**: Alerts are stored in-memory and lost on restart.
-6. **Placeholder scripts**: `replay_pcap.py`, `benchmark_pipeline.py`, `train_models.py`, `prepare_dataset.py` are stubs.
-7. **Single-threaded pipeline**: No async/concurrent processing.
-8. **Dashboard loads Google Fonts**: Requires internet for full styling (does not affect security).
-
----
-
-## Required Fixes (Priority Order)
-
-1. Add continuous alert polling to the dashboard (3-5 second interval)
-2. Register DNS and Anomaly detectors in the default pipeline
-3. Integrate AlertCorrelator into the pipeline flow
-4. Add persistent alert storage (SQLite or file-based)
-5. Implement the replay_pcap.py and benchmark_pipeline.py scripts
-6. Add live capture support (tshark/Zeek live feed) for true live monitoring
-7. Remove Google Fonts dependency for offline operation
-
----
-
-## Final Statement
-
-Based on the controlled replay experiment with 25 test runs across
-5 scenario types (benign, DDoS, scanning, beaconing, exfiltration), UniShield
-demonstrates **near-real-time replay** passive threat detection under the
-tested conditions. The system processes flow records incrementally through a
-sliding-window pipeline with sub-millisecond per-record latency and detects
-embedded attack patterns with measurable precision.
-
-This result does not prove production readiness or generalisation to all
-critical-infrastructure networks. The system is a research prototype operating
-on synthetic test traffic in an isolated laboratory environment.
+- The dominant delay is waiting for a window to close. A window closes when the first record after its end arrives, so in quiet traffic the delay grows with the gap between records; `processing.allowed_lateness_sec` adds to it by design.
+- Detection, correlation and storage take milliseconds per window.
+- API visibility is bounded by the poll interval; the dashboard polls every 3 s.
+- In traffic time, an alert can be raised at most one window length plus the close delay after the activity starts; slow behaviours (beaconing, exfiltration baselines) need several windows of evidence by design.

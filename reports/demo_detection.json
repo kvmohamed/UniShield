@@ -1,0 +1,139 @@
+{
+  "seed": 11,
+  "scenarios": [
+    {
+      "scenario": "benign_hard",
+      "expected": [],
+      "detected": [],
+      "alerts": 0,
+      "records": 546,
+      "ok": true
+    },
+    {
+      "scenario": "ddos_syn",
+      "expected": [
+        "SYN_FLOOD"
+      ],
+      "detected": [
+        "SYN_FLOOD"
+      ],
+      "alerts": 1,
+      "records": 6060,
+      "ok": true
+    },
+    {
+      "scenario": "ddos_udp",
+      "expected": [
+        "DDOS_VOLUMETRIC",
+        "UDP_FLOOD"
+      ],
+      "detected": [
+        "DDOS_VOLUMETRIC",
+        "UDP_FLOOD"
+      ],
+      "alerts": 2,
+      "records": 1560,
+      "ok": true
+    },
+    {
+      "scenario": "port_scan",
+      "expected": [
+        "PORT_SCAN"
+      ],
+      "detected": [
+        "PORT_SCAN"
+      ],
+      "alerts": 1,
+      "records": 360,
+      "ok": true
+    },
+    {
+      "scenario": "host_sweep",
+      "expected": [
+        "HOST_SCAN"
+      ],
+      "detected": [
+        "HOST_SCAN"
+      ],
+      "alerts": 1,
+      "records": 314,
+      "ok": true
+    },
+    {
+      "scenario": "beacon_30s",
+      "expected": [
+        "C2_BEACONING"
+      ],
+      "detected": [
+        "C2_BEACONING"
+      ],
+      "alerts": 1,
+      "records": 325,
+      "ok": true
+    },
+    {
+      "scenario": "exfil_episodes",
+      "expected": [
+        "DATA_EXFILTRATION"
+      ],
+      "detected": [
+        "DATA_EXFILTRATION",
+        "STATISTICAL_ANOMALY"
+      ],
+      "alerts": 6,
+      "records": 636,
+      "ok": true
+    },
+    {
+      "scenario": "dga",
+      "expected": [
+        "DGA_DETECTED"
+      ],
+      "detected": [
+        "DGA_DETECTED"
+      ],
+      "alerts": 1,
+      "records": 180,
+      "ok": true
+    },
+    {
+      "scenario": "dns_tunnel",
+      "expected": [
+        "DNS_TUNNELLING"
+      ],
+      "detected": [
+        "DNS_TUNNELLING"
+      ],
+      "alerts": 1,
+      "records": 210,
+      "ok": true
+    },
+    {
+      "scenario": "encrypted_anomaly",
+      "expected": [
+        "ENCRYPTED_SESSION_ANOMALY"
+      ],
+      "detected": [
+        "ENCRYPTED_SESSION_ANOMALY"
+      ],
+      "alerts": 2,
+      "records": 73,
+      "ok": true
+    },
+    {
+      "scenario": "beacon_60s",
+      "expected": [
+        "C2_BEACONING"
+      ],
+      "detected": [
+        "C2_BEACONING"
+      ],
+      "alerts": 1,
+      "records": 418,
+      "ok": true
+    }
+  ],
+  "passed": 11,
+  "total": 11,
+  "generated_at": "2026-10-21T19:09:50+00:00"
+}
