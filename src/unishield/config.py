@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import yaml
 from dotenv import load_dotenv
@@ -106,6 +106,11 @@ class APIConfig(BaseModel):
     port: int = 8000
     workers: int = 1
     reload: bool = False
+    # Key for administrative endpoints (replay, demo, clearing alerts), sent as
+    # the X-API-Key header. Set it only through UNISHIELD_ADMIN_API_KEY. When it
+    # is unset, administrative endpoints accept loopback clients only.
+    admin_api_key: Optional[str] = Field(default=None, repr=False)
+    cors_origins: list[str] = Field(default_factory=list)   # the dashboard is same-origin
 
 
 class DatabaseConfig(BaseModel):
@@ -212,6 +217,8 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_LOGS_DIR": ("paths", "logs_dir"),
     "UNISHIELD_DATA_DIR": ("paths", "data_dir"),
     "UNISHIELD_DETECTION_MODE": ("models", "detection_mode"),
+    "UNISHIELD_DB_URL": ("database", "url"),
+    "UNISHIELD_ADMIN_API_KEY": ("api", "admin_api_key"),
 }
 
 

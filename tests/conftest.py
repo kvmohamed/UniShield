@@ -1,10 +1,36 @@
-"""Shared fixtures: deterministic sample input files (see unishield.data.sample_files)."""
+"""Shared fixtures: deterministic sample input files (see unishield.data.sample_files) and an API client."""
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from unishield.data import sample_files
+# Tests never touch the default on-disk database.
+os.environ.setdefault("UNISHIELD_DB_URL", "sqlite://")
+
+from unishield.data import sample_files  # noqa: E402
+
+
+@pytest.fixture
+def api_client(monkeypatch, tmp_path):
+    """(TestClient from a loopback address, data dir) for a fresh app with an in-memory database."""
+    from fastapi.testclient import TestClient
+
+    from unishield.api.app import create_app
+    from unishield.config import reset_config
+    from unishield.storage import AlertRepository
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setenv("UNISHIELD_DATA_DIR", str(data_dir))
+    monkeypatch.delenv("UNISHIELD_ADMIN_API_KEY", raising=False)
+    reset_config()
+    app = create_app(AlertRepository.from_url("sqlite://"))
+    client = TestClient(app, client=("127.0.0.1", 50000))
+    yield client, data_dir
+    app.state.ctx.reset()
+    reset_config()
 
 
 @pytest.fixture(scope="session")

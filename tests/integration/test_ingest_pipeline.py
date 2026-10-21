@@ -11,9 +11,8 @@ import shutil
 import time
 
 import pytest
-from fastapi.testclient import TestClient
 
-from unishield.config import get_config, reset_config
+from unishield.config import get_config
 from unishield.data.sample_generator import SimulatedReader, generate_mixed_scenario
 from unishield.ingest.pcap_reader import PcapReader
 from unishield.ingest.zeek_reader import ZeekReader
@@ -79,18 +78,9 @@ def test_alerts_report_the_input_source():
 # ---------------------------------------------------------------- replay API
 
 @pytest.fixture
-def api(monkeypatch, tmp_path):
-    """API client whose replay data directory is a fresh temp folder."""
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    monkeypatch.setenv("UNISHIELD_DATA_DIR", str(data_dir))
-    reset_config()
-    from unishield.api import app as app_module
-    yield TestClient(app_module.app), data_dir
-    _wait_for_replay(TestClient(app_module.app))
-    app_module.reset_replay_state()
-    app_module.clear_alerts()
-    reset_config()
+def api(api_client):
+    yield api_client
+    _wait_for_replay(api_client[0])
 
 
 def _wait_for_replay(client, timeout=30.0):

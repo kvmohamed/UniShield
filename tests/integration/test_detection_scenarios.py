@@ -19,9 +19,7 @@ import shutil
 import time
 
 import pytest
-from fastapi.testclient import TestClient
 
-from unishield.config import reset_config
 from unishield.data import sample_files
 from unishield.data.sample_generator import SimulatedReader, build_scenario
 from unishield.ingest.pcap_reader import PcapReader
@@ -87,18 +85,9 @@ def test_benign_sample_pcap_raises_no_ddos_or_scan_alert(sample_capture):
 # ---------------------------------------------------------------- via the API
 
 @pytest.fixture
-def api(monkeypatch, tmp_path):
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    monkeypatch.setenv("UNISHIELD_DATA_DIR", str(data_dir))
-    reset_config()
-    from unishield.api import app as app_module
-    client = TestClient(app_module.app)
-    yield client, data_dir
-    _wait(client)
-    app_module.reset_replay_state()
-    app_module.clear_alerts()
-    reset_config()
+def api(api_client):
+    yield api_client
+    _wait(api_client[0])
 
 
 def _wait(client, timeout=60.0):
@@ -124,7 +113,7 @@ def test_port_scan_pcap_alert_reaches_the_api(api, attack_pcaps):
 def test_demo_endpoint_shows_ddos_and_scan(api):
     client, _ = api
     body = client.post("/replay/demo", params={"normal": 300, "ddos": 6000, "scan": 150,
-                                               "beacon": 30, "exfil": 40, "seed": 42}).json()
+                                               "beacon": 30, "exfil": 40, "seed": 42, "wait": True}).json()
     assert body["status"] == "completed"
     classes = set(body["result"]["alerts_by_class"])
     assert {"SYN_FLOOD", "UDP_FLOOD", "DDOS_VOLUMETRIC", "PORT_SCAN"} <= classes
