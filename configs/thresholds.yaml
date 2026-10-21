@@ -94,12 +94,15 @@ dns:
   txt_record_frequency: 0.5          # TXT/NULL/ANY/CNAME/MX share that raises severity
 
 encrypted:
-  # Encrypted session analysis thresholds (optional advanced module)
-  # NOTE: These do NOT prove malware. They flag anomalous patterns.
-  suspicious_tls_versions: ["SSLv3", "TLSv1.0"]
-  flow_duration_threshold_sec: 60
-  packet_size_variance_threshold: 0.1
-  burst_pattern_score: 0.7
+  # Encrypted-session analysis from TLS handshake metadata (optional module).
+  # Nothing is decrypted. Findings are "suspicious encrypted-session
+  # behaviour", not proof of malware.
+  outdated_tls_versions: ["SSLv3", "TLSv1.0", "TLSv1.1"]
+  ja3_blocklist: {}                  # {md5: label}, supplied by the operator from threat intel
+  long_session_sec: 1800             # long session...
+  low_rate_bytes_per_sec: 200        # ...at a low byte rate...
+                                     # ...on a port where TLS is unusual
+  realert_after_sec: 900
 
 statistical:
   # Robust z-score detector: window metrics vs a rolling baseline of windows

@@ -33,12 +33,14 @@ from unishield.detectors.base import BaseDetector
 from unishield.detectors.beaconing_detector import BeaconingDetector
 from unishield.detectors.ddos_detector import DDoSDetector
 from unishield.detectors.dns_detector import DNSDetector
+from unishield.detectors.encrypted_detector import EncryptedSessionDetector
 from unishield.detectors.exfiltration_detector import ExfiltrationDetector
 from unishield.detectors.scan_detector import ScanDetector
 from unishield.detectors.statistical_detector import StatisticalDetector
 from unishield.features.base import BaseFeatureExtractor, WindowContext
 from unishield.features.beaconing import BeaconingFeatureExtractor
 from unishield.features.dns import DNSFeatureExtractor
+from unishield.features.encrypted import EncryptedSessionFeatureExtractor
 from unishield.features.exfiltration import ExfiltrationFeatureExtractor
 from unishield.features.scan import ScanFeatureExtractor
 from unishield.features.volume import VolumeFeatureExtractor
@@ -200,6 +202,7 @@ class Pipeline:
             BeaconingFeatureExtractor(),
             ExfiltrationFeatureExtractor(),
             DNSFeatureExtractor(),
+            EncryptedSessionFeatureExtractor(),
         ]
 
         # Detectors: rule detectors first; detectors with runs_after_rules
@@ -210,6 +213,7 @@ class Pipeline:
             BeaconingDetector(),
             ExfiltrationDetector(),
             DNSDetector(),
+            EncryptedSessionDetector(),
             StatisticalDetector(),
             AnomalyDetector(),
         ]

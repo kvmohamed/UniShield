@@ -426,6 +426,54 @@ def generate_dns_tunnel_traffic(
 
 
 # ---------------------------------------------------------------------------
+# Encrypted sessions (optional advanced module; handshake metadata only)
+# ---------------------------------------------------------------------------
+
+LABEL_ENCRYPTED = "ENCRYPTED_SESSION_ANOMALY"
+LEGACY_TLS_SERVER = "198.51.100.77"
+TUNNEL_TLS_SERVER = "203.0.113.150"
+
+
+def generate_encrypted_anomaly_traffic(
+    count: int = 12,
+    start_time: datetime | None = None,
+    client_ip: str = "10.0.2.31",
+    *,
+    rng: random.Random | None = None,
+    seed: int | None = None,
+) -> list[NormalisedFlow]:
+    """
+    A client negotiating TLS 1.0 with one external server, plus a one-hour
+    TLS session at a few bytes per second on port 4443 (a pattern typical of
+    tunnels and keep-alive channels).
+    """
+    rng = _rng(rng, seed)
+    current_time = start_time or _now()
+    flows = []
+    for _ in range(count):
+        current_time += timedelta(seconds=rng.uniform(1, 4))
+        flows.append(_flow(
+            timestamp=current_time, src=client_ip, dst=LEGACY_TLS_SERVER,
+            sport=rng.randint(49152, 65535), dport=443, protocol=ProtocolType.TCP,
+            orig_packets=rng.randint(6, 12), resp_packets=rng.randint(8, 20),
+            orig_bytes=rng.randint(600, 2000), resp_bytes=rng.randint(3000, 20000),
+            duration=round(rng.uniform(0.2, 3.0), 3), conn_state="SF",
+            direction=FlowDirection.OUTBOUND, label=LABEL_ENCRYPTED, tcp_flags=_COMPLETED_TCP_FLAGS,
+            tls_version="TLSv1.0", tls_cipher="TLS_RSA_WITH_AES_128_CBC_SHA",
+        ))
+    current_time += timedelta(seconds=2)
+    flows.append(_flow(
+        timestamp=current_time, src=client_ip, dst=TUNNEL_TLS_SERVER,
+        sport=rng.randint(49152, 65535), dport=4443, protocol=ProtocolType.TCP,
+        orig_packets=900, resp_packets=900, orig_bytes=rng.randint(90_000, 140_000),
+        resp_bytes=rng.randint(90_000, 140_000), duration=3600.0, conn_state="SF",
+        direction=FlowDirection.OUTBOUND, label=LABEL_ENCRYPTED, tcp_flags=_COMPLETED_TCP_FLAGS,
+        tls_version="TLSv1.3", tls_cipher="TLS_AES_128_GCM_SHA256",
+    ))
+    return flows
+
+
+# ---------------------------------------------------------------------------
 # Mixed scenario (baseline + attacks)
 # ---------------------------------------------------------------------------
 
@@ -553,6 +601,12 @@ _SCENARIOS: dict[str, tuple[frozenset[str], str, Callable[[random.Random, dateti
         frozenset({"DNS_TUNNELLING"}), "Background traffic plus data encoded in DNS subdomains",
         lambda rng, t0: generate_normal_traffic(60, t0, rng=rng)
         + generate_dns_tunnel_traffic(150, t0 + timedelta(seconds=20), rng=rng),
+    ),
+    "encrypted_anomaly": (
+        frozenset({"ENCRYPTED_SESSION_ANOMALY"}),
+        "Background traffic plus a TLS 1.0 client and a long low-rate TLS session on port 4443",
+        lambda rng, t0: generate_normal_traffic(60, t0, rng=rng)
+        + generate_encrypted_anomaly_traffic(12, t0 + timedelta(seconds=20), rng=rng),
     ),
     "beacon_60s": (
         frozenset({"C2_BEACONING"}), "20 minutes of background traffic plus a 60 s HTTPS beacon (5% jitter)",

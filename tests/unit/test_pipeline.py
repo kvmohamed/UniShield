@@ -384,6 +384,7 @@ class TestPipeline:
             "beaconing_detector",
             "exfiltration_detector",
             "dns_detector",
+            "encrypted_session_detector",
             "statistical_detector",
             "anomaly_detector",
         }
