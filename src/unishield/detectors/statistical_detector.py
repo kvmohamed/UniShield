@@ -17,6 +17,10 @@ DESIGN:
       at least ``mad_threshold`` above the baseline, after
       ``min_samples_for_baseline`` baseline windows. Only increases are
       reported (a drop in traffic is not treated as a threat here).
+    - Windows with fewer than ``min_window_flows`` flows are added to the
+      baseline but never reported: in one or two flows, a single larger
+      transfer moves packets/s and bytes/s together and is not a meaningful
+      aggregate deviation.
 
 Confidence is a rule score (max z / twice the threshold), not a probability.
 """
@@ -96,7 +100,7 @@ class StatisticalDetector(BaseDetector):
         current = {m: float(features.get(m) or 0.0) for m in METRICS}
         alerts: list[Alert] = []
 
-        if len(self._history) >= min_samples:
+        if len(self._history) >= min_samples and len(flows) >= t.get("min_window_flows", 5):
             deviations = {}
             for metric, floor in METRICS.items():
                 values = [h[metric] for h in self._history]

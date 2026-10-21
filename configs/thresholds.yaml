@@ -111,6 +111,7 @@ statistical:
   min_deviating_metrics: 2           # metrics that must deviate together
   min_samples_for_baseline: 30       # baseline windows before alerting
   baseline_windows: 120              # rolling baseline length
+  min_window_flows: 5                # smaller windows join the baseline but are not reported
 
 anomaly:
   # Isolation Forest over log-scaled window features; reports only windows

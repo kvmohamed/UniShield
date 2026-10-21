@@ -21,6 +21,7 @@ labels; they are ground truth for evaluation.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 from dataclasses import dataclass
@@ -59,6 +60,27 @@ LABEL_BEACON = "C2_BEACONING"
 LABEL_EXFIL = "DATA_EXFILTRATION"
 
 _COMPLETED_TCP_FLAGS = "ACK,FIN,PSH,SYN"
+
+# TLS metadata for simulated HTTPS/IMAPS sessions, so that TLS presence alone
+# does not separate benign from attack traffic. The JA3 values are MD5s of
+# made-up ClientHello strings standing in for a few common client stacks.
+_TLS_PORTS = frozenset({443, 465, 993, 995, 8443})
+_CLIENT_JA3 = tuple(
+    hashlib.md5(text.encode()).hexdigest()
+    for text in ("771,4865-4866-4867,0-23-65281-10-11-35-16-5-13-43-45-51,29-23-24,0",
+                 "771,4865-4867-4866,0-23-65281-10-11-16-5-34-51-43-13-45,29-23-24-25,0",
+                 "771,49195-49199-52393,0-23-65281-10-11-35-13,29-23-24,0")
+)
+
+
+def _tls_fields(rng: random.Random, dport: int | None) -> dict:
+    """tls_version / tls_cipher / ja3 for a TLS port, else nothing."""
+    if dport not in _TLS_PORTS:
+        return {}
+    if rng.random() < 0.7:
+        return {"tls_version": "TLSv1.3", "tls_cipher": "TLS_AES_128_GCM_SHA256", "ja3": rng.choice(_CLIENT_JA3)}
+    return {"tls_version": "TLSv1.2", "tls_cipher": "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+            "ja3": rng.choice(_CLIENT_JA3)}
 
 
 def _rng(rng: random.Random | None, seed: int | None) -> random.Random:
@@ -124,7 +146,7 @@ def _completed_tcp(rng, t, src, dst, dport, direction, label=LABEL_BENIGN,
         protocol=ProtocolType.TCP, orig_packets=orig_pkts, resp_packets=resp_pkts,
         orig_bytes=rng.randint(*up), resp_bytes=rng.randint(*down),
         duration=round(rng.uniform(0.05, 5.0), 3), conn_state="SF",
-        direction=direction, label=label, tcp_flags=_COMPLETED_TCP_FLAGS,
+        direction=direction, label=label, tcp_flags=_COMPLETED_TCP_FLAGS, **_tls_fields(rng, dport),
     )
 
 
@@ -328,7 +350,7 @@ def generate_beacon_traffic(
             orig_packets=orig_pkts, resp_packets=resp_pkts, orig_bytes=rng.randint(120, 260),
             resp_bytes=rng.randint(80, 240), duration=round(rng.uniform(0.1, 2.0), 3),
             conn_state="SF", direction=FlowDirection.OUTBOUND, label=LABEL_BEACON,
-            tcp_flags=_COMPLETED_TCP_FLAGS, tls_version="TLSv1.2",
+            tcp_flags=_COMPLETED_TCP_FLAGS, **_tls_fields(rng, 443),
         ))
     return flows
 
@@ -350,13 +372,15 @@ def generate_exfil_traffic(
         current_time += timedelta(seconds=rng.uniform(1, 10))
         up = rng.randint(500_000, 5_000_000)
         orig_pkts = max(up // 1400, 1)
+        dport = rng.choice([443, 8443, 4444, 9090])
         flows.append(_flow(
             timestamp=current_time, src=internal_ip, dst=EXFIL_DEST,
-            sport=rng.randint(49152, 65535), dport=rng.choice([443, 8443, 4444, 9090]),
+            sport=rng.randint(49152, 65535), dport=dport,
             protocol=ProtocolType.TCP, orig_packets=orig_pkts, resp_packets=max(orig_pkts // 2, 1),
             orig_bytes=up, resp_bytes=rng.randint(5_000, 40_000),
             duration=round(rng.uniform(5.0, 120.0), 3), conn_state="SF",
             direction=FlowDirection.OUTBOUND, label=LABEL_EXFIL, tcp_flags=_COMPLETED_TCP_FLAGS,
+            **_tls_fields(rng, dport),
         ))
     return flows
 
@@ -530,7 +554,7 @@ def _benign_hard(rng: random.Random, t0: datetime) -> list[NormalisedFlow]:
         timestamp=t, src=client, dst="151.101.1.140", sport=51000, dport=443,
         protocol=ProtocolType.TCP, orig_packets=4000, resp_packets=14000, orig_bytes=240_000,
         resp_bytes=20_000_000, duration=30.0, conn_state="SF", direction=FlowDirection.OUTBOUND,
-        label=LABEL_BENIGN, tcp_flags=_COMPLETED_TCP_FLAGS,
+        label=LABEL_BENIGN, tcp_flags=_COMPLETED_TCP_FLAGS, **_tls_fields(rng, 443),
     ))
     for i in range(25):                                                 # page load from 25 CDN hosts
         flows.append(_completed_tcp(rng, t + timedelta(milliseconds=120 * i), client,
