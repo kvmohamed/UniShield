@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 from unishield.correlation.severity import from_levels as severity_from_levels
 from unishield.schemas.alert import Alert, Severity, ThreatClass

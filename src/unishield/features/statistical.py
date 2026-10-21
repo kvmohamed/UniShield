@@ -22,7 +22,7 @@ from collections import deque
 from typing import Any
 
 from unishield.features.base import BaseFeatureExtractor, WindowContext, resolve_window
-from unishield.schemas.flow import NormalisedFlow, ProtocolType
+from unishield.schemas.flow import NormalisedFlow
 
 
 class StatisticalFeatureExtractor(BaseFeatureExtractor):

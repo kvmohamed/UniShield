@@ -5,19 +5,15 @@ DNS features/detectors, and statistical features.
 
 from __future__ import annotations
 
-import math
 from datetime import datetime, timedelta, timezone
 
-import pytest
 
 from unishield.correlation.correlator import AlertCorrelator
 from unishield.data.sample_generator import (
     SimulatedReader,
-    generate_beacon_traffic,
     generate_ddos_traffic,
     generate_mixed_scenario,
     generate_normal_traffic,
-    generate_scan_traffic,
 )
 from unishield.detectors.anomaly_detector import AnomalyDetector
 from unishield.detectors.beaconing_detector import BeaconingDetector

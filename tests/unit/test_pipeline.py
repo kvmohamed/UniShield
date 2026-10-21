@@ -5,10 +5,8 @@ Tests for the processing pipeline, feature extractors and detectors.
 
 from __future__ import annotations
 
-import math
 from datetime import datetime, timedelta, timezone
 
-import pytest
 
 from unishield.data.sample_generator import (
     SimulatedReader,
@@ -27,7 +25,7 @@ from unishield.features.beaconing import BeaconingFeatureExtractor
 from unishield.features.exfiltration import ExfiltrationFeatureExtractor
 from unishield.features.scan import ScanFeatureExtractor
 from unishield.features.volume import VolumeFeatureExtractor
-from unishield.processing.pipeline import Pipeline, PipelineResult
+from unishield.processing.pipeline import Pipeline
 from unishield.schemas.flow import (
     FlowDirection,
     InputSource,
