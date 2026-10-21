@@ -1,40 +1,53 @@
 """
 UniShield — Data Exfiltration Detector
 
-Detects data exfiltration patterns:
-    - Abnormally high outbound/inbound byte ratios
-    - Large sustained outbound transfers
-    - Traffic to unusual ports
-    - Long-duration sessions with high byte counts
+Applies exfiltration rules to the per-pair upload candidates of
+ExfiltrationFeatureExtractor (internal source → external destination,
+bytes the internal host uploaded on connections it initiated):
 
-Uses features from the ExfiltrationFeatureExtractor.
+    volume     — upload >= ``min_upload_mb`` in the window and upload/download
+                 >= ``upload_download_ratio``
+    baseline   — the source's window upload is >= ``baseline_deviation_sigma``
+                 robust standard deviations above its own history (after
+                 ``min_baseline_windows`` windows), at least
+                 ``baseline_min_upload_mb``, and upload-dominated
+    long session — an outbound session of >= ``long_session_duration_sec`` that
+                 uploaded >= ``long_session_min_upload_mb``, upload-dominated
 
-MITRE ATT&CK:
-    - T1041: Exfiltration Over C2 Channel
-    - T1048: Exfiltration Over Alternative Protocol
+A rare destination (uploaded to by <= ``max_destination_sources`` internal
+hosts) raises severity by one level; an unusual destination port is reported
+as evidence only. A pair is re-reported after ``realert_after_sec`` of
+traffic time or when its severity rises.
+
+Confidence is a rule score, not a calibrated probability.
+
+MITRE ATT&CK: T1041, T1048 (+ T1573 over TLS, T1571 on an unusual port).
 """
 
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta
 from typing import Any
 
 from unishield.config import get_thresholds
+from unishield.correlation import severity as sev
+from unishield.correlation.mitre_mapping import ENCRYPTED_CHANNEL, NON_STANDARD_PORT, techniques_for
 from unishield.detectors.base import BaseDetector
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
 
+_MB = 1_000_000
+
 
 class ExfiltrationDetector(BaseDetector):
-    """
-    Detect data exfiltration based on volume asymmetry and session patterns.
-    """
+    """Detect data exfiltration from upload volume, per-source baselines and session length."""
 
     def __init__(self, thresholds: dict[str, Any] | None = None):
         if thresholds is None:
-            all_thresholds = get_thresholds()
-            thresholds = all_thresholds.get("exfiltration", {})
+            thresholds = get_thresholds().get("exfiltration", {})
         super().__init__(thresholds)
+        self._last_reported: dict[tuple[str, str], tuple[datetime, Severity]] = {}
 
     @property
     def name(self) -> str:
@@ -46,7 +59,7 @@ class ExfiltrationDetector(BaseDetector):
 
     @property
     def mitre_techniques(self) -> list[str]:
-        return ["T1041", "T1048"]
+        return techniques_for(ThreatClass.DATA_EXFILTRATION, ENCRYPTED_CHANNEL, NON_STANDARD_PORT)
 
     def detect(
         self,
@@ -57,128 +70,94 @@ class ExfiltrationDetector(BaseDetector):
     ) -> list[Alert]:
         start_time = time.time()
         self._windows_analysed += 1
-        alerts: list[Alert] = []
-
         if not flows or not features:
-            return alerts
+            return []
 
         t = self._thresholds
-        severity_levels = t.get("severity_levels", {})
+        min_upload = t.get("min_upload_mb", 5) * _MB
+        ratio_thr = t.get("upload_download_ratio", 5.0)
+        sigma = t.get("baseline_deviation_sigma", 3.5)
+        min_windows = t.get("min_baseline_windows", 10)
+        baseline_min = t.get("baseline_min_upload_mb", 1) * _MB
+        long_sec = t.get("long_session_duration_sec", 3600)
+        long_min = t.get("long_session_min_upload_mb", 1) * _MB
+        max_sources = t.get("max_destination_sources", 3)
+        realert = timedelta(seconds=t.get("realert_after_sec", 600))
+        levels = t.get("severity_levels", {})
+        alerts: list[Alert] = []
 
-        # --- Outbound/Inbound Ratio Check ---
-        ob_ratio = features.get("outbound_inbound_ratio", 0)
-        ratio_threshold = t.get("outbound_inbound_byte_ratio", 5.0)
-        outbound_bytes = features.get("total_outbound_bytes", 0)
+        for c in features.get("exfil_candidates", []):
+            upload = c["upload_bytes"]
+            upload_dominated = c["upload_download_ratio"] >= ratio_thr
+            if not upload_dominated:
+                continue
 
-        if ob_ratio > ratio_threshold and outbound_bytes > 1_000_000:  # > 1 MB
-            severity = self._determine_severity(
-                ob_ratio, severity_levels, "outbound_inbound_byte_ratio"
-            )
+            rules = []
+            if upload >= min_upload:
+                rules.append("volume")
+            z = c["robust_z"]
+            if (z is not None and c["baseline_windows"] >= min_windows and z >= sigma
+                    and c["source_window_upload"] >= baseline_min):
+                rules.append("baseline")
+            if c["max_duration_sec"] >= long_sec and c["long_session_upload_bytes"] >= long_min:
+                rules.append("long_session")
+            if not rules:
+                continue
 
-            confidence = min(1.0, ob_ratio / ratio_threshold * 0.4)
+            if "volume" in rules:
+                severity = sev.from_levels(upload / _MB, levels, "upload_mb", default=Severity.MEDIUM)
+            else:
+                severity = Severity.LOW
+            rare = c["destination_sources"] <= max_sources
+            if rare:
+                severity = sev.escalate(severity)
 
-            alert = Alert(
+            key = (c["source_ip"], c["destination_ip"])
+            previous = self._last_reported.get(key)
+            if previous is not None and window_end - previous[0] < realert \
+                    and sev.RANK[severity] <= sev.RANK[previous[1]]:
+                continue
+            self._last_reported[key] = (window_end, severity)
+
+            confidence = 0.4 + 0.1 * len(rules) + (0.15 if rare else 0.0)
+            if "volume" in rules:
+                confidence += min(0.2, 0.1 * upload / min_upload)
+            extra = []
+            if c["uses_tls"]:
+                extra.append(ENCRYPTED_CHANNEL)
+            if c["unusual_port"]:
+                extra.append(NON_STANDARD_PORT)
+
+            alerts.append(Alert(
                 window_start=window_start,
                 window_end=window_end,
-                destination_ip=features.get("top_dest_ip"),
+                source_ip=c["source_ip"],
+                destination_ip=c["destination_ip"],
                 threat_class=ThreatClass.DATA_EXFILTRATION,
                 severity=severity,
-                confidence=round(confidence, 4),
+                confidence=round(min(1.0, confidence), 4),
                 detector_name=self.name,
                 model_version=self.version,
                 evidence={
-                    "outbound_inbound_ratio": ob_ratio,
-                    "ratio_threshold": ratio_threshold,
-                    "total_outbound_bytes": outbound_bytes,
-                    "total_inbound_bytes": features.get("total_inbound_bytes", 0),
-                    "top_dest_ip": features.get("top_dest_ip"),
-                    "top_dest_bytes": features.get("top_dest_bytes", 0),
+                    "rules": rules,
+                    "upload_bytes": upload,
+                    "download_bytes": c["download_bytes"],
+                    "upload_download_ratio": c["upload_download_ratio"],
+                    "destination_ports": c["destination_ports"],
+                    "unusual_port": c["unusual_port"],
+                    "rare_destination": rare,
+                    "destination_sources": c["destination_sources"],
+                    "source_window_upload": c["source_window_upload"],
+                    "baseline_median_bytes": c["baseline_median_bytes"],
+                    "baseline_windows": c["baseline_windows"],
+                    "robust_z": z,
+                    "max_session_sec": c["max_duration_sec"],
+                    "min_upload_mb": min_upload / _MB,
+                    "ratio_threshold": ratio_thr,
                 },
-                mitre_techniques=["T1041"],
+                mitre_techniques=techniques_for(ThreatClass.DATA_EXFILTRATION, *extra),
                 detection_latency_ms=self._measure_latency(start_time),
-            )
-            alerts.append(alert)
-
-        # --- High-Volume Transfer to Single Destination ---
-        top_dest_bytes = features.get("top_dest_bytes", 0)
-        volume_threshold_bytes = t.get("unusual_outbound_volume_mb", 100) * 1_000_000
-
-        if top_dest_bytes > volume_threshold_bytes:
-            severity = self._determine_severity(
-                top_dest_bytes / 1_000_000,
-                severity_levels,
-                "unusual_outbound_volume_mb",
-            )
-
-            alert = Alert(
-                window_start=window_start,
-                window_end=window_end,
-                destination_ip=features.get("top_dest_ip"),
-                threat_class=ThreatClass.DATA_EXFILTRATION,
-                severity=severity,
-                confidence=min(1.0, top_dest_bytes / volume_threshold_bytes * 0.5),
-                detector_name=self.name,
-                model_version=self.version,
-                evidence={
-                    "top_dest_bytes": top_dest_bytes,
-                    "volume_threshold_bytes": volume_threshold_bytes,
-                    "top_dest_ip": features.get("top_dest_ip"),
-                    "avg_bytes_per_dest": features.get("avg_bytes_per_dest", 0),
-                },
-                mitre_techniques=["T1048"],
-                detection_latency_ms=self._measure_latency(start_time),
-            )
-            alerts.append(alert)
-
-        # --- Unusual Port Usage ---
-        port_rarity = features.get("dest_port_rarity", 0)
-        unusual_flows = features.get("unusual_port_flows", 0)
-        rarity_threshold = t.get("port_rarity_threshold", 0.95)
-
-        if port_rarity > rarity_threshold and unusual_flows > 5:
-            alert = Alert(
-                window_start=window_start,
-                window_end=window_end,
-                threat_class=ThreatClass.DATA_EXFILTRATION,
-                severity=Severity.MEDIUM,
-                confidence=min(1.0, port_rarity * 0.6),
-                detector_name=self.name,
-                model_version=self.version,
-                evidence={
-                    "dest_port_rarity": port_rarity,
-                    "rarity_threshold": rarity_threshold,
-                    "unusual_port_flows": unusual_flows,
-                    "note": "High ratio of traffic on uncommon ports",
-                },
-                mitre_techniques=["T1048"],
-                detection_latency_ms=self._measure_latency(start_time),
-            )
-            alerts.append(alert)
-
-        # --- Long-Duration Sessions ---
-        max_duration = features.get("max_session_duration_sec", 0)
-        long_sessions = features.get("long_sessions_count", 0)
-        duration_threshold = t.get("long_session_duration_sec", 3600)
-
-        if max_duration > duration_threshold and long_sessions > 0:
-            alert = Alert(
-                window_start=window_start,
-                window_end=window_end,
-                threat_class=ThreatClass.DATA_EXFILTRATION,
-                severity=Severity.LOW,
-                confidence=min(1.0, max_duration / duration_threshold * 0.3),
-                detector_name=self.name,
-                model_version=self.version,
-                evidence={
-                    "max_session_duration_sec": max_duration,
-                    "duration_threshold": duration_threshold,
-                    "long_sessions_count": long_sessions,
-                    "max_session_bytes": features.get("max_session_bytes", 0),
-                },
-                mitre_techniques=["T1041"],
-                detection_latency_ms=self._measure_latency(start_time),
-            )
-            alerts.append(alert)
+            ))
 
         self._alerts_generated += len(alerts)
         return alerts

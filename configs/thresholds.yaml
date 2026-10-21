@@ -62,24 +62,25 @@ beaconing:
   realert_after_sec: 900             # re-report a pair after this much traffic time (or if severity rises)
 
 exfiltration:
-  # Data exfiltration thresholds
-  outbound_inbound_byte_ratio: 5.0
-  long_session_duration_sec: 3600
-  unusual_outbound_volume_mb: 100
-  destination_rarity: 0.9
-  burst_size_bytes: 10000000         # 10 MB burst
-  port_rarity_threshold: 0.95
-  baseline_deviation_sigma: 3.0
-  severity_levels:
+  # Evaluated per internal source -> external destination per window, on the
+  # bytes the internal host uploaded on connections it initiated.
+  min_upload_mb: 5                   # volume rule: upload to one destination in the window
+  upload_download_ratio: 5.0         # every rule: upload must dominate download for the pair
+  baseline_deviation_sigma: 3.5      # baseline rule: robust z of the source's window upload vs its history
+  min_baseline_windows: 10           # history needed before the baseline rule applies
+  baseline_min_upload_mb: 1          # baseline rule ignores smaller uploads
+  long_session_duration_sec: 3600    # long-session rule: outbound session at least this long...
+  long_session_min_upload_mb: 1      # ...that uploaded at least this much
+  max_destination_sources: 3         # rare destination (<= this many internal uploaders) raises severity
+  history_sec: 7200                  # destination rarity look-back
+  realert_after_sec: 600             # re-report a pair after this much traffic time (or if severity rises)
+  severity_levels:                   # volume rule, by MB uploaded in the window
     critical:
-      outbound_inbound_byte_ratio: 20.0
-      unusual_outbound_volume_mb: 500
+      upload_mb: 500
     high:
-      outbound_inbound_byte_ratio: 10.0
-      unusual_outbound_volume_mb: 200
+      upload_mb: 50
     medium:
-      outbound_inbound_byte_ratio: 5.0
-      unusual_outbound_volume_mb: 100
+      upload_mb: 5
 
 dns:
   # DGA / DNS tunnelling thresholds (optional advanced module)

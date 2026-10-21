@@ -473,6 +473,13 @@ _SCENARIOS: dict[str, tuple[frozenset[str], str, Callable[[random.Random, dateti
         lambda rng, t0: generate_normal_traffic(300, t0, gap_ms=(1000, 5000), rng=rng)
         + generate_beacon_traffic(25, t0 + timedelta(seconds=30), interval_sec=30, jitter_percent=5, rng=rng),
     ),
+    "exfil_episodes": (
+        frozenset({"DATA_EXFILTRATION"}),
+        "30 minutes of background traffic plus three exfiltration episodes 12 minutes apart",
+        lambda rng, t0: generate_normal_traffic(600, t0, gap_ms=(1000, 5000), rng=rng)
+        + [f for k in range(3)
+           for f in generate_exfil_traffic(12, t0 + timedelta(minutes=2 + 12 * k), rng=rng)],
+    ),
     "beacon_60s": (
         frozenset({"C2_BEACONING"}), "20 minutes of background traffic plus a 60 s HTTPS beacon (5% jitter)",
         lambda rng, t0: generate_normal_traffic(400, t0, gap_ms=(1000, 5000), rng=rng)
