@@ -1,8 +1,13 @@
 # ============================================================
-# UniShield — Docker Compose
+# UniShield - Docker Compose
 # ============================================================
-# Single service: the FastAPI backend, which also serves the
-# dashboard at http://127.0.0.1:8000/dashboard
+# Single service: the FastAPI backend, which also serves the dashboard at
+# http://127.0.0.1:8000/dashboard
+#
+# Administrative endpoints (replay, demo, clear alerts) need the X-API-Key
+# header: requests reach the container from the Docker bridge, not from
+# loopback, so set UNISHIELD_ADMIN_API_KEY in a .env file next to this file
+# (see .env.example) and enter the same key in the dashboard header.
 
 services:
   api:
@@ -10,18 +15,34 @@ services:
     image: unishield:0.1.0
     container_name: unishield-api
     ports:
-      # Loopback only: the API has no authentication yet (planned, Phase 8)
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8000:8000"           # published on the host's loopback only
     volumes:
-      # Read-only: the container never writes to host data or config
-      - ./configs:/app/configs:ro
-      - ./data:/app/data:ro
+      - ./configs:/app/configs:ro        # configuration
+      - ./data:/app/data:ro              # replay inputs (read-only)
+      - ./reports:/app/reports:ro        # benchmark / evaluation reports shown in the dashboard
+      - ./models:/app/models:ro          # trained models for hybrid mode
+      - unishield-state:/app/state       # alert database (SQLite)
+      - unishield-logs:/app/logs
     environment:
       UNISHIELD_ENV: docker
       UNISHIELD_DEBUG: "false"
+      UNISHIELD_DB_URL: sqlite:////app/state/unishield.db
+      UNISHIELD_ADMIN_API_KEY: ${UNISHIELD_ADMIN_API_KEY:-}
+      UNISHIELD_DETECTION_MODE: ${UNISHIELD_DETECTION_MODE:-rules}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3
+
+volumes:
+  unishield-state:
+  unishield-logs:
