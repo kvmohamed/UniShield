@@ -149,14 +149,29 @@ def test_demo_wait_and_unknown_scenario(api_client):
 
 
 def test_second_replay_while_running_is_409(api_client):
+    import threading
+
+    from unishield.data.sample_generator import SimulatedReader, build_scenario
+
     client, _ = api_client
-    client.post("/replay/demo", params={"scenario": "exfil_episodes"})
-    second = client.post("/replay/demo", params={"scenario": "dga"})
-    if client.get("/replay/status").json()["status"] == "running":
-        assert second.status_code == 409
+    release = threading.Event()
+
+    class BlockingReader(SimulatedReader):
+        def read(self):
+            for i, flow in enumerate(super().read()):
+                if i == 10:
+                    release.wait(10)                   # hold the run open until the test is done
+                yield flow
+
+    client.app.state.ctx.start_replay(BlockingReader(build_scenario("dga", 1).flows), "test", "simulated")
+    try:
+        assert client.get("/replay/status").json()["status"] == "running"
+        assert client.post("/replay/demo", params={"scenario": "dga"}).status_code == 409
         assert client.delete("/alerts").status_code == 409
-    assert client.post("/replay/stop").json()["status"] in ("stopping", "idle")
-    assert wait_idle(client)["status"] in ("stopped", "completed")
+        assert client.post("/replay/stop").json()["status"] == "stopping"
+    finally:
+        release.set()
+    assert wait_idle(client)["status"] == "stopped"
 
 
 def test_replay_keeps_alerts_when_clear_false(api_client):
