@@ -1,15 +1,21 @@
 """
 UniShield — Beaconing Feature Extractor
 
-Extracts C2 beaconing pattern features from flow windows.
-Looks for periodic communication patterns indicating command-and-control.
+C2 beacons check in every few seconds to every few hours, so a single
+10-second window can never show the pattern. This extractor keeps a bounded
+rolling history across windows:
 
-Features computed:
-    - Inter-arrival time statistics (mean, std, CV)
-    - Periodicity score (FFT-based)
-    - Packet size regularity
-    - Destination rarity
-    - Session count patterns
+    - per (source, destination, destination port): start times and uploaded
+      bytes of up to ``max_per_pair`` recent connections within ``history_sec``
+    - per destination: which sources contacted it within ``history_sec``
+      (destination rarity — a C2 server is contacted by few internal hosts,
+      a popular service by many)
+
+Each window adds only records not seen before (windows overlap) and then
+profiles every pair it touched: interval mean/std/CV, periodicity (share of
+intervals within 20% of the median), size regularity and destination rarity.
+Inbound connections (an outside host contacting an internal one) are not
+tracked; beacons originate inside the monitored network.
 
 SECURITY CONSTRAINTS:
     - Read-only computation over local flow records.
@@ -19,18 +25,65 @@ SECURITY CONSTRAINTS:
 from __future__ import annotations
 
 import math
-from collections import Counter, defaultdict
-from typing import Any
+from collections import OrderedDict, deque
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
+from typing import Any, Optional
 
+from unishield.config import get_thresholds
 from unishield.features.base import BaseFeatureExtractor, WindowContext
-from unishield.schemas.flow import NormalisedFlow
+from unishield.schemas.flow import FlowDirection, NormalisedFlow
+
+_MAX_CANDIDATES = 10
+_SEEN_LIMIT = 200_000
+
+
+@dataclass
+class BeaconCandidate:
+    source_ip: str
+    destination_ip: str
+    destination_port: Optional[int]
+    connection_count: int
+    interval_mean_sec: float
+    interval_std_sec: float
+    interval_cv: float
+    periodicity: float
+    size_regularity: float
+    span_sec: float
+    destination_sources: int
+    uses_tls: bool
+
+
+def _cv(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    mean = sum(values) / len(values)
+    if mean == 0:
+        return 0.0
+    std = math.sqrt(sum((v - mean) ** 2 for v in values) / len(values))
+    return std / mean
 
 
 class BeaconingFeatureExtractor(BaseFeatureExtractor):
-    """Extract C2 beaconing pattern features."""
+    """Extract C2 beaconing features from a rolling per-pair connection history."""
 
-    def __init__(self, min_connections: int = 5):
-        self.min_connections = min_connections
+    def __init__(
+        self,
+        min_connections: int | None = None,
+        history_sec: float | None = None,
+        max_pairs: int = 50_000,
+        max_per_pair: int = 64,
+    ):
+        t = get_thresholds().get("beaconing", {})
+        self.min_connections = min_connections or t.get("min_connections", 10)
+        self.history = timedelta(seconds=history_sec or t.get("history_sec", 7200))
+        self.max_pairs = max_pairs
+        self.max_per_pair = max_per_pair
+        # (src, dst, dport) -> deque[(timestamp, orig_bytes, tls)]; least recently used first
+        self._pairs: OrderedDict[tuple, deque] = OrderedDict()
+        # dst -> {src: last seen}
+        self._dst_sources: OrderedDict[str, dict[str, datetime]] = OrderedDict()
+        self._seen: OrderedDict[str, None] = OrderedDict()
 
     @property
     def name(self) -> str:
@@ -50,123 +103,118 @@ class BeaconingFeatureExtractor(BaseFeatureExtractor):
             "top_beacon_dst_ip",
             "avg_beacon_cv",
             "min_beacon_cv",
+            "beacon_candidates",
+            "tracked_pairs",
         ]
 
+    def reset(self) -> None:
+        self._pairs.clear()
+        self._dst_sources.clear()
+        self._seen.clear()
+
     def extract(self, flows: list[NormalisedFlow], window: WindowContext | None = None) -> dict[str, Any]:
-        if not flows:
-            return {name: 0 for name in self.feature_names}
-
-        # Group by (source_ip, destination_ip) pairs
-        pairs: dict[tuple[str, str], list[NormalisedFlow]] = defaultdict(list)
-        for f in flows:
-            pairs[(f.source_ip, f.destination_ip)].append(f)
-
-        # Analyse each pair for beaconing behaviour
-        beacon_candidates: list[dict[str, Any]] = []
-
-        for (src, dst), pair_flows in pairs.items():
-            if len(pair_flows) < self.min_connections:
+        touched: set[tuple] = set()
+        for f in sorted(flows, key=lambda x: x.timestamp):
+            if f.event_id in self._seen or f.direction == FlowDirection.INBOUND:
                 continue
+            self._remember(f.event_id)
+            key = (f.source_ip, f.destination_ip, f.destination_port)
+            self._add(key, f)
+            touched.add(key)
 
-            # Sort by timestamp
-            sorted_flows = sorted(pair_flows, key=lambda f: f.timestamp)
-
-            # Compute inter-arrival times (seconds)
-            intervals = []
-            for i in range(1, len(sorted_flows)):
-                delta = (sorted_flows[i].timestamp - sorted_flows[i - 1].timestamp).total_seconds()
-                if delta > 0:
-                    intervals.append(delta)
-
-            if len(intervals) < 3:
+        now = max((f.timestamp for f in flows), default=None)
+        candidates = []
+        for key in touched:
+            if key not in self._pairs:        # evicted by the pair limit within this window
                 continue
+            candidate = self._profile(key, now)
+            if candidate is not None:
+                candidates.append(candidate)
+        candidates.sort(key=lambda c: (c.interval_cv, -c.connection_count))
+        candidates = candidates[:_MAX_CANDIDATES]
 
-            # Inter-arrival time statistics
-            mean_interval = sum(intervals) / len(intervals)
-            variance = sum((x - mean_interval) ** 2 for x in intervals) / len(intervals)
-            std_interval = math.sqrt(variance)
-            cv = std_interval / mean_interval if mean_interval > 0 else float("inf")
+        features: dict[str, Any] = {name: 0 for name in self.feature_names}
+        features.update(top_beacon_src_ip=None, top_beacon_dst_ip=None, beacon_candidates=[],
+                        tracked_pairs=len(self._pairs))
+        if not candidates:
+            return features
+        top = candidates[0]
+        features.update(
+            candidate_beacon_pairs=len(candidates),
+            top_beacon_interval_mean=round(top.interval_mean_sec, 4),
+            top_beacon_interval_std=round(top.interval_std_sec, 4),
+            top_beacon_interval_cv=round(top.interval_cv, 4),
+            top_beacon_periodicity_score=round(top.periodicity, 4),
+            top_beacon_size_regularity=round(top.size_regularity, 4),
+            top_beacon_connection_count=top.connection_count,
+            top_beacon_src_ip=top.source_ip,
+            top_beacon_dst_ip=top.destination_ip,
+            avg_beacon_cv=round(sum(c.interval_cv for c in candidates) / len(candidates), 4),
+            min_beacon_cv=round(top.interval_cv, 4),
+            beacon_candidates=[asdict(c) for c in candidates],
+        )
+        return features
 
-            # Periodicity score using simple FFT-like analysis
-            # (ratio of dominant frequency power to total)
-            periodicity = self._periodicity_score(intervals)
+    # ------------------------------------------------------------ internals
 
-            # Packet size regularity
-            sizes = [f.byte_count for f in sorted_flows]
-            size_regularity = self._size_regularity(sizes)
+    def _remember(self, event_id: str) -> None:
+        self._seen[event_id] = None
+        if len(self._seen) > _SEEN_LIMIT:
+            self._seen.popitem(last=False)
 
-            beacon_candidates.append({
-                "src_ip": src,
-                "dst_ip": dst,
-                "connection_count": len(pair_flows),
-                "interval_mean": mean_interval,
-                "interval_std": std_interval,
-                "interval_cv": cv,
-                "periodicity_score": periodicity,
-                "size_regularity": size_regularity,
-            })
+    def _add(self, key: tuple, f: NormalisedFlow) -> None:
+        history = self._pairs.get(key)
+        if history is None:
+            if len(self._pairs) >= self.max_pairs:
+                self._pairs.popitem(last=False)
+            history = self._pairs[key] = deque(maxlen=self.max_per_pair)
+        else:
+            self._pairs.move_to_end(key)
+        upload = f.orig_bytes if f.orig_bytes is not None else f.byte_count
+        history.append((f.timestamp, upload, bool(f.tls_version) or f.destination_port in (443, 8443)))
 
-        if not beacon_candidates:
-            return {name: 0 for name in self.feature_names}
+        sources = self._dst_sources.get(f.destination_ip)
+        if sources is None:
+            if len(self._dst_sources) >= self.max_pairs:
+                self._dst_sources.popitem(last=False)
+            sources = self._dst_sources[f.destination_ip] = {}
+        else:
+            self._dst_sources.move_to_end(f.destination_ip)
+        sources[f.source_ip] = f.timestamp
 
-        # Find the top beacon candidate (lowest CV = most regular)
-        top = min(beacon_candidates, key=lambda c: c["interval_cv"])
+    def _profile(self, key: tuple, now: Optional[datetime]) -> Optional[BeaconCandidate]:
+        history = self._pairs[key]
+        if now is not None:
+            while history and now - history[0][0] > self.history:
+                history.popleft()
+        if len(history) < self.min_connections:
+            return None
+        times = sorted(h[0] for h in history)
+        intervals = [(b - a).total_seconds() for a, b in zip(times, times[1:])]
+        intervals = [i for i in intervals if i > 0]
+        if len(intervals) < self.min_connections - 1:
+            return None
+        mean = sum(intervals) / len(intervals)
+        std = math.sqrt(sum((i - mean) ** 2 for i in intervals) / len(intervals))
+        median = sorted(intervals)[len(intervals) // 2]
+        periodicity = sum(1 for i in intervals if abs(i - median) <= 0.2 * median) / len(intervals)
 
-        return {
-            "candidate_beacon_pairs": len(beacon_candidates),
-            "top_beacon_interval_mean": round(top["interval_mean"], 4),
-            "top_beacon_interval_std": round(top["interval_std"], 4),
-            "top_beacon_interval_cv": round(top["interval_cv"], 4),
-            "top_beacon_periodicity_score": round(top["periodicity_score"], 4),
-            "top_beacon_size_regularity": round(top["size_regularity"], 4),
-            "top_beacon_connection_count": top["connection_count"],
-            "top_beacon_src_ip": top["src_ip"],
-            "top_beacon_dst_ip": top["dst_ip"],
-            "avg_beacon_cv": round(
-                sum(c["interval_cv"] for c in beacon_candidates) / len(beacon_candidates), 4
-            ),
-            "min_beacon_cv": round(
-                min(c["interval_cv"] for c in beacon_candidates), 4
-            ),
-        }
-
-    @staticmethod
-    def _periodicity_score(intervals: list[float]) -> float:
-        """
-        Estimate periodicity from inter-arrival times.
-
-        Uses a simplified approach: measures how closely intervals
-        cluster around the median interval. A perfectly periodic
-        signal would have all intervals identical (score → 1.0).
-        """
-        if len(intervals) < 2:
-            return 0.0
-
-        sorted_vals = sorted(intervals)
-        median = sorted_vals[len(sorted_vals) // 2]
-        if median == 0:
-            return 0.0
-
-        # Fraction of intervals within 20% of median
-        tolerance = 0.2 * median
-        within_tolerance = sum(1 for v in intervals if abs(v - median) <= tolerance)
-        return within_tolerance / len(intervals)
-
-    @staticmethod
-    def _size_regularity(sizes: list[int]) -> float:
-        """
-        Measure how regular packet sizes are.
-
-        Returns 1.0 if all sizes are identical, decreasing with variance.
-        """
-        if len(sizes) < 2:
-            return 1.0
-
-        mean_size = sum(sizes) / len(sizes)
-        if mean_size == 0:
-            return 0.0
-
-        variance = sum((s - mean_size) ** 2 for s in sizes) / len(sizes)
-        cv = math.sqrt(variance) / mean_size
-        # Map CV to [0, 1] — low CV = high regularity
-        return max(0.0, 1.0 - cv)
+        src, dst, dport = key
+        sources = self._dst_sources.get(dst, {})
+        if now is not None:
+            for s in [s for s, seen in sources.items() if now - seen > self.history]:
+                del sources[s]
+        return BeaconCandidate(
+            source_ip=src,
+            destination_ip=dst,
+            destination_port=dport,
+            connection_count=len(times),
+            interval_mean_sec=mean,
+            interval_std_sec=std,
+            interval_cv=std / mean if mean > 0 else 0.0,
+            periodicity=periodicity,
+            size_regularity=max(0.0, 1.0 - _cv([float(h[1]) for h in history])),
+            span_sec=(times[-1] - times[0]).total_seconds(),
+            destination_sources=len(sources),
+            uses_tls=any(h[2] for h in history),
+        )

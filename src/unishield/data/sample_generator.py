@@ -136,16 +136,17 @@ def generate_normal_traffic(
     count: int = 500,
     start_time: datetime | None = None,
     *,
+    gap_ms: tuple[int, int] = (100, 2000),
     rng: random.Random | None = None,
     seed: int | None = None,
 ) -> list[NormalisedFlow]:
-    """Normal baseline traffic (about one completed flow per second)."""
+    """Normal baseline traffic (by default about one completed flow per second)."""
     rng = _rng(rng, seed)
     current_time = start_time or _now()
     flows = []
 
     for _ in range(count):
-        current_time += timedelta(milliseconds=rng.randint(100, 2000))
+        current_time += timedelta(milliseconds=rng.randint(*gap_ms))
         kind = rng.choices(["out_tcp", "in_tcp", "dns", "icmp"], weights=[0.55, 0.15, 0.25, 0.05])[0]
 
         if kind == "out_tcp":
@@ -466,6 +467,16 @@ _SCENARIOS: dict[str, tuple[frozenset[str], str, Callable[[random.Random, dateti
         frozenset({"HOST_SCAN"}), "Background traffic plus an SSH sweep of a /24",
         lambda rng, t0: generate_normal_traffic(60, t0, rng=rng)
         + generate_host_sweep_traffic(254, t0 + timedelta(seconds=20), rng=rng),
+    ),
+    "beacon_30s": (
+        frozenset({"C2_BEACONING"}), "15 minutes of background traffic plus a 30 s HTTPS beacon (5% jitter)",
+        lambda rng, t0: generate_normal_traffic(300, t0, gap_ms=(1000, 5000), rng=rng)
+        + generate_beacon_traffic(25, t0 + timedelta(seconds=30), interval_sec=30, jitter_percent=5, rng=rng),
+    ),
+    "beacon_60s": (
+        frozenset({"C2_BEACONING"}), "20 minutes of background traffic plus a 60 s HTTPS beacon (5% jitter)",
+        lambda rng, t0: generate_normal_traffic(400, t0, gap_ms=(1000, 5000), rng=rng)
+        + generate_beacon_traffic(18, t0 + timedelta(seconds=30), interval_sec=60, jitter_percent=5, rng=rng),
     ),
 }
 

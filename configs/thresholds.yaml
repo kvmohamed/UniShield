@@ -50,24 +50,16 @@ scanning:
       unique_dest_hosts: 20
 
 beaconing:
-  # C2 beacon thresholds
-  min_connections: 10                # minimum connections to consider
-  regularity_cv_threshold: 0.3      # coefficient of variation
-  periodicity_score: 0.7            # FFT periodicity score
-  destination_rarity: 0.9           # rarity percentile
-  packet_size_regularity: 0.8       # size pattern score
-  min_interval_sec: 5
+  # Evaluated per (source, destination, port) over a rolling history of
+  # connection start times kept across windows (beacons are slower than a window).
+  min_connections: 10                # connections needed in the history
+  min_interval_sec: 5                # ignore sub-5-second machine traffic (scans, floods, page loads)
   max_interval_sec: 3600
-  severity_levels:
-    critical:
-      regularity_cv_threshold: 0.1
-      periodicity_score: 0.9
-    high:
-      regularity_cv_threshold: 0.2
-      periodicity_score: 0.8
-    medium:
-      regularity_cv_threshold: 0.3
-      periodicity_score: 0.7
+  regularity_cv_threshold: 0.3       # interval std / mean
+  periodicity_score: 0.7             # share of intervals within 20% of the median
+  max_destination_sources: 3         # rare destination: contacted by at most this many internal hosts
+  history_sec: 7200                  # how long connection history is kept per pair
+  realert_after_sec: 900             # re-report a pair after this much traffic time (or if severity rises)
 
 exfiltration:
   # Data exfiltration thresholds
