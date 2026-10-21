@@ -6,6 +6,7 @@ from unishield.ingest.tls import (
     build_client_hello,
     build_server_hello,
     cipher_name,
+    ja3_text,
     parse_tls_hello,
 )
 
@@ -54,3 +55,24 @@ def test_truncated_and_non_tls_payloads_return_none():
     assert parse_tls_hello(b"GET / HTTP/1.1\r\n") is None
     assert parse_tls_hello(b"\x17\x03\x03\x00\x10" + bytes(16)) is None   # application data
     assert parse_tls_hello(b"") is None
+
+
+def test_ja3_string_and_hash():
+    hello = parse_tls_hello(build_client_hello([0x0304, 0x0303], ciphers=[0x1301, 0xC02F],
+                                               groups=[0x001D, 0x0017], point_formats=[0]))
+    assert hello.ja3_string == "771,4865-49199,43-10-11,29-23,0"
+    assert hello.ja3 == "643802e5f23794d524ef98a2375a56fd"
+
+
+def test_ja3_ignores_grease():
+    plain = parse_tls_hello(build_client_hello([0x0304], ciphers=[0x1301], groups=[0x001D]))
+    greased = parse_tls_hello(build_client_hello([0x0304], ciphers=[0x0A0A, 0x1301], groups=[0x2A2A, 0x001D]))
+    assert greased.ja3 == plain.ja3
+
+
+def test_ja3_empty_fields():
+    assert ja3_text(769, [47], [], [], []) == "769,47,,,"
+
+
+def test_server_hello_has_no_ja3():
+    assert parse_tls_hello(build_server_hello(0x0304, 0x1302)).ja3 is None

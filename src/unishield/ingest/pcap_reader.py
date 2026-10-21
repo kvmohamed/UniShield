@@ -157,7 +157,7 @@ class PcapReader(BaseReader):
         """Convert one IP packet to a packet-level NormalisedFlow."""
         src_port = dst_port = None
         tcp_flags = None
-        tls_version = tls_cipher = None
+        tls_version = tls_cipher = ja3 = None
 
         if pkt.haslayer(TCP):
             protocol = ProtocolType.TCP
@@ -168,7 +168,7 @@ class PcapReader(BaseReader):
             if len(payload) > 5 and payload[0] == 0x16 and payload[1] == 0x03:
                 hello = parse_tls_hello(payload)
                 if hello is not None:
-                    tls_version, tls_cipher = hello.version, hello.cipher
+                    tls_version, tls_cipher, ja3 = hello.version, hello.cipher, hello.ja3
         elif pkt.haslayer(UDP):
             protocol = ProtocolType.UDP
             src_port, dst_port = int(pkt[UDP].sport), int(pkt[UDP].dport)
@@ -210,5 +210,6 @@ class PcapReader(BaseReader):
             dns_rcode=dns_rcode,
             tls_version=tls_version,
             tls_cipher=tls_cipher,
+            ja3=ja3,
             source_type=InputSource.PCAP,
         )

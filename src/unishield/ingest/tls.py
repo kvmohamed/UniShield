@@ -11,12 +11,18 @@ legacy_version field. The real version is in the supported_versions
 extension (RFC 8446 §4.2.1): the client lists what it offers, the server
 states what it selected.
 
+The ClientHello also yields a JA3 fingerprint: MD5 of
+"version,ciphers,extensions,groups,point_formats" (decimal values joined by
+"-", GREASE values removed) — a client-software fingerprint, not proof of
+anything on its own.
+
 Limitation: a hello split across several TCP segments is not reassembled;
 such packets yield None.
 """
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Optional
 
@@ -51,6 +57,8 @@ _CONTENT_HANDSHAKE = 0x16
 _CLIENT_HELLO = 1
 _SERVER_HELLO = 2
 _EXT_SUPPORTED_VERSIONS = 0x002B
+_EXT_SUPPORTED_GROUPS = 0x000A
+_EXT_EC_POINT_FORMATS = 0x000B
 
 
 @dataclass(frozen=True)
@@ -59,6 +67,8 @@ class TLSHello:
     kind: str                     # "client" or "server"
     version: Optional[str]        # client: highest offered; server: selected
     cipher: Optional[str] = None  # server only: selected cipher suite
+    ja3: Optional[str] = None     # client only: JA3 fingerprint (MD5 hex)
+    ja3_string: Optional[str] = None
 
 
 def _is_grease(value: int) -> bool:
@@ -72,6 +82,15 @@ def version_name(code: int) -> str:
 
 def cipher_name(code: int) -> str:
     return _CIPHER_NAMES.get(code, f"0x{code:04x}")
+
+
+def ja3_text(version: int, ciphers: list[int], extensions: list[int], groups: list[int],
+             point_formats: list[int]) -> str:
+    """The JA3 input string (GREASE values removed from ciphers, extensions and groups)."""
+    def join(values, drop_grease=True):
+        return "-".join(str(v) for v in values if not (drop_grease and _is_grease(v)))
+    return ",".join([str(version), join(ciphers), join(extensions), join(groups),
+                     join(point_formats, drop_grease=False)])
 
 
 def parse_tls_hello(payload: bytes) -> Optional[TLSHello]:
@@ -96,14 +115,20 @@ def parse_tls_hello(payload: bytes) -> Optional[TLSHello]:
         p += 2 + 32                                  # version + random
         p += 1 + body[p]                             # session id
         selected_cipher = None
+        ciphers: list[int] = []
         if hs_type == _CLIENT_HELLO:
-            p += 2 + int.from_bytes(body[p:p + 2], "big")   # cipher suites
+            cs_len = int.from_bytes(body[p:p + 2], "big")
+            ciphers = [int.from_bytes(body[i:i + 2], "big") for i in range(p + 2, p + 2 + cs_len, 2)]
+            p += 2 + cs_len                                   # cipher suites
             p += 1 + body[p]                                  # compression methods
         else:
             selected_cipher = int.from_bytes(body[p:p + 2], "big")
             p += 2 + 1                                        # cipher + compression
 
         version = legacy_version
+        extensions: list[int] = []
+        groups: list[int] = []
+        point_formats: list[int] = []
         end = 4 + hs_len
         if p + 2 <= end:
             ext_end = min(p + 2 + int.from_bytes(body[p:p + 2], "big"), end)
@@ -113,21 +138,28 @@ def parse_tls_hello(payload: bytes) -> Optional[TLSHello]:
                 ext_len = int.from_bytes(body[p + 2:p + 4], "big")
                 data = body[p + 4:p + 4 + ext_len]
                 p += 4 + ext_len
-                if ext_type != _EXT_SUPPORTED_VERSIONS:
-                    continue
-                if hs_type == _CLIENT_HELLO:
-                    offered = [
-                        int.from_bytes(data[i:i + 2], "big")
-                        for i in range(1, 1 + data[0], 2)
-                    ]
-                    offered = [v for v in offered if not _is_grease(v)]
-                    if offered:
-                        version = max(offered)
-                elif len(data) >= 2:
-                    version = int.from_bytes(data[:2], "big")
+                extensions.append(ext_type)
+                if ext_type == _EXT_SUPPORTED_GROUPS and len(data) >= 2:
+                    n = int.from_bytes(data[:2], "big")
+                    groups = [int.from_bytes(data[i:i + 2], "big") for i in range(2, 2 + n, 2)]
+                elif ext_type == _EXT_EC_POINT_FORMATS and data:
+                    point_formats = list(data[1:1 + data[0]])
+                elif ext_type == _EXT_SUPPORTED_VERSIONS:
+                    if hs_type == _CLIENT_HELLO:
+                        offered = [
+                            int.from_bytes(data[i:i + 2], "big")
+                            for i in range(1, 1 + data[0], 2)
+                        ]
+                        offered = [v for v in offered if not _is_grease(v)]
+                        if offered:
+                            version = max(offered)
+                    elif len(data) >= 2:
+                        version = int.from_bytes(data[:2], "big")
 
         if hs_type == _CLIENT_HELLO:
-            return TLSHello(kind="client", version=version_name(version))
+            ja3_string = ja3_text(legacy_version, ciphers, extensions, groups, point_formats)
+            return TLSHello(kind="client", version=version_name(version),
+                            ja3=hashlib.md5(ja3_string.encode()).hexdigest(), ja3_string=ja3_string)
         return TLSHello(
             kind="server",
             version=version_name(version),
@@ -137,11 +169,18 @@ def parse_tls_hello(payload: bytes) -> Optional[TLSHello]:
         return None
 
 
-def build_client_hello(versions: list[int], ciphers: list[int] | None = None) -> bytes:
+def build_client_hello(versions: list[int], ciphers: list[int] | None = None,
+                       groups: list[int] | None = None, point_formats: list[int] | None = None) -> bytes:
     """Build a minimal ClientHello record (for tests and sample files)."""
     ciphers = ciphers or [0x1301, 0xC02F]
     sv = bytes([2 * len(versions)]) + b"".join(v.to_bytes(2, "big") for v in versions)
     ext = _EXT_SUPPORTED_VERSIONS.to_bytes(2, "big") + len(sv).to_bytes(2, "big") + sv
+    if groups:
+        g = (2 * len(groups)).to_bytes(2, "big") + b"".join(x.to_bytes(2, "big") for x in groups)
+        ext += _EXT_SUPPORTED_GROUPS.to_bytes(2, "big") + len(g).to_bytes(2, "big") + g
+    if point_formats:
+        f = bytes([len(point_formats)]) + bytes(point_formats)
+        ext += _EXT_EC_POINT_FORMATS.to_bytes(2, "big") + len(f).to_bytes(2, "big") + f
     cs = b"".join(c.to_bytes(2, "big") for c in ciphers)
     hello = (
         (0x0303).to_bytes(2, "big") + bytes(32) + b"\x00"

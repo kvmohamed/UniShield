@@ -80,6 +80,7 @@ class _FlowState:
     tls_offered: Optional[str] = None
     tls_selected: Optional[str] = None
     tls_cipher: Optional[str] = None
+    ja3: Optional[str] = None
 
 
 def _port_key(endpoint: _Endpoint) -> tuple[str, int]:
@@ -262,6 +263,8 @@ class Sessionizer:
                 state.tls_selected = p.tls_version
         if p.tls_cipher and not from_orig:
             state.tls_cipher = p.tls_cipher
+        if p.ja3 and from_orig and state.ja3 is None:
+            state.ja3 = p.ja3
 
     @staticmethod
     def _orientation(p: NormalisedFlow, src: _Endpoint, dst: _Endpoint, flags: set[str]):
@@ -317,6 +320,7 @@ class Sessionizer:
             dns_rcode=s.dns_rcode,
             tls_version=s.tls_selected or s.tls_offered,
             tls_cipher=s.tls_cipher,
+            ja3=s.ja3,
             source_type=s.source_type,
         )
         heapq.heappush(self._heap, (record.timestamp, next(self._seq), record))
