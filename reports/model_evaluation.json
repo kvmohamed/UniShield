@@ -1,0 +1,563 @@
+{
+  "context": {
+    "dataset": "windows_synthetic.csv",
+    "sha256": "a78c70776e6560b541157956dc6b39059ee52791ce1433915d411b46964a27a9",
+    "source_description": "seeded generator, 11 scenarios \u00d7 20 seeds",
+    "limitations": [
+      "The data is produced by UniShield's own seeded generator. Train and test come from the same generator, so supervised scores are optimistic; the leave-one-attack-out table is a better guide to behaviour on unfamiliar attacks.",
+      "Results on real traffic (e.g. CICIDS2017, CTU-13) require running `scripts/prepare_dataset.py --input <files>` on those datasets; they are not included.",
+      "Probabilities are calibrated on the calibration split of the same distribution and may be miscalibrated on other networks."
+    ],
+    "generated_at": "2026-10-21 18:36 UTC"
+  },
+  "results": {
+    "threshold": 0.9,
+    "windows": {
+      "train": 11099,
+      "calibration": 3635,
+      "test": 3710
+    },
+    "attack_windows": {
+      "train": 1900,
+      "calibration": 651,
+      "test": 653
+    },
+    "approaches": {
+      "rules": {
+        "tp": 276,
+        "fp": 0,
+        "tn": 3057,
+        "fn": 377,
+        "precision": 1.0,
+        "recall": 0.4227,
+        "f1": 0.5942,
+        "false_positive_rate": 0.0,
+        "accuracy": 0.8984,
+        "pr_auc": 0.5243,
+        "roc_auc": 0.7113,
+        "recall_by_class": {
+          "C2_BEACONING": 0.2907,
+          "DATA_EXFILTRATION": 0.3,
+          "DGA_DETECTED": 0.75,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 1.0,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 0.9062,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        },
+        "benign_false_alarm_windows": 0,
+        "episodes": 48,
+        "episodes_detected": 48,
+        "episode_recall": 1.0,
+        "episode_recall_by_class": {
+          "C2_BEACONING": 1.0,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 1.0,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        },
+        "delay_median_sec": 0.0,
+        "delay_max_sec": 550.0
+      },
+      "rules_statistical": {
+        "tp": 323,
+        "fp": 0,
+        "tn": 3057,
+        "fn": 330,
+        "precision": 1.0,
+        "recall": 0.4946,
+        "f1": 0.6618,
+        "false_positive_rate": 0.0,
+        "accuracy": 0.9111,
+        "pr_auc": 0.5836,
+        "roc_auc": 0.7473,
+        "recall_by_class": {
+          "C2_BEACONING": 0.2907,
+          "DATA_EXFILTRATION": 0.5611,
+          "DGA_DETECTED": 0.75,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 1.0,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 0.9062,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        },
+        "benign_false_alarm_windows": 0,
+        "episodes": 48,
+        "episodes_detected": 48,
+        "episode_recall": 1.0,
+        "episode_recall_by_class": {
+          "C2_BEACONING": 1.0,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 1.0,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        },
+        "delay_median_sec": 0.0,
+        "delay_max_sec": 550.0
+      },
+      "random_forest": {
+        "tp": 447,
+        "fp": 0,
+        "tn": 3057,
+        "fn": 206,
+        "precision": 1.0,
+        "recall": 0.6845,
+        "f1": 0.8127,
+        "false_positive_rate": 0.0,
+        "accuracy": 0.9445,
+        "pr_auc": 0.9609,
+        "roc_auc": 0.9865,
+        "recall_by_class": {
+          "C2_BEACONING": 0.4244,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 0.7576,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        },
+        "benign_false_alarm_windows": 0,
+        "episodes": 48,
+        "episodes_detected": 48,
+        "episode_recall": 1.0,
+        "episode_recall_by_class": {
+          "C2_BEACONING": 1.0,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 1.0,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        },
+        "delay_median_sec": 0.0,
+        "delay_max_sec": 545.0
+      },
+      "xgboost": {
+        "tp": 492,
+        "fp": 1,
+        "tn": 3056,
+        "fn": 161,
+        "precision": 0.998,
+        "recall": 0.7534,
+        "f1": 0.8586,
+        "false_positive_rate": 0.0003,
+        "accuracy": 0.9563,
+        "pr_auc": 0.9752,
+        "roc_auc": 0.993,
+        "recall_by_class": {
+          "C2_BEACONING": 0.5407,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 0.875,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 1.0,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 0.9688,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        },
+        "benign_false_alarm_windows": 1,
+        "episodes": 48,
+        "episodes_detected": 48,
+        "episode_recall": 1.0,
+        "episode_recall_by_class": {
+          "C2_BEACONING": 1.0,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 1.0,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        },
+        "delay_median_sec": 0.0,
+        "delay_max_sec": 90.0
+      },
+      "isolation_forest": {
+        "tp": 0,
+        "fp": 0,
+        "tn": 3057,
+        "fn": 653,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "false_positive_rate": 0.0,
+        "accuracy": 0.824,
+        "pr_auc": 0.4211,
+        "roc_auc": 0.7607,
+        "recall_by_class": {
+          "C2_BEACONING": 0.0,
+          "DATA_EXFILTRATION": 0.0,
+          "DGA_DETECTED": 0.0,
+          "DNS_TUNNELLING": 0.0,
+          "ENCRYPTED_SESSION_ANOMALY": 0.0,
+          "HOST_SCAN": 0.0,
+          "PORT_SCAN": 0.0,
+          "SYN_FLOOD": 0.0,
+          "UDP_FLOOD": 0.0
+        },
+        "benign_false_alarm_windows": 0,
+        "episodes": 48,
+        "episodes_detected": 0,
+        "episode_recall": 0.0,
+        "episode_recall_by_class": {
+          "C2_BEACONING": 0.0,
+          "DATA_EXFILTRATION": 0.0,
+          "DGA_DETECTED": 0.0,
+          "DNS_TUNNELLING": 0.0,
+          "ENCRYPTED_SESSION_ANOMALY": 0.0,
+          "HOST_SCAN": 0.0,
+          "PORT_SCAN": 0.0,
+          "SYN_FLOOD": 0.0,
+          "UDP_FLOOD": 0.0
+        },
+        "delay_median_sec": null,
+        "delay_max_sec": null
+      },
+      "hybrid": {
+        "tp": 455,
+        "fp": 0,
+        "tn": 3057,
+        "fn": 198,
+        "precision": 1.0,
+        "recall": 0.6968,
+        "f1": 0.8213,
+        "false_positive_rate": 0.0,
+        "accuracy": 0.9466,
+        "pr_auc": 0.9615,
+        "roc_auc": 0.9866,
+        "recall_by_class": {
+          "C2_BEACONING": 0.4244,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 1.0,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        },
+        "benign_false_alarm_windows": 0,
+        "episodes": 48,
+        "episodes_detected": 48,
+        "episode_recall": 1.0,
+        "episode_recall_by_class": {
+          "C2_BEACONING": 1.0,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 1.0,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        },
+        "delay_median_sec": 0.0,
+        "delay_max_sec": 545.0
+      }
+    },
+    "calibration": {
+      "random_forest": {
+        "calibrated": true,
+        "brier_after": 0.0249,
+        "ece_after": 0.0101,
+        "brier_before": 0.0271,
+        "ece_before": 0.0271
+      },
+      "xgboost": {
+        "calibrated": true,
+        "brier_after": 0.0194,
+        "ece_after": 0.0089,
+        "brier_before": 0.0205,
+        "ece_before": 0.0149
+      },
+      "isolation_forest": {
+        "calibrated": true,
+        "brier_after": 0.1175,
+        "ece_after": 0.0148
+      }
+    },
+    "feature_importance": [
+      [
+        "flows_per_second",
+        0.0323
+      ],
+      [
+        "failed_connection_ratio",
+        0.0318
+      ],
+      [
+        "total_flows",
+        0.0307
+      ],
+      [
+        "connection_rate",
+        0.03
+      ],
+      [
+        "outbound_inbound_ratio",
+        0.0298
+      ],
+      [
+        "max_query_length",
+        0.0288
+      ],
+      [
+        "total_outbound_bytes",
+        0.0274
+      ],
+      [
+        "unique_source_ips",
+        0.0269
+      ],
+      [
+        "peak_flows_per_second",
+        0.0258
+      ],
+      [
+        "nxdomain_ratio",
+        0.0251
+      ],
+      [
+        "max_domain_entropy",
+        0.025
+      ],
+      [
+        "dest_ip_entropy",
+        0.0248
+      ],
+      [
+        "syn_target_attempts",
+        0.0238
+      ],
+      [
+        "max_pair_upload",
+        0.0237
+      ],
+      [
+        "avg_domain_entropy",
+        0.0235
+      ]
+    ],
+    "random_forest_confusion": {
+      "C2_BEACONING": {
+        "C2_BEACONING": 253,
+        "BENIGN": 91
+      },
+      "DATA_EXFILTRATION": {
+        "DATA_EXFILTRATION": 180
+      },
+      "DGA_DETECTED": {
+        "DGA_DETECTED": 16
+      },
+      "DNS_TUNNELLING": {
+        "DNS_TUNNELLING": 16
+      },
+      "ENCRYPTED_SESSION_ANOMALY": {
+        "ENCRYPTED_SESSION_ANOMALY": 30,
+        "BENIGN": 3
+      },
+      "HOST_SCAN": {
+        "HOST_SCAN": 12
+      },
+      "PORT_SCAN": {
+        "PORT_SCAN": 32
+      },
+      "SYN_FLOOD": {
+        "SYN_FLOOD": 8
+      },
+      "UDP_FLOOD": {
+        "UDP_FLOOD": 12
+      }
+    },
+    "ablations": {
+      "all_features": {
+        "f1": 0.8127,
+        "recall": 0.6845,
+        "precision": 1.0,
+        "false_positive_rate": 0.0,
+        "pr_auc": 0.9609,
+        "recall_by_class": {
+          "C2_BEACONING": 0.4244,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 0.7576,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        }
+      },
+      "without_volume": {
+        "f1": 0.8159,
+        "recall": 0.6922,
+        "precision": 0.9934,
+        "false_positive_rate": 0.001,
+        "pr_auc": 0.9285,
+        "recall_by_class": {
+          "C2_BEACONING": 0.4244,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 0.9394,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 0.9688,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        }
+      },
+      "without_scan": {
+        "f1": 0.8171,
+        "recall": 0.6907,
+        "precision": 1.0,
+        "false_positive_rate": 0.0,
+        "pr_auc": 0.9594,
+        "recall_by_class": {
+          "C2_BEACONING": 0.436,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 0.7576,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        }
+      },
+      "without_beaconing": {
+        "f1": 0.804,
+        "recall": 0.6784,
+        "precision": 0.9866,
+        "false_positive_rate": 0.002,
+        "pr_auc": 0.9467,
+        "recall_by_class": {
+          "C2_BEACONING": 0.407,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 0.8182,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        }
+      },
+      "without_exfiltration": {
+        "f1": 0.8087,
+        "recall": 0.6799,
+        "precision": 0.9978,
+        "false_positive_rate": 0.0003,
+        "pr_auc": 0.9591,
+        "recall_by_class": {
+          "C2_BEACONING": 0.4215,
+          "DATA_EXFILTRATION": 0.9889,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 0.7576,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        }
+      },
+      "without_dns": {
+        "f1": 0.8195,
+        "recall": 0.6953,
+        "precision": 0.9978,
+        "false_positive_rate": 0.0003,
+        "pr_auc": 0.96,
+        "recall_by_class": {
+          "C2_BEACONING": 0.4419,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 0.7879,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        }
+      },
+      "without_tls": {
+        "f1": 0.8401,
+        "recall": 0.732,
+        "precision": 0.9856,
+        "false_positive_rate": 0.0023,
+        "pr_auc": 0.9434,
+        "recall_by_class": {
+          "C2_BEACONING": 0.532,
+          "DATA_EXFILTRATION": 1.0,
+          "DGA_DETECTED": 1.0,
+          "DNS_TUNNELLING": 1.0,
+          "ENCRYPTED_SESSION_ANOMALY": 0.5758,
+          "HOST_SCAN": 1.0,
+          "PORT_SCAN": 1.0,
+          "SYN_FLOOD": 1.0,
+          "UDP_FLOOD": 1.0
+        }
+      }
+    },
+    "leave_one_attack_out": {
+      "C2_BEACONING": {
+        "windows": 344,
+        "flagged_as_attack": 0.0,
+        "benign_false_positive_rate": 0.0
+      },
+      "DATA_EXFILTRATION": {
+        "windows": 180,
+        "flagged_as_attack": 0.0,
+        "benign_false_positive_rate": 0.0003
+      },
+      "DGA_DETECTED": {
+        "windows": 16,
+        "flagged_as_attack": 0.0,
+        "benign_false_positive_rate": 0.0
+      },
+      "DNS_TUNNELLING": {
+        "windows": 16,
+        "flagged_as_attack": 0.0,
+        "benign_false_positive_rate": 0.0003
+      },
+      "ENCRYPTED_SESSION_ANOMALY": {
+        "windows": 33,
+        "flagged_as_attack": 0.0,
+        "benign_false_positive_rate": 0.0
+      },
+      "HOST_SCAN": {
+        "windows": 12,
+        "flagged_as_attack": 1.0,
+        "benign_false_positive_rate": 0.0003
+      },
+      "PORT_SCAN": {
+        "windows": 32,
+        "flagged_as_attack": 0.9688,
+        "benign_false_positive_rate": 0.0
+      },
+      "SYN_FLOOD": {
+        "windows": 8,
+        "flagged_as_attack": 1.0,
+        "benign_false_positive_rate": 0.0
+      },
+      "UDP_FLOOD": {
+        "windows": 12,
+        "flagged_as_attack": 0.0,
+        "benign_false_positive_rate": 0.0
+      }
+    }
+  }
+}
