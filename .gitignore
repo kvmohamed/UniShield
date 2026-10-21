@@ -41,6 +41,7 @@ data/samples/*
 models/saved/*.joblib
 models/saved/*.pkl
 models/saved/*.pt
+models/metadata/*.json
 
 # Reports
 reports/benchmark_results/*.json

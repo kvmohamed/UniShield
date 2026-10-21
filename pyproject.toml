@@ -45,6 +45,10 @@ dev = [
 reports = [
     "matplotlib>=3.8",
 ]
+# Optional XGBoost window model (scripts/train_models.py trains it when installed)
+ml = [
+    "xgboost>=2.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

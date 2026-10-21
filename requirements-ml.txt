@@ -1,0 +1,9 @@
+# ============================================================
+# UniShield - optional ML extra (XGBoost window model)
+# Install after requirements.txt or requirements-dev.txt.
+# On Linux x86_64 the xgboost wheel also pulls nvidia-nccl-cu12;
+# "xgboost-cpu" is a smaller drop-in alternative there.
+# ============================================================
+-r requirements.txt
+
+xgboost==3.4.1
