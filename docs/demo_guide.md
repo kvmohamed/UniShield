@@ -1,67 +1,80 @@
 # UniShield — Demo Guide
 
-> The full scripted demonstration is rebuilt in Phase 10. This guide covers what
-> works today.
+Everything below runs offline on synthetic or locally written data. Nothing
+is downloaded and nothing is sent on any network.
 
-## Quick Demo (Local)
+## 1. One command
 
-### 1. Install and start the API
 ```bash
-py -3.12 -m venv .venv          # Linux/macOS: python3.12 -m venv .venv
-.venv\Scripts\activate          # Linux/macOS: source .venv/bin/activate
-pip install -r requirements-dev.txt
-pip install --no-deps -e .
-python -m unishield.main
+python scripts/run_demo.py            # full: about 5 minutes
+python scripts/run_demo.py --quick    # shorter seeds/runs: about 1 minute
 ```
 
-### 2. Verify Health
+(`scripts/run_demo.bat` on Windows and `scripts/run_demo.sh` on Linux/macOS
+use the project's `.venv` when it exists.)
+
+It runs seven steps and writes every result to `reports/`:
+
+| Step | Output |
+|---|---|
+| Sample input files (PCAP, PCAPNG, Zeek JSON/TSV, flow CSV/JSONL, CICIDS-style CSV) | `data/samples/` |
+| Every labelled scenario through the pipeline, raised vs expected classes | `reports/demo_detection.json` |
+| Window dataset, training, calibration, comparison of approaches | `reports/model_evaluation.md`, `models/saved/` |
+| Throughput and alert-latency benchmark (5 runs) + PCAP path | `reports/benchmark.md` |
+| Paced real-time replay with end-to-end timestamps (5 runs) | `reports/realtime_verdict.md` |
+| Passive-mode verification (static + runtime) | `reports/passive_mode_verification.md` |
+| Charts | `reports/figures/*.png` |
+
+## 2. Dashboard
+
 ```bash
-curl http://127.0.0.1:8000/health
+python -m unishield.main              # http://127.0.0.1:8000/dashboard
 ```
 
-### 3. Open the Dashboard and API Docs
-- Dashboard: http://127.0.0.1:8000/dashboard
-- API docs: http://127.0.0.1:8000/docs
+- **Overview**: pick a scenario (e.g. `ddos_syn`, `beacon_30s`,
+  `encrypted_anomaly`, or `mixed`) and press *Run demo*, or enter a file under
+  `data/` (e.g. `data/samples/attack_portscan.pcap`) and press *Analyse file*.
+- **Alerts & timeline**: filter alerts, page through them and open one to see
+  its evidence, MITRE ATT&CK links and stage timestamps (window closed →
+  stored).
+- **Traffic analytics**: flows and bytes per analysis window, top alert
+  sources and destinations.
+- **Benchmark & evaluation**: the measured benchmark, live pipeline metrics
+  and the model comparison table.
+- **Architecture status**: pipeline stages, safety constraints, trained
+  models and per-detector counters.
 
-### 4. Run the synthetic demo
-Click **Run Demo Analysis** on the dashboard, or:
-```bash
-curl -X POST "http://127.0.0.1:8000/replay/demo?normal=300&ddos=6000&scan=150&beacon=30&exfil=40&seed=42"
-```
-This produces DDoS (volumetric, SYN flood, UDP flood), port-scan and exfiltration alerts.
-`seed=42` makes the run reproducible; omit it for a random one. Beaconing at the demo's 60-second interval is not
-detected yet, and some LOW-severity beaconing alerts are false positives (Phase 5).
+From another machine or from Docker, set `UNISHIELD_ADMIN_API_KEY` and type
+the key into the *Admin key* field to run demos and replays.
 
-### 5. Replay sample traffic files
-```bash
-python scripts/make_samples.py
-curl -X POST "http://127.0.0.1:8000/replay/start?file_path=data/samples/sample.pcap"
-curl http://127.0.0.1:8000/replay/status
-```
-The sample PCAP (26 packets) is grouped into 10 flows; `/replay/status` shows the
-reader, sessionizer, normaliser and window counts. It is benign, so it raises no DDoS
-or scan alert. Replay `data/samples/attack_portscan.pcap` or
-`data/samples/attack_synflood.pcap` to see PORT_SCAN / SYN_FLOOD alerts from a real
-capture.
+## 3. Hybrid detection
 
-### 6. Run Tests
 ```bash
-python -m pytest tests/ -q
+python scripts/prepare_dataset.py --synthetic --seeds 1-20
+python scripts/train_models.py
+UNISHIELD_DETECTION_MODE=hybrid python -m unishield.main
 ```
 
-## Offline Demo
-After installation the system runs without Internet access. The dashboard requests a web
-font from Google Fonts and falls back to system fonts when offline.
+or `POST /replay/demo?scenario=beacon_30s&mode=hybrid`. Alerts from the
+window model have `detector_name = ml_detector` and a calibrated probability
+as confidence.
 
-## Docker Demo
+## 4. Command line
+
 ```bash
-docker compose up -d --build
-# API and dashboard: http://127.0.0.1:8000/dashboard
+python scripts/replay_pcap.py --input data/samples/attack_synflood.pcap
+python scripts/replay_pcap.py --input data/samples/zeek --json
+python scripts/verify_passive_mode.py
+pytest                       # unit, integration and security tests
+pytest -m performance        # performance targets on this machine
 ```
 
-## What to Show
-1. Health endpoint confirming security constraints
-2. API documentation with all endpoints
-3. Test suite passing
-4. Configuration with immutable security constraints
-5. Flow and alert schema validation
+## Talking points
+
+- Detection is metadata only; TLS is never decrypted.
+- Rule confidences are scores; only the ML detector reports calibrated
+  probabilities.
+- Every number in the reports is produced by the scripts on the machine that
+  ran them, with the machine recorded in the report.
+- The models are trained on synthetic data from UniShield's own generator;
+  read the leave-one-attack-out table before trusting the high scores.
