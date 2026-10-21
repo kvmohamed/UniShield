@@ -26,6 +26,8 @@ build/
 
 # Database
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
 
 # Data files (keep structure, ignore large files)

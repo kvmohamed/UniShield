@@ -51,6 +51,7 @@ from unishield.processing.window import SlidingWindow, Window
 from unishield.schemas.alert import Alert, SourceType
 from unishield.schemas.flow import InputSource, NormalisedFlow
 from unishield.schemas.metrics import PipelineMetrics
+from unishield.schemas.timeutil import utc_now
 
 logger = logging.getLogger("unishield.processing.pipeline")
 
@@ -68,6 +69,19 @@ _ALERT_SOURCE = {
 _RECORD_LATENCY_HISTORY = 100_000
 _WINDOW_LATENCY_HISTORY = 10_000
 _FEATURE_HISTORY = 1_000
+
+
+def _related_flow_id(alert: Alert, records: list[NormalisedFlow]) -> Optional[str]:
+    """
+    Id of the first flow in the window between the alert's source and
+    destination: its flow_id (sessionizer / Zeek uid / CSV) or else its event_id.
+    """
+    if alert.source_ip is None and alert.destination_ip is None:
+        return None
+    for f in records:
+        if (alert.source_ip is None or f.source_ip == alert.source_ip)                 and (alert.destination_ip is None or f.destination_ip == alert.destination_ip):
+            return f.flow_id or f.event_id
+    return None
 
 
 def _percentile(values, p: int) -> float:
@@ -91,6 +105,8 @@ class PipelineResult:
         self.total_alerts: int = 0
         self.alerts: list[Alert] = []
         self.features_history: deque[dict[str, Any]] = deque(maxlen=_FEATURE_HISTORY)
+        # per-window traffic and alert counts of the most recent windows (dashboard analytics)
+        self.window_series: deque[dict[str, Any]] = deque(maxlen=_WINDOW_LATENCY_HISTORY)
         self.start_time: Optional[float] = None
         self.end_time: Optional[float] = None
         self.latencies_ms: deque[float] = deque(maxlen=_RECORD_LATENCY_HISTORY)
@@ -257,6 +273,7 @@ class Pipeline:
         self.detectors = detectors or default_detectors(self.detection_mode)
         self._window_observer = window_observer
         self._last_rule_classes: set[str] = set()
+        self.result: PipelineResult | None = None
 
         # Alert correlation engine
         self._correlator = AlertCorrelator() if enable_correlation else None
@@ -302,6 +319,7 @@ class Pipeline:
         """
         result = PipelineResult()
         result.start_time = time.time()
+        self.result = result                  # live view for the API while running
 
         self._is_running = True
         self._should_stop = False
@@ -396,6 +414,7 @@ class Pipeline:
     def _process_window(self, window: Window, result: PipelineResult) -> None:
         """Extract features, run detectors and deliver alerts for one closed window."""
         started = time.perf_counter()
+        closed_at = utc_now()
         result.total_windows += 1
         self._total_windows += 1
 
@@ -417,6 +436,10 @@ class Pipeline:
         for alert in alerts:
             if source is not None:
                 alert.source_type = source
+            if alert.flow_id is None:
+                alert.flow_id = _related_flow_id(alert, window.records)
+            alert.window_closed_at = closed_at
+            alert.emitted_at = utc_now()
             result.alerts.append(alert)
             result.total_alerts += 1
             self._total_alerts += 1
@@ -427,6 +450,15 @@ class Pipeline:
                     logger.error("Alert callback error: %s", e)
 
         result.window_latencies_ms.append((time.perf_counter() - started) * 1000.0)
+        result.window_series.append({
+            "window_start": window.start,
+            "window_end": window.end,
+            "flows": len(window.records),
+            "packets": features.get("total_packets", 0),
+            "bytes": features.get("total_bytes", 0),
+            "alerts": len(alerts),
+            "processing_ms": round(result.window_latencies_ms[-1], 3),
+        })
 
     def _extract_features(
         self, flows: list[NormalisedFlow], window: WindowContext | None = None

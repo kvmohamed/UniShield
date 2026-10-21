@@ -1,1 +1,5 @@
-"""Storage package — database, repositories, migrations."""
+"""Storage package — SQLAlchemy alert and run persistence (SQLite default, PostgreSQL by URL)."""
+
+from unishield.storage.repository import AlertQuery, AlertRepository
+
+__all__ = ["AlertQuery", "AlertRepository"]

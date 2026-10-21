@@ -24,6 +24,7 @@ PyYAML==6.0.3
 scapy==2.8.0
 scikit-learn==1.9.1
 scipy==1.18.1
+SQLAlchemy==2.1.6
 starlette==1.8.0
 threadpoolctl==3.7.0
 typing-inspection==0.4.4

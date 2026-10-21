@@ -164,11 +164,34 @@ class Alert(BaseModel):
         description="How the traffic was obtained",
     )
 
+    # --- Processing-stage wall-clock times (end-to-end latency) ---
+    window_closed_at: Optional[datetime] = Field(
+        default=None,
+        description="Wall-clock time the alert's window closed and analysis began (UTC)",
+    )
+    emitted_at: Optional[datetime] = Field(
+        default=None,
+        description="Wall-clock time the pipeline emitted the alert (UTC)",
+    )
+    stored_at: Optional[datetime] = Field(
+        default=None,
+        description="Wall-clock time the alert was written to storage (UTC)",
+    )
+    run_id: Optional[str] = Field(
+        default=None,
+        description="Replay/analysis run that produced the alert",
+    )
+
     @field_validator("timestamp", "window_start", "window_end")
     @classmethod
     def normalise_utc(cls, v: datetime) -> datetime:
         """Store every alert time as timezone-aware UTC."""
         return ensure_utc(v)
+
+    @field_validator("window_closed_at", "emitted_at", "stored_at")
+    @classmethod
+    def normalise_optional_utc(cls, v: Optional[datetime]) -> Optional[datetime]:
+        return ensure_utc(v) if v is not None else None
 
     @field_validator("confidence")
     @classmethod
