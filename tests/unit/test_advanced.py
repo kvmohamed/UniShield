@@ -26,7 +26,7 @@ from unishield.detectors.dns_detector import DNSDetector
 from unishield.detectors.exfiltration_detector import ExfiltrationDetector
 from unishield.detectors.scan_detector import ScanDetector
 from unishield.features.beaconing import BeaconingFeatureExtractor
-from unishield.features.dns import DNSFeatureExtractor, _char_entropy
+from unishield.features.dns import DNSFeatureExtractor, char_entropy as _char_entropy
 from unishield.features.exfiltration import ExfiltrationFeatureExtractor
 from unishield.features.scan import ScanFeatureExtractor
 from unishield.features.statistical import StatisticalFeatureExtractor

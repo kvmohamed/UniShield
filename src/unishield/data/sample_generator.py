@@ -15,7 +15,7 @@ Reproducibility: every generator accepts ``rng`` (a ``random.Random``) or
 returns a labelled scenario plus the threat classes it is expected to raise.
 
 Labels (``NormalisedFlow.label``): BENIGN, DDOS_SYN_FLOOD, DDOS_UDP_FLOOD,
-PORT_SCAN, HOST_SCAN, C2_BEACONING, DATA_EXFILTRATION. Detectors never read
+PORT_SCAN, HOST_SCAN, C2_BEACONING, DATA_EXFILTRATION, DGA, DNS_TUNNELLING. Detectors never read
 labels; they are ground truth for evaluation.
 """
 
@@ -362,6 +362,70 @@ def generate_exfil_traffic(
 
 
 # ---------------------------------------------------------------------------
+# DNS: DGA and tunnelling (optional advanced module)
+# ---------------------------------------------------------------------------
+
+LABEL_DGA = "DGA"
+LABEL_DNS_TUNNEL = "DNS_TUNNELLING"
+
+
+def _dns_flow(rng, t, src, query, qtype, rcode, label, resp=True):
+    return _flow(
+        timestamp=t, src=src, dst=DNS_RESOLVER, sport=rng.randint(1024, 65535), dport=53,
+        protocol=ProtocolType.UDP, orig_packets=1, resp_packets=1 if resp else 0,
+        orig_bytes=40 + len(query), resp_bytes=(60 + len(query)) if resp else 0,
+        duration=0.01, conn_state="SF" if resp else "S0", direction=FlowDirection.INTERNAL,
+        label=label, dns_query=query, dns_record_type=qtype, dns_rcode=rcode if resp else None,
+    )
+
+
+def generate_dga_traffic(
+    count: int = 120,
+    start_time: datetime | None = None,
+    infected_ip: str = "10.0.1.66",
+    *,
+    nxdomain_fraction: float = 0.9,
+    rng: random.Random | None = None,
+    seed: int | None = None,
+) -> list[NormalisedFlow]:
+    """An infected host resolving random-looking domains, most of which do not exist."""
+    rng = _rng(rng, seed)
+    current_time = start_time or _now()
+    alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+    flows = []
+    for _ in range(count):
+        current_time += timedelta(milliseconds=rng.randint(30, 150))
+        name = "".join(rng.choice(alphabet) for _ in range(rng.randint(10, 16)))
+        query = f"{name}.{rng.choice(['com', 'net', 'org', 'info', 'biz'])}"
+        rcode = "NXDOMAIN" if rng.random() < nxdomain_fraction else "NOERROR"
+        flows.append(_dns_flow(rng, current_time, infected_ip, query, "A", rcode, LABEL_DGA))
+    return flows
+
+
+def generate_dns_tunnel_traffic(
+    count: int = 150,
+    start_time: datetime | None = None,
+    client_ip: str = "10.0.1.77",
+    base_domain: str = "t.exfil-tunnel.example",
+    *,
+    rng: random.Random | None = None,
+    seed: int | None = None,
+) -> list[NormalisedFlow]:
+    """Data encoded as base32-like subdomains of one base domain, mostly TXT queries."""
+    rng = _rng(rng, seed)
+    current_time = start_time or _now()
+    alphabet = "abcdefghijklmnopqrstuvwxyz234567"
+    flows = []
+    for i in range(count):
+        current_time += timedelta(milliseconds=rng.randint(40, 120))
+        chunk = "".join(rng.choice(alphabet) for _ in range(rng.randint(40, 60)))
+        query = f"{chunk}.{i:05d}.{base_domain}"
+        qtype = "TXT" if rng.random() < 0.8 else "A"
+        flows.append(_dns_flow(rng, current_time, client_ip, query, qtype, "NOERROR", LABEL_DNS_TUNNEL))
+    return flows
+
+
+# ---------------------------------------------------------------------------
 # Mixed scenario (baseline + attacks)
 # ---------------------------------------------------------------------------
 
@@ -479,6 +543,16 @@ _SCENARIOS: dict[str, tuple[frozenset[str], str, Callable[[random.Random, dateti
         lambda rng, t0: generate_normal_traffic(600, t0, gap_ms=(1000, 5000), rng=rng)
         + [f for k in range(3)
            for f in generate_exfil_traffic(12, t0 + timedelta(minutes=2 + 12 * k), rng=rng)],
+    ),
+    "dga": (
+        frozenset({"DGA_DETECTED"}), "Background traffic plus a host resolving random-looking domains (mostly NXDOMAIN)",
+        lambda rng, t0: generate_normal_traffic(60, t0, rng=rng)
+        + generate_dga_traffic(120, t0 + timedelta(seconds=20), rng=rng),
+    ),
+    "dns_tunnel": (
+        frozenset({"DNS_TUNNELLING"}), "Background traffic plus data encoded in DNS subdomains",
+        lambda rng, t0: generate_normal_traffic(60, t0, rng=rng)
+        + generate_dns_tunnel_traffic(150, t0 + timedelta(seconds=20), rng=rng),
     ),
     "beacon_60s": (
         frozenset({"C2_BEACONING"}), "20 minutes of background traffic plus a 60 s HTTPS beacon (5% jitter)",

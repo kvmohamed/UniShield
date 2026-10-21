@@ -1,18 +1,24 @@
 """
-UniShield — DNS Tunnelling & DGA Detector
+UniShield — DNS Tunnelling & DGA Detector (optional advanced module)
 
-Detects DNS-based threats:
-    - DNS Tunnelling: data exfiltration/C2 via encoded DNS queries
-      (long queries, high entropy, TXT record abuse)
-    - DGA (Domain Generation Algorithm): malware-generated domains
-      with high character entropy, unusual character distributions
+Applies rules to the candidates of DNSFeatureExtractor:
 
-Uses features from the DNSFeatureExtractor.
+    DGA_DETECTED   — one client queried at least ``dga_min_domains`` distinct
+                     registrable domains that look machine-generated, and
+                     either at least ``nxdomain_ratio`` of its answers were
+                     NXDOMAIN or (without response codes) at least
+                     ``dga_generated_share`` of its domains look generated
+    DNS_TUNNELLING — one base domain received at least ``tunnel_min_queries``
+                     queries with mostly unique subdomains
+                     (>= ``subdomain_uniqueness``) that are long
+                     (>= ``query_length_threshold`` characters on average) or
+                     high-entropy (>= ``domain_entropy_threshold`` bits/char)
 
-MITRE ATT&CK:
-    - T1071.004: Application Layer Protocol: DNS
-    - T1568.002: Dynamic Resolution: Domain Generation Algorithms
-    - T1048.003: Exfiltration Over Alternative Protocol: DNS
+Name-based heuristics are probabilistic: CDNs and some services use
+generated-looking names, so findings are leads for investigation.
+Confidence is a rule score, not a calibrated probability.
+
+MITRE ATT&CK: T1568.002 (DGA); T1071.004, T1572 (tunnelling).
 """
 
 from __future__ import annotations
@@ -21,20 +27,18 @@ import time
 from typing import Any
 
 from unishield.config import get_thresholds
+from unishield.correlation.mitre_mapping import techniques_for
 from unishield.detectors.base import BaseDetector
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
 
 
 class DNSDetector(BaseDetector):
-    """
-    Detect DNS tunnelling and DGA activity.
-    """
+    """Detect DGA activity per client and DNS tunnelling per base domain."""
 
     def __init__(self, thresholds: dict[str, Any] | None = None):
         if thresholds is None:
-            all_thresholds = get_thresholds()
-            thresholds = all_thresholds.get("dns", {})
+            thresholds = get_thresholds().get("dns", {})
         super().__init__(thresholds)
 
     @property
@@ -47,7 +51,7 @@ class DNSDetector(BaseDetector):
 
     @property
     def mitre_techniques(self) -> list[str]:
-        return ["T1071.004", "T1568.002", "T1048.003"]
+        return sorted({t for c in self.threat_classes for t in techniques_for(c)})
 
     def detect(
         self,
@@ -58,106 +62,86 @@ class DNSDetector(BaseDetector):
     ) -> list[Alert]:
         start_time = time.time()
         self._windows_analysed += 1
-        alerts: list[Alert] = []
-
-        if not flows or not features:
-            return alerts
+        if not flows or not features or not features.get("dns_query_count"):
+            return []
 
         t = self._thresholds
-        dns_count = features.get("dns_query_count", 0)
+        alerts: list[Alert] = []
 
-        if dns_count == 0:
-            return alerts
-
-        # --- DNS Tunnelling Detection ---
-        avg_query_len = features.get("avg_query_length", 0)
-        max_query_len = features.get("max_query_length", 0)
-        txt_ratio = features.get("txt_record_ratio", 0)
-        long_queries = features.get("long_query_domains", 0)
-        avg_entropy = features.get("avg_domain_entropy", 0)
-
-        len_threshold = t.get("query_length_threshold", 50)
-        txt_threshold = t.get("txt_record_frequency", 0.1)
-        entropy_threshold = t.get("domain_entropy_threshold", 3.5)
-
-        # Tunnelling indicators: long queries + high TXT ratio + high entropy
-        tunnelling_score = 0.0
-        if avg_query_len > len_threshold * 0.7:
-            tunnelling_score += 0.3
-        if max_query_len > len_threshold:
-            tunnelling_score += 0.2
-        if txt_ratio > txt_threshold:
-            tunnelling_score += 0.3
-        if avg_entropy > entropy_threshold:
-            tunnelling_score += 0.2
-
-        if tunnelling_score >= 0.5:
-            severity = Severity.HIGH if tunnelling_score >= 0.8 else Severity.MEDIUM
-
-            alert = Alert(
-                window_start=window_start,
-                window_end=window_end,
-                threat_class=ThreatClass.DNS_TUNNELLING,
-                severity=severity,
-                confidence=round(min(1.0, tunnelling_score), 4),
-                detector_name=self.name,
-                model_version=self.version,
+        min_domains = t.get("dga_min_domains", 10)
+        nx_thr = t.get("nxdomain_ratio", 0.3)
+        share_thr = t.get("dga_generated_share", 0.5)
+        for c in features.get("dga_candidates", []):
+            if c["generated_looking_domains"] < min_domains:
+                continue
+            nx = c["nxdomain_ratio"]
+            if nx is not None:
+                if nx < nx_thr:
+                    continue
+            elif c["generated_share"] < share_thr:
+                continue
+            strong = nx is not None and c["generated_looking_domains"] >= 2 * min_domains
+            confidence = 0.5 + 0.2 * min(1.0, c["generated_looking_domains"] / (2 * min_domains)) \
+                + (0.2 * nx if nx is not None else 0.1 * c["generated_share"])
+            alerts.append(self._alert(
+                ThreatClass.DGA_DETECTED, Severity.HIGH if strong else Severity.MEDIUM, confidence,
+                window_start, window_end, start_time,
+                source_ip=c["source_ip"], destination_ip=c["resolver_ip"],
                 evidence={
-                    "avg_query_length": avg_query_len,
-                    "max_query_length": max_query_len,
-                    "txt_record_ratio": txt_ratio,
-                    "long_query_domains": long_queries,
-                    "avg_domain_entropy": avg_entropy,
-                    "dns_query_count": dns_count,
-                    "tunnelling_score": round(tunnelling_score, 4),
+                    "generated_looking_domains": c["generated_looking_domains"],
+                    "distinct_domains": c["distinct_domains"],
+                    "generated_share": c["generated_share"],
+                    "nxdomain_ratio": nx,
+                    "examples": c["examples"],
+                    "min_domains": min_domains,
                 },
-                mitre_techniques=["T1071.004", "T1048.003"],
-                detection_latency_ms=self._measure_latency(start_time),
-            )
-            alerts.append(alert)
+            ))
 
-        # --- DGA Detection ---
-        high_entropy_domains = features.get("high_entropy_domains", 0)
-        unique_subdomain_ratio = features.get("unique_subdomain_ratio", 0)
-        avg_consonant = features.get("avg_consonant_ratio", 0)
-        nxdomain_ratio = features.get("nxdomain_ratio", 0)
-        nxdomain_threshold = t.get("nxdomain_ratio", 0.3)
-        subdomain_threshold = t.get("subdomain_uniqueness", 0.8)
-
-        # DGA indicators: high entropy + many unique subdomains + high NXDOMAIN
-        dga_score = 0.0
-        if high_entropy_domains > 5:
-            dga_score += 0.3
-        if unique_subdomain_ratio > subdomain_threshold:
-            dga_score += 0.25
-        if nxdomain_ratio > nxdomain_threshold:
-            dga_score += 0.25
-        if avg_consonant > 0.75:
-            dga_score += 0.2
-
-        if dga_score >= 0.5:
-            severity = Severity.HIGH if dga_score >= 0.8 else Severity.MEDIUM
-
-            alert = Alert(
-                window_start=window_start,
-                window_end=window_end,
-                threat_class=ThreatClass.DGA_DETECTED,
-                severity=severity,
-                confidence=round(min(1.0, dga_score), 4),
-                detector_name=self.name,
-                model_version=self.version,
+        min_queries = t.get("tunnel_min_queries", 20)
+        unique_thr = t.get("subdomain_uniqueness", 0.8)
+        length_thr = t.get("query_length_threshold", 30)
+        entropy_thr = t.get("domain_entropy_threshold", 3.8)
+        txt_thr = t.get("txt_record_frequency", 0.5)
+        for c in features.get("tunnel_candidates", []):
+            encoded = c["avg_subdomain_length"] >= length_thr or c["avg_subdomain_entropy"] >= entropy_thr
+            if not (c["queries"] >= min_queries and c["unique_subdomain_ratio"] >= unique_thr and encoded):
+                continue
+            heavy = c["tunnel_record_ratio"] >= txt_thr or c["encoded_bytes"] >= 5000
+            confidence = 0.5 + 0.2 * min(1.0, c["avg_subdomain_length"] / (2 * length_thr)) \
+                + (0.2 if heavy else 0.0)
+            clients = c["clients"]
+            alerts.append(self._alert(
+                ThreatClass.DNS_TUNNELLING, Severity.HIGH if heavy else Severity.MEDIUM, confidence,
+                window_start, window_end, start_time,
+                source_ip=clients[0] if len(clients) == 1 else None, destination_ip=None,
                 evidence={
-                    "high_entropy_domains": high_entropy_domains,
-                    "unique_subdomain_ratio": unique_subdomain_ratio,
-                    "avg_consonant_ratio": avg_consonant,
-                    "nxdomain_ratio": nxdomain_ratio,
-                    "avg_domain_entropy": avg_entropy,
-                    "dga_score": round(dga_score, 4),
+                    "base_domain": c["base_domain"],
+                    "queries": c["queries"],
+                    "unique_subdomain_ratio": c["unique_subdomain_ratio"],
+                    "avg_subdomain_length": c["avg_subdomain_length"],
+                    "avg_subdomain_entropy": c["avg_subdomain_entropy"],
+                    "txt_or_null_ratio": c["tunnel_record_ratio"],
+                    "encoded_bytes": c["encoded_bytes"],
+                    "clients": clients,
                 },
-                mitre_techniques=["T1568.002"],
-                detection_latency_ms=self._measure_latency(start_time),
-            )
-            alerts.append(alert)
+            ))
 
         self._alerts_generated += len(alerts)
         return alerts
+
+    def _alert(self, threat, severity, confidence, window_start, window_end, start_time, *,
+               source_ip, destination_ip, evidence) -> Alert:
+        return Alert(
+            window_start=window_start,
+            window_end=window_end,
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            threat_class=threat,
+            severity=severity,
+            confidence=round(min(1.0, confidence), 4),
+            detector_name=self.name,
+            model_version=self.version,
+            evidence=evidence,
+            mitre_techniques=techniques_for(threat),
+            detection_latency_ms=self._measure_latency(start_time),
+        )

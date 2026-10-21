@@ -83,13 +83,15 @@ exfiltration:
       upload_mb: 5
 
 dns:
-  # DGA / DNS tunnelling thresholds (optional advanced module)
-  query_length_threshold: 50
-  domain_entropy_threshold: 3.5
-  nxdomain_ratio: 0.3
-  subdomain_uniqueness: 0.8
-  txt_record_frequency: 0.1
-  ngram_anomaly_score: 0.7
+  # DGA (per client) and DNS tunnelling (per base domain); optional advanced module.
+  dga_min_domains: 10                # generated-looking registrable domains from one client in a window
+  nxdomain_ratio: 0.3                # ...with at least this NXDOMAIN share of its answers (when rcodes are known)
+  dga_generated_share: 0.5           # ...or, without rcodes, this share of its domains generated-looking
+  tunnel_min_queries: 20             # queries to one base domain in a window
+  subdomain_uniqueness: 0.8          # share of those queries with a distinct subdomain
+  query_length_threshold: 30         # average subdomain length (characters) that suggests encoded data
+  domain_entropy_threshold: 3.8      # ...or average subdomain entropy (bits per character)
+  txt_record_frequency: 0.5          # TXT/NULL/ANY/CNAME/MX share that raises severity
 
 encrypted:
   # Encrypted session analysis thresholds (optional advanced module)
