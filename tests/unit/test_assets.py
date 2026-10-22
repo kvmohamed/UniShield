@@ -273,6 +273,7 @@ class TestDnsResolver:
 class TestBeaconRoles:
     @pytest.mark.parametrize("address, role", [
         (C2_SERVER, "update_server"), (C2_SERVER, "cdn_or_proxy"), (C2_SERVER, "monitoring"),
+        (C2_SERVER, "backup_server"),
         ("10.0.1.50", "monitoring"),
     ])
     def test_regular_polling_of_or_by_these_roles_is_info(self, address, role):
@@ -328,7 +329,8 @@ def test_api_shows_inventory_and_policy_effects(clean_assets, monkeypatch, tmp_p
     try:
         before = client.get("/system/assets").json()
         assert before["assets"][0]["name"] == "scanner" and before["policy_effects"] is None
-        assert before["policies"]["backup_server"]["destination"] == {"DATA_EXFILTRATION": "suppress"}
+        assert before["policies"]["backup_server"]["destination"] == {"DATA_EXFILTRATION": "suppress",
+                                                                      "C2_BEACONING": "info"}
         assert client.post("/replay/demo", params={"scenario": "port_scan", "wait": True}).json()["status"] == "completed"
         after = client.get("/system/assets").json()
         assert after["policy_effects"]["downgraded_to_info"] > 0

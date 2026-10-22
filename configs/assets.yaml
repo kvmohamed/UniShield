@@ -23,9 +23,10 @@
 #
 # ---- Roles and their built-in policies --------------------------------------
 #   vulnerability_scanner  as source: PORT_SCAN, HOST_SCAN, RECONNAISSANCE -> info
-#   backup_server          as destination: DATA_EXFILTRATION -> suppress
-#                          (uploads to it are also kept out of the uploader's
-#                          baseline, so a backup does not distort it)
+#   backup_server          as destination: DATA_EXFILTRATION -> suppress,
+#                          C2_BEACONING -> info (scheduled backups are periodic);
+#                          uploads to it are also kept out of the uploader's
+#                          baseline, so a backup does not distort it
 #   dns_resolver           as source: DGA_DETECTED, DNS_TUNNELLING -> info
 #                          (a resolver queries on behalf of all its clients;
 #                          the clients' own queries are still analysed)

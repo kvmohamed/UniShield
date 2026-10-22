@@ -52,7 +52,7 @@ _SCANS = {_C.PORT_SCAN: "info", _C.HOST_SCAN: "info", _C.RECONNAISSANCE: "info"}
 #: assets.yaml override single entries.
 DEFAULT_ROLE_POLICIES: dict[str, dict[str, dict[ThreatClass, str]]] = {
     "vulnerability_scanner": {"source": dict(_SCANS)},
-    "backup_server": {"destination": {_C.DATA_EXFILTRATION: "suppress"}},
+    "backup_server": {"destination": {_C.DATA_EXFILTRATION: "suppress", _C.C2_BEACONING: "info"}},
     "dns_resolver": {"source": {_C.DGA_DETECTED: "info", _C.DNS_TUNNELLING: "info"}},
     "update_server": {"destination": {_C.C2_BEACONING: "info"}},
     "cdn_or_proxy": {"destination": {_C.C2_BEACONING: "info"}},
