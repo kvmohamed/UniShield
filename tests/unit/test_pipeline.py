@@ -388,3 +388,18 @@ class TestPipeline:
             "anomaly_detector",
         }
         assert metrics.detectors_loaded == len(pipeline.detectors)
+
+
+def test_run_result_keeps_recent_alerts_but_counts_all(monkeypatch):
+    """Long runs: PipelineResult.alerts is bounded, totals and per-class counts are not."""
+    from unishield.config import get_config
+    from unishield.data.sample_generator import SimulatedReader, build_scenario
+
+    flows = build_scenario("port_scan", 1).flows + build_scenario("dga", 1).flows
+    full = Pipeline().run(SimulatedReader(sorted(flows, key=lambda f: f.timestamp)))
+    assert full.total_alerts >= 2
+    monkeypatch.setattr(get_config().processing, "max_alerts_in_memory", 1)
+    bounded = Pipeline().run(SimulatedReader(sorted(flows, key=lambda f: f.timestamp)))
+    assert len(bounded.alerts) == 1 and bounded.alerts[0].threat_class == full.alerts[-1].threat_class
+    assert bounded.total_alerts == full.total_alerts
+    assert bounded.summary()["alerts_by_class"] == full.summary()["alerts_by_class"]

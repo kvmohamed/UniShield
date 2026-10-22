@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import deque
+from collections import Counter, deque
 from typing import Any, Optional
 
 from unishield.assets import AssetInventory, AssetPolicy
@@ -107,13 +107,17 @@ class PipelineResult:
 
     Latency percentiles cover the most recent 100k records / 10k windows;
     ``features_history`` keeps the features of the most recent 1,000 windows.
+    ``alerts`` keeps the most recent ``max_alerts`` alerts (all when None);
+    ``total_alerts`` and the per-class counts always cover the whole run.
     """
 
-    def __init__(self):
+    def __init__(self, max_alerts: int | None = None):
         self.total_records: int = 0
         self.total_windows: int = 0
         self.total_alerts: int = 0
         self.alerts: list[Alert] = []
+        self.max_alerts = max_alerts
+        self._class_counts: Counter[str] = Counter()
         self.features_history: deque[dict[str, Any]] = deque(maxlen=_FEATURE_HISTORY)
         # per-window traffic and alert counts of the most recent windows (dashboard analytics)
         self.window_series: deque[dict[str, Any]] = deque(maxlen=_WINDOW_LATENCY_HISTORY)
@@ -126,6 +130,13 @@ class PipelineResult:
         self.ingest: dict[str, Any] = {}
         self.asset_policy: dict[str, Any] = {}
         self.state: Optional[dict[str, Any]] = None
+
+    def add_alert(self, alert: Alert) -> None:
+        self.alerts.append(alert)
+        if self.max_alerts is not None and len(self.alerts) > self.max_alerts:
+            del self.alerts[0]
+        self.total_alerts += 1
+        self._class_counts[alert.threat_class.value] += 1
 
     def record_latency(self, latency_ms: float) -> None:
         self.latencies_ms.append(latency_ms)
@@ -179,11 +190,7 @@ class PipelineResult:
         }
 
     def _alerts_by_class(self) -> dict[str, int]:
-        counts: dict[str, int] = {}
-        for a in self.alerts:
-            key = a.threat_class.value
-            counts[key] = counts.get(key, 0) + 1
-        return counts
+        return dict(self._class_counts)
 
 
 DETECTION_MODES = ("rules", "hybrid", "ml")
@@ -401,7 +408,7 @@ class Pipeline:
         Records flow through windowing incrementally; each window is analysed
         when it closes, and the remaining windows are flushed at end of input.
         """
-        result = PipelineResult()
+        result = PipelineResult(self._config.processing.max_alerts_in_memory)
         result.start_time = time.time()
         self.result = result                  # live view for the API while running
 
@@ -536,8 +543,7 @@ class Pipeline:
                 alert.flow_id = _related_flow_id(alert, window.records)
             alert.window_closed_at = closed_at
             alert.emitted_at = utc_now()
-            result.alerts.append(alert)
-            result.total_alerts += 1
+            result.add_alert(alert)
             self._total_alerts += 1
             if self._alert_callback:
                 try:

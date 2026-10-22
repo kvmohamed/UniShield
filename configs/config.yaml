@@ -83,6 +83,7 @@ processing:
   max_queue_size: 10000             # (planned)
   max_alert_batch: 100              # (planned)
   max_records_in_memory: 50000
+  max_alerts_in_memory: 100000      # in-memory run result keeps the newest alerts (counts and the database keep all)
 
 ingest:
   supported_formats:                # informational

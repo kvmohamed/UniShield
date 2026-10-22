@@ -208,6 +208,9 @@ class ProcessingConfig(BaseModel):
     max_queue_size: int = 10000
     max_alert_batch: int = 100
     max_records_in_memory: int = 50000
+    # PipelineResult.alerts keeps the most recent alerts only (counts cover the whole run;
+    # stored alerts are in the database). Bounds memory on long runs.
+    max_alerts_in_memory: int = Field(default=100_000, gt=0)
 
 
 class IngestConfig(BaseModel):
