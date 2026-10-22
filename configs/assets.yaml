@@ -1,0 +1,81 @@
+# ============================================================
+# UniShield — Asset Inventory
+# ============================================================
+# Tells UniShield what some hosts are for, so expected behaviour is not
+# reported as an attack. Detectors still analyse these hosts' traffic; after
+# detection, the role's policy decides what happens to each alert:
+#
+#   alert     report unchanged
+#   info      report with severity INFO (original severity and the matching
+#             asset in evidence.asset_policy)
+#   suppress  do not report; counted (pipeline summary, /metrics,
+#             /system/assets) and the latest suppressed alerts kept for review
+#
+# Nothing is hidden silently. Every entry is a trust decision: a scanner
+# listed here that is compromised will have its scans reported as INFO.
+# Keep the list short and review it with the people who run these hosts.
+#
+# The file is validated at start-up: unknown keys, roles, threat classes or
+# actions, malformed addresses and duplicate names are errors.
+# Select another file with site.assets_file in config.yaml or
+# UNISHIELD_ASSETS_FILE. With IP anonymisation on, only single-address
+# entries match (by their salted hash); networks (CIDR) cannot.
+#
+# ---- Roles and their built-in policies --------------------------------------
+#   vulnerability_scanner  as source: PORT_SCAN, HOST_SCAN, RECONNAISSANCE -> info
+#   backup_server          as destination: DATA_EXFILTRATION -> suppress
+#                          (uploads to it are also kept out of the uploader's
+#                          baseline, so a backup does not distort it)
+#   dns_resolver           as source: DGA_DETECTED, DNS_TUNNELLING -> info
+#                          (a resolver queries on behalf of all its clients;
+#                          the clients' own queries are still analysed)
+#   update_server          as destination: C2_BEACONING -> info
+#   cdn_or_proxy           as destination: C2_BEACONING -> info
+#   monitoring             as source: scans and C2_BEACONING -> info;
+#                          as destination: C2_BEACONING -> info
+#   server                 no built-in policy; shown in alert evidence
+#
+# A DNS_TUNNELLING alert without a single source matches on the source side
+# only when all of its clients hold the role. When several roles match, the
+# most lenient action wins (suppress > info > alert).
+#
+# ---- Example (uncomment and replace with your own hosts) --------------------
+# The addresses below are documentation ranges (RFC 5737 / RFC 3849).
+#
+# version: 1
+# assets:
+#   - name: corp-resolver
+#     addresses: ["192.0.2.53", "192.0.2.54"]
+#     roles: [dns_resolver]
+#     description: internal recursive resolvers
+#   - name: offsite-backup
+#     addresses: ["198.51.100.0/28"]
+#     roles: [backup_server]
+#     description: nightly backup target (provider network)
+#   - name: vuln-scanner
+#     addresses: ["192.0.2.10"]
+#     roles: [vulnerability_scanner]
+#     description: weekly authenticated scan, Sunday 02:00
+#   - name: patch-mirror
+#     addresses: ["203.0.113.80"]
+#     roles: [update_server]
+#   - name: web-proxy
+#     addresses: ["192.0.2.8"]
+#     roles: [cdn_or_proxy]
+#   - name: nms
+#     addresses: ["192.0.2.20", "2001:db8:5::20"]
+#     roles: [monitoring]
+#   - name: historian
+#     addresses: ["192.0.2.30"]
+#     roles: [server]
+#
+# # Override single built-in policies (role -> side -> threat class -> action):
+# policies:
+#   vulnerability_scanner:
+#     source: {PORT_SCAN: suppress, HOST_SCAN: suppress, RECONNAISSANCE: suppress}
+#   backup_server:
+#     destination: {DATA_EXFILTRATION: info}
+# ------------------------------------------------------------------------------
+
+version: 1
+assets: []

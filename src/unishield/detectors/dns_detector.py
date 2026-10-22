@@ -123,6 +123,7 @@ class DNSDetector(BaseDetector):
                     "txt_or_null_ratio": c["tunnel_record_ratio"],
                     "encoded_bytes": c["encoded_bytes"],
                     "clients": clients,
+                    "client_count": c.get("client_count", len(clients)),
                 },
             ))
 

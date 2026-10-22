@@ -1,4 +1,4 @@
-"""System endpoints: health, metrics, traffic analytics, architecture status, reports."""
+"""System endpoints: health, metrics, traffic analytics, architecture status, assets, reports."""
 
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ from unishield import __version__
 from unishield.api.deps import get_context
 from unishield.api.security import auth_mode, public, require_viewer
 from unishield.api.state import AppContext
-from unishield.config import get_config
+from unishield.assets import AssetInventory
+from unishield.config import assets_source, get_config
 from unishield.processing.pipeline import DETECTION_MODES, default_detectors
 from unishield.schemas.metrics import HealthStatus, PipelineMetrics
 
@@ -167,6 +168,28 @@ def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
                       for d in detectors],
         "detection_modes": list(DETECTION_MODES),
         "models": models,
+        "assets_source": assets_source(),
+    }
+
+
+@router.get("/system/assets", summary="Asset inventory and what its role policies changed")
+def asset_inventory(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
+    """
+    The loaded asset inventory, the effective role policies, and for the
+    current/last run the alerts the policies downgraded or suppressed
+    (counts plus the most recent suppressed alerts).
+    """
+    pipeline = ctx.pipeline
+    inventory = pipeline.asset_policy.inventory if pipeline else AssetInventory.from_config()
+    policy = pipeline.asset_policy if pipeline else None
+    return {
+        "source": assets_source(),
+        "assets": inventory.describe(),
+        "policies": {role: {side: {c.value: a for c, a in classes.items()} for side, classes in sides.items()}
+                     for role, sides in inventory.policies.items()},
+        "run_id": ctx.replay.get("run_id"),
+        "policy_effects": policy.stats() if policy else None,
+        "recent_suppressed": list(policy.recent_suppressed) if policy else [],
     }
 
 

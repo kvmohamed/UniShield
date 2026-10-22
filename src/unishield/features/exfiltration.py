@@ -17,6 +17,12 @@ Replies from internal servers to inbound requests are not uploads: serving
 content is not exfiltration evidence. Flows without a direction fall back to
 a port heuristic (higher source port → likely an outbound client).
 
+Uploads to destinations whose asset role makes them expected (by default a
+``backup_server``, see ``unishield.assets``) are still profiled as
+candidates, marked ``expected_destination``, but are left out of the
+source's window total and baseline: a nightly backup neither inflates the
+source's history nor makes its other uploads look anomalous.
+
 SECURITY CONSTRAINTS:
     - Read-only computation over local flow records.
     - No network communication or payload inspection.
@@ -29,8 +35,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from unishield.assets import AssetInventory
 from unishield.config import get_thresholds
 from unishield.features.base import BaseFeatureExtractor, WindowContext
+from unishield.schemas.alert import ThreatClass
 from unishield.schemas.flow import FlowDirection, NormalisedFlow
 
 WELL_KNOWN_PORTS = frozenset({21, 22, 25, 53, 80, 110, 123, 143, 443, 587, 993, 995, 8080, 8443})
@@ -75,8 +83,10 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
     """Extract per-pair upload features with per-source baselines."""
 
     def __init__(self, baseline_windows: int = 60, history_sec: float | None = None,
-                 long_session_sec: float | None = None, max_tracked: int = 50_000):
+                 long_session_sec: float | None = None, max_tracked: int = 50_000,
+                 assets: AssetInventory | None = None):
         t = get_thresholds().get("exfiltration", {})
+        self.assets = assets if assets is not None else AssetInventory.from_config()
         self.baseline_windows = baseline_windows
         self.history = timedelta(seconds=history_sec or t.get("history_sec", 7200))
         self.long_session_sec = long_session_sec or t.get("long_session_duration_sec", 3600)
@@ -103,6 +113,7 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
             "avg_bytes_per_dest",
             "dest_port_rarity",
             "unusual_port_flows",
+            "expected_upload_bytes",
             "exfil_candidates",
         ]
 
@@ -120,6 +131,8 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
         pairs: dict[tuple[str, str], _Pair] = defaultdict(_Pair)
         source_upload: dict[str, int] = defaultdict(int)
         dest_upload: dict[str, int] = defaultdict(int)
+        expected: dict[str, bool] = {}
+        expected_upload = 0
         unusual_port_flows = 0
         for f in flows:
             split = f.orig_bytes is not None and f.resp_bytes is not None
@@ -144,11 +157,17 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
             if duration >= self.long_session_sec:
                 p.long_session_upload += up
             p.tls = p.tls or bool(f.tls_version) or f.destination_port in (443, 8443)
-            source_upload[f.source_ip] += up
             dest_upload[f.destination_ip] += up
+            if f.destination_ip not in expected:
+                expected[f.destination_ip] = self.assets.expected_destination(
+                    f.destination_ip, ThreatClass.DATA_EXFILTRATION)
+            if expected[f.destination_ip]:
+                expected_upload += up              # kept out of the source total and baseline
+            else:
+                source_upload[f.source_ip] += up
 
         now = max(f.timestamp for f in flows)
-        candidates = [self._candidate(src, dst, p, source_upload[src], now)
+        candidates = [self._candidate(src, dst, p, source_upload[src], now, expected.get(dst, False))
                       for (src, dst), p in pairs.items() if p.upload >= _MIN_CANDIDATE_UPLOAD]
         candidates.sort(key=lambda c: c["upload_bytes"], reverse=True)
 
@@ -175,6 +194,7 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
             "avg_bytes_per_dest": round(sum(dest_upload.values()) / max(len(dest_upload), 1), 2),
             "dest_port_rarity": round(unusual_port_flows / max(outbound_flows, 1), 4),
             "unusual_port_flows": unusual_port_flows,
+            "expected_upload_bytes": expected_upload,
             "exfil_candidates": candidates[:_MAX_CANDIDATES],
         }
 
@@ -200,7 +220,8 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
             self._uploaders.move_to_end(dst)
         return uploaders
 
-    def _candidate(self, src: str, dst: str, p: _Pair, source_total: int, now: datetime) -> dict[str, Any]:
+    def _candidate(self, src: str, dst: str, p: _Pair, source_total: int, now: datetime,
+                   expected_destination: bool) -> dict[str, Any]:
         history = list(self._baselines.get(src, ()))
         z = median = mad = None
         if history:
@@ -225,4 +246,5 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
             "baseline_mad_bytes": round(mad, 1) if mad is not None else None,
             "robust_z": round(z, 2) if z is not None else None,
             "destination_sources": len(recent),
+            "expected_destination": expected_destination,
         }

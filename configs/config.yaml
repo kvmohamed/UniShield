@@ -207,6 +207,10 @@ outbound:
     #   max_per_hour: 30
     #   redact_ips: true
 
+site:
+  # Per-site files; relative paths are resolved against the configs directory.
+  assets_file: "assets.yaml"        # asset inventory (roles); UNISHIELD_ASSETS_FILE
+
 paths:
   data_dir: "./data"                # replay API input directory
   raw_dir: "./data/raw"             # (planned)

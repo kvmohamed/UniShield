@@ -27,6 +27,9 @@ class PipelineMetrics(BaseModel):
     total_records_ingested: int = Field(default=0, ge=0)
     total_records_processed: int = Field(default=0, ge=0)
     total_alerts_generated: int = Field(default=0, ge=0)
+    # asset-role policies (unishield.assets): alerts not reported / reported as INFO
+    alerts_suppressed_by_policy: int = Field(default=0, ge=0)
+    alerts_downgraded_by_policy: int = Field(default=0, ge=0)
     records_per_second: float = Field(default=0.0, ge=0.0)
     alerts_per_second: float = Field(default=0.0, ge=0.0)
 

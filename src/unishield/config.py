@@ -9,10 +9,14 @@ Precedence (highest first):
     1. Environment variables listed in ``ENV_OVERRIDES``
     2. ``configs/config.yaml``
     3. Model defaults below
+
+Site files (section ``site``): ``assets.yaml``, the asset inventory,
+validated by ``AssetInventoryConfig``.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 from pathlib import Path
@@ -20,7 +24,9 @@ from typing import Any, Literal, Optional
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from unishield.schemas.alert import ThreatClass
 
 logger = logging.getLogger("unishield.config")
 
@@ -55,6 +61,12 @@ def config_dir() -> Path:
 def _resolve_config_path(filename: str) -> Path:
     """Resolve a file inside the configs directory."""
     return config_dir() / filename
+
+
+def resolve_site_path(name: str) -> Path:
+    """A site file named in the config: absolute, or relative to the configs directory."""
+    path = Path(name).expanduser()
+    return path if path.is_absolute() else config_dir() / path
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -379,6 +391,73 @@ class PathsConfig(BaseModel):
     logs_dir: str = "./logs"
 
 
+DEFAULT_ASSETS_FILE = "assets.yaml"
+
+
+class SiteConfig(BaseModel):
+    """Per-site files; relative paths are resolved against the configs directory."""
+    assets_file: Optional[str] = DEFAULT_ASSETS_FILE    # asset inventory (roles of known hosts)
+
+
+# ---------------------------------------------------------------------------
+# Asset inventory (configs/assets.yaml)
+# ---------------------------------------------------------------------------
+
+AssetRole = Literal[
+    "dns_resolver", "backup_server", "vulnerability_scanner", "update_server",
+    "cdn_or_proxy", "monitoring", "server",
+]
+PolicyAction = Literal["alert", "info", "suppress"]
+
+
+class AssetEntry(BaseModel):
+    """One host or network and the roles it has."""
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=128)
+    addresses: list[str] = Field(min_length=1)          # IP addresses or CIDR networks
+    roles: list[AssetRole] = Field(min_length=1)
+    description: str = ""
+
+    @field_validator("addresses")
+    @classmethod
+    def valid_networks(cls, v: list[str]) -> list[str]:
+        out = []
+        for address in v:
+            try:
+                out.append(str(ipaddress.ip_network(str(address).strip(), strict=False)))
+            except ValueError as exc:
+                raise ValueError(f"invalid address or network {address!r}: {exc}") from None
+        return out
+
+
+class RolePolicy(BaseModel):
+    """Action per threat class when the role holder is the alert's source or destination."""
+    model_config = ConfigDict(extra="forbid")
+
+    source: dict[ThreatClass, PolicyAction] = Field(default_factory=dict)
+    destination: dict[ThreatClass, PolicyAction] = Field(default_factory=dict)
+
+
+class AssetInventoryConfig(BaseModel):
+    """Validated contents of the asset inventory file."""
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1] = 1
+    assets: list[AssetEntry] = Field(default_factory=list)
+    # Overrides of the built-in role policies (assets.DEFAULT_ROLE_POLICIES), merged per class.
+    policies: dict[AssetRole, RolePolicy] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def unique_names(self) -> "AssetInventoryConfig":
+        seen: set[str] = set()
+        for entry in self.assets:
+            if entry.name in seen:
+                raise ValueError(f"duplicate asset name {entry.name!r}")
+            seen.add(entry.name)
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Unified config object
 # ---------------------------------------------------------------------------
@@ -406,6 +485,7 @@ class UnishieldConfig(BaseModel):
     export: ExportConfig = ExportConfig()
     outbound: OutboundConfig = OutboundConfig()
     paths: PathsConfig = PathsConfig()
+    site: SiteConfig = SiteConfig()
 
     @model_validator(mode="after")
     def outbound_only_to_analyst_side(self) -> "UnishieldConfig":
@@ -455,6 +535,7 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_API_KEY_ROLE": ("api", "api_key_role"),
     "UNISHIELD_AUTH_MODE": ("auth", "mode"),
     "UNISHIELD_COOKIE_SECURE": ("auth", "cookie_secure"),
+    "UNISHIELD_ASSETS_FILE": ("site", "assets_file"),
 }
 
 
@@ -574,3 +655,60 @@ def reset_thresholds() -> None:
     """Reset cached thresholds (used in testing)."""
     global _thresholds
     _thresholds = None
+
+
+# ---------------------------------------------------------------------------
+# Asset inventory loader
+# ---------------------------------------------------------------------------
+
+_assets: AssetInventoryConfig | None = None
+_assets_source: Optional[str] = None
+
+
+def load_assets(path: Path | None = None) -> AssetInventoryConfig:
+    """
+    Load and validate the asset inventory (``site.assets_file`` /
+    ``UNISHIELD_ASSETS_FILE`` unless ``path`` is given). A missing default
+    ``assets.yaml`` means no assets; a missing file that was named explicitly,
+    or an invalid one, raises an error.
+    """
+    global _assets, _assets_source
+    if _assets is not None:
+        return _assets
+
+    name = get_config().site.assets_file
+    if path is None and not name:
+        _assets, _assets_source = AssetInventoryConfig(), None
+        return _assets
+    explicit = path is not None or name != DEFAULT_ASSETS_FILE
+    path = path if path is not None else resolve_site_path(name)
+    if not path.is_file():
+        if explicit:
+            raise FileNotFoundError(f"Asset inventory not found: {path}")
+        logger.info("No asset inventory at %s; no asset roles apply", path)
+        _assets, _assets_source = AssetInventoryConfig(), None
+        return _assets
+    try:
+        _assets = AssetInventoryConfig(**load_yaml(path))
+    except ValueError as exc:
+        raise ValueError(f"Invalid asset inventory {path}: {exc}") from exc
+    _assets_source = str(path)
+    logger.info("Asset inventory loaded from %s: %d entries", path, len(_assets.assets))
+    return _assets
+
+
+def get_assets() -> AssetInventoryConfig:
+    """Return the loaded asset inventory, loading it if necessary."""
+    return _assets if _assets is not None else load_assets()
+
+
+def assets_source() -> Optional[str]:
+    """File the asset inventory came from (None when there is none)."""
+    get_assets()
+    return _assets_source
+
+
+def reset_assets() -> None:
+    """Reset the cached asset inventory (used in testing)."""
+    global _assets, _assets_source
+    _assets, _assets_source = None, None

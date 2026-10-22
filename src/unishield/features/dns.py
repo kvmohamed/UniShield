@@ -238,6 +238,7 @@ class DNSFeatureExtractor(BaseFeatureExtractor):
                 "txt_ratio": round(b["types"]["TXT"] / queries, 4),
                 "encoded_bytes": sum(sub_lengths),
                 "clients": sorted(b["clients"])[:5],
+                "client_count": len(b["clients"]),
             })
         out.sort(key=lambda x: x["encoded_bytes"], reverse=True)
         return out[:10]

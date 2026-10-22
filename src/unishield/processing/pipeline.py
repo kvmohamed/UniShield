@@ -27,6 +27,7 @@ import time
 from collections import deque
 from typing import Any, Optional
 
+from unishield.assets import AssetInventory, AssetPolicy
 from unishield.config import get_config
 from unishield.correlation.correlator import AlertCorrelator
 from unishield.detectors.anomaly_detector import AnomalyDetector
@@ -119,6 +120,7 @@ class PipelineResult:
         self._latency_sum_ms: float = 0.0
         self.errors: int = 0
         self.ingest: dict[str, Any] = {}
+        self.asset_policy: dict[str, Any] = {}
 
     def record_latency(self, latency_ms: float) -> None:
         self.latencies_ms.append(latency_ms)
@@ -166,6 +168,7 @@ class PipelineResult:
             "window_processing_p95_ms": round(_percentile(self.window_latencies_ms, 95), 2),
             "errors": self.errors,
             "alerts_by_class": self._alerts_by_class(),
+            "asset_policy": self.asset_policy,
             "ingest": self.ingest,
         }
 
@@ -242,6 +245,7 @@ class Pipeline:
         window_observer: Any | None = None,
         detection_mode: str | None = None,
         intel: IntelMatcher | None = None,
+        assets: AssetInventory | None = None,
     ):
         """
         Args:
@@ -258,6 +262,8 @@ class Pipeline:
             intel: Imported threat-intelligence indicators (IntelStore.matcher()).
                 Used for INTEL_MATCH alerts, the JA3 blocklist and enriching
                 other alerts; ignored when ``intel.enabled`` is false.
+            assets: Asset inventory whose role policies are applied to the
+                alerts (see ``unishield.assets``); defaults to ``site.assets_file``.
         """
         config = get_config()
         self._config = config
@@ -272,13 +278,17 @@ class Pipeline:
         # Threat intelligence imported by the operator (empty unless supplied)
         self.intel = intel if intel is not None and config.intel.enabled else IntelMatcher()
         self._intel_escalate = config.intel.escalate_severity
+        # Asset roles: applied to alerts after deduplication; the exfiltration
+        # extractor also keeps expected uploads (e.g. backups) out of baselines.
+        inventory = assets if assets is not None else AssetInventory.from_config()
+        self.asset_policy = AssetPolicy(inventory)
 
         # Feature extractors
         self.extractors = extractors or [
             VolumeFeatureExtractor(),
             ScanFeatureExtractor(),
             BeaconingFeatureExtractor(),
-            ExfiltrationFeatureExtractor(),
+            ExfiltrationFeatureExtractor(assets=inventory),
             DNSFeatureExtractor(),
             EncryptedSessionFeatureExtractor(extra_ja3=self.intel.ja3_labels()),
             IntelFeatureExtractor(self.intel),
@@ -347,11 +357,12 @@ class Pipeline:
         self.window = self._new_window()
 
         logger.info(
-            "Pipeline started: window=%ds, slide=%ds, extractors=%d, detectors=%d",
+            "Pipeline started: window=%ds, slide=%ds, extractors=%d, detectors=%d, assets=%d",
             self.window_size_sec,
             self.slide_interval_sec,
             len(self.extractors),
             len(self.detectors),
+            len(self.asset_policy.inventory),
         )
 
         self._reader = reader
@@ -407,6 +418,7 @@ class Pipeline:
                 "normalizer": normalizer.stats(),
                 "windowing": self.window.stats(),
             }
+            result.asset_policy = self.asset_policy.stats()
             # Push final metrics
             if self._metrics_callback:
                 try:
@@ -450,6 +462,7 @@ class Pipeline:
                 logger.error("Window observer error: %s", e)
         if self._correlator and alerts:
             alerts = self._correlator.deduplicate(alerts)
+        alerts = self.asset_policy.apply(alerts)
 
         source = _ALERT_SOURCE.get(window.records[-1].source_type)
         for alert in alerts:
@@ -552,4 +565,6 @@ class Pipeline:
             latency_p95_ms=round(_percentile(latencies, 95), 3),
             latency_p99_ms=round(_percentile(latencies, 99), 3),
             latency_avg_ms=round(sum(latencies) / len(latencies), 3) if latencies else 0.0,
+            alerts_suppressed_by_policy=self.asset_policy.suppressed,
+            alerts_downgraded_by_policy=self.asset_policy.downgraded,
         )

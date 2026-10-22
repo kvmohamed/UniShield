@@ -454,7 +454,7 @@ def runtime_check_detailed() -> tuple[list[str], list[str], list[str], list[str]
             body = client.post("/replay/demo", params={"scenario": "port_scan", "wait": True}).json()
             exercised.append(f"api:/replay/demo:{body.get('status')}")
             for path in ("/health", "/alerts", "/incidents", "/metrics", "/metrics/traffic", "/system/architecture",
-                         "/intel/status", "/outputs/status", "/auth/me", "/audit"):
+                         "/intel/status", "/outputs/status", "/auth/me", "/audit", "/system/assets"):
                 client.get(path)
                 exercised.append(f"api:{path}")
             attempts += wire.attempts
