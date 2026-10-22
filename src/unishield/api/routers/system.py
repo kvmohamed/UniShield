@@ -59,6 +59,7 @@ def health_check(response: Response, ctx: AppContext = Depends(get_context)) -> 
         no_active_scanning=config.security.no_active_scanning,
         no_response_path=config.security.no_response_path,
         auth_mode=auth_mode(),
+        tls=config.tls.enabled,
         database_connected=state["storage_ok"],
         pipeline_active=ctx.running,
         detectors_loaded=len(pipeline.detectors) if pipeline else 0,

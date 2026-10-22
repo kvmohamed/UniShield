@@ -81,6 +81,14 @@ class Principal:
 ANONYMOUS = Principal("anonymous", "anonymous", None)
 
 
+def hsts_header(request: Request) -> Optional[str]:
+    """Strict-Transport-Security value for an HTTPS request, or None (plain HTTP, or HSTS disabled)."""
+    tls = get_config().tls
+    if request.url.scheme != "https" or not tls.hsts_max_age:
+        return None
+    return f"max-age={tls.hsts_max_age}" + ("; includeSubDomains" if tls.hsts_include_subdomains else "")
+
+
 def auth_mode() -> str:
     return get_config().auth.mode
 

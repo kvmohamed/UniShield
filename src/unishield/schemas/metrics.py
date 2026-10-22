@@ -89,6 +89,7 @@ class HealthStatus(BaseModel):
     )
 
     auth_mode: str = Field(default="accounts", description="accounts | open (lab only)")
+    tls: bool = Field(default=False, description="UniShield itself serves HTTPS (tls.certfile)")
 
     # Component status
     database_connected: bool = Field(default=False)

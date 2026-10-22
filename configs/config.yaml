@@ -29,7 +29,7 @@ api:
   host: "127.0.0.1"
   port: 8000
   workers: 1
-  reload: true                      # auto-reload on code change (development only)
+  reload: false                     # auto-reload on code change: development only (UNISHIELD_API_RELOAD=true)
   # Administrative endpoints (replay, demo, clear alerts) need the X-API-Key
   # header when UNISHIELD_ADMIN_API_KEY is set; without it they accept
   # loopback clients only. Never put the key in this file.

@@ -112,6 +112,11 @@ class APIConfig(BaseModel):
     admin_api_key: Optional[str] = Field(default=None, repr=False)
     api_key_role: Literal["viewer", "analyst", "admin"] = "admin"
     cors_origins: list[str] = Field(default_factory=list)   # the dashboard is same-origin
+    # Reverse proxies whose X-Forwarded-For / X-Forwarded-Proto headers are
+    # trusted (client address for rate limiting and the audit log; https for
+    # Secure cookies and HSTS). Comma-separated addresses or "*" (never "*"
+    # when clients can reach UniShield directly).
+    forwarded_allow_ips: str = "127.0.0.1"
     # On shutdown (SIGTERM / Ctrl+C) wait this long for a running replay to stop
     # and record its state; uvicorn also waits this long for open requests.
     shutdown_timeout_sec: int = Field(default=15, ge=1, le=600)
@@ -138,6 +143,28 @@ class AuthConfig(BaseModel):
     # Secure flag on the session cookie: auto = when the request arrived over
     # HTTPS (directly or via a trusted proxy's X-Forwarded-Proto).
     cookie_secure: Literal["auto", "always", "never"] = "auto"
+
+
+class TLSConfig(BaseModel):
+    """HTTPS served by uvicorn itself. Alternatively terminate TLS at a reverse proxy (docs/deployment.md)."""
+    certfile: Optional[str] = None          # PEM certificate chain (may also contain the key)
+    keyfile: Optional[str] = None           # PEM private key
+    # Only from UNISHIELD_TLS_KEYFILE_PASSWORD, never in a file.
+    keyfile_password: Optional[str] = Field(default=None, repr=False)
+    # Strict-Transport-Security on HTTPS responses (direct TLS or a trusted
+    # proxy's X-Forwarded-Proto: https); 0 disables it.
+    hsts_max_age: int = Field(default=31_536_000, ge=0)
+    hsts_include_subdomains: bool = False
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.certfile)
+
+    @model_validator(mode="after")
+    def _key_needs_certificate(self) -> "TLSConfig":
+        if self.keyfile and not self.certfile:
+            raise ValueError("tls.keyfile is set but tls.certfile is not")
+        return self
 
 
 class RetentionConfig(BaseModel):
@@ -367,6 +394,7 @@ class UnishieldConfig(BaseModel):
     security: SecurityConfig = SecurityConfig()
     api: APIConfig = APIConfig()
     auth: AuthConfig = AuthConfig()
+    tls: TLSConfig = TLSConfig()
     database: DatabaseConfig = DatabaseConfig()
     retention: RetentionConfig = RetentionConfig()
     processing: ProcessingConfig = ProcessingConfig()
@@ -407,6 +435,11 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_API_HOST": ("api", "host"),
     "UNISHIELD_API_PORT": ("api", "port"),
     "UNISHIELD_API_DOCS": ("api", "docs_enabled"),
+    "UNISHIELD_API_RELOAD": ("api", "reload"),
+    "UNISHIELD_FORWARDED_ALLOW_IPS": ("api", "forwarded_allow_ips"),
+    "UNISHIELD_TLS_CERTFILE": ("tls", "certfile"),
+    "UNISHIELD_TLS_KEYFILE": ("tls", "keyfile"),
+    "UNISHIELD_TLS_KEYFILE_PASSWORD": ("tls", "keyfile_password"),
     "UNISHIELD_WINDOW_SIZE_SEC": ("processing", "window_size_sec"),
     "UNISHIELD_SLIDE_INTERVAL_SEC": ("processing", "slide_interval_sec"),
     "UNISHIELD_ANONYMIZE_IPS": ("security", "anonymize_ips"),

@@ -33,6 +33,7 @@ from unishield.api.security import (
     SECURITY_HEADERS,
     auth_mode,
     enforce_route_guards,
+    hsts_header,
     origin_allowed,
     public,
 )
@@ -104,6 +105,9 @@ def create_app(repository: AlertRepository | None = None) -> FastAPI:
             response = await call_next(request)
         for name, value in SECURITY_HEADERS.items():
             response.headers.setdefault(name, value)
+        hsts = hsts_header(request)
+        if hsts:
+            response.headers.setdefault("Strict-Transport-Security", hsts)
         if request.url.path in ("/", "/dashboard"):
             response.headers["Content-Security-Policy"] = DASHBOARD_CSP
         if request.url.path.startswith(_NO_STORE):

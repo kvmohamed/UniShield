@@ -69,6 +69,8 @@ def config_summary(config: UnishieldConfig) -> dict[str, Any]:
         "static_api_key": bool(config.api.admin_api_key),
         "static_api_key_role": config.api.api_key_role if config.api.admin_api_key else None,
         "docs_enabled": config.api.docs_enabled,
+        "tls": config.tls.enabled,
+        "forwarded_allow_ips": config.api.forwarded_allow_ips,
         "cors_origins": list(config.api.cors_origins),
         "database_backend": config.database.url.split(":", 1)[0].split("+", 1)[0],
         "alert_retention_days": config.retention.alert_days,
