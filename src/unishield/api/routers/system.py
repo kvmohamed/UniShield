@@ -114,7 +114,7 @@ def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     detectors = pipeline.detectors if pipeline else default_detectors("rules")
     extractors = [e.name for e in pipeline.extractors] if pipeline else [
         "volume_features", "scan_features", "beaconing_features", "exfiltration_features",
-        "dns_features", "encrypted_session_features"]
+        "dns_features", "encrypted_session_features", "intel_features"]
     try:
         models = [{k: m.get(k) for k in ("name", "version", "algorithm", "created_at")}
                   for m in ModelRegistry().list()]

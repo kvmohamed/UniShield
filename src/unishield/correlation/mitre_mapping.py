@@ -33,6 +33,9 @@ MITRE_TECHNIQUES: dict[ThreatClass, tuple[str, ...]] = {
     ThreatClass.ENCRYPTED_SESSION_ANOMALY: ("T1573",),
     # A statistical deviation is not evidence of a specific technique.
     ThreatClass.STATISTICAL_ANOMALY: (),
+    # A list match says an indicator is known-bad, not which technique is in use;
+    # techniques listed with the indicator are added per alert.
+    ThreatClass.INTEL_MATCH: (),
 }
 
 # Extra techniques added when evidence supports them

@@ -383,6 +383,7 @@ class TestPipeline:
             "exfiltration_detector",
             "dns_detector",
             "encrypted_session_detector",
+            "intel_detector",
             "statistical_detector",
             "anomaly_detector",
         }

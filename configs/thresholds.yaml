@@ -104,6 +104,17 @@ encrypted:
                                      # ...on a port where TLS is unusual
   realert_after_sec: 900
 
+intel:
+  # INTEL_MATCH: traffic involving an indicator imported with
+  # scripts/import_intel.py (see intel: in config.yaml). A severity listed
+  # with the indicator overrides these. Confidence is a list-match score.
+  outbound_severity: HIGH            # monitored host -> listed address
+  dns_severity: HIGH                 # monitored host resolves a listed domain (or a subdomain)
+  inbound_severity: MEDIUM           # listed address -> monitored network
+  other_severity: MEDIUM             # internal or direction unknown
+  base_confidence: 0.7               # +0.1 per additional list naming the indicator (max 0.9)
+  realert_after_sec: 900
+
 statistical:
   # Robust z-score detector: window metrics vs a rolling baseline of windows
   # that no rule explained (median / MAD).

@@ -2,7 +2,8 @@
 UniShield — Pipeline Orchestrator
 
 Connects ingest → sessionization → normalisation → windowing → feature
-extraction → detection → deduplication into one streaming pipeline.
+extraction → detection → intel enrichment → deduplication into one
+streaming pipeline.
 
 DESIGN:
     - Processes records incrementally; a window is analysed as soon as
@@ -35,6 +36,7 @@ from unishield.detectors.ddos_detector import DDoSDetector
 from unishield.detectors.dns_detector import DNSDetector
 from unishield.detectors.encrypted_detector import EncryptedSessionDetector
 from unishield.detectors.exfiltration_detector import ExfiltrationDetector
+from unishield.detectors.intel_detector import IntelDetector
 from unishield.detectors.scan_detector import ScanDetector
 from unishield.detectors.statistical_detector import StatisticalDetector
 from unishield.features.base import BaseFeatureExtractor, WindowContext
@@ -42,9 +44,12 @@ from unishield.features.beaconing import BeaconingFeatureExtractor
 from unishield.features.dns import DNSFeatureExtractor
 from unishield.features.encrypted import EncryptedSessionFeatureExtractor
 from unishield.features.exfiltration import ExfiltrationFeatureExtractor
+from unishield.features.intel import IntelFeatureExtractor
 from unishield.features.scan import ScanFeatureExtractor
 from unishield.features.volume import VolumeFeatureExtractor
 from unishield.ingest.base import BaseReader
+from unishield.intel.enrich import enrich_alerts
+from unishield.intel.matcher import IntelMatcher
 from unishield.processing.normalization import Normalizer
 from unishield.processing.sessionizer import Sessionizer
 from unishield.processing.window import SlidingWindow, Window
@@ -179,7 +184,8 @@ def default_detectors(mode: str = "rules") -> list[BaseDetector]:
     """
     Default detector set for a detection mode:
 
-        rules  — rule detectors + statistical (robust z) + Isolation Forest
+        rules  — rule detectors (incl. threat-intel matches) + statistical
+                 (robust z) + Isolation Forest
         hybrid — ``rules`` + the supervised window model for windows no rule
                  explained (falls back to ``rules`` when no model is saved)
         ml     — the supervised window model alone (evaluation/ablation)
@@ -193,6 +199,7 @@ def default_detectors(mode: str = "rules") -> list[BaseDetector]:
         ExfiltrationDetector(),
         DNSDetector(),
         EncryptedSessionDetector(),
+        IntelDetector(),
         StatisticalDetector(),
         AnomalyDetector(),
     ]
@@ -214,7 +221,8 @@ class Pipeline:
     Streaming detection pipeline.
 
     Stages: reader → sessionizer (packet-level readers only) → normaliser
-    → event-time sliding window → feature extraction → detectors → deduplication.
+    → event-time sliding window → feature extraction → detectors → intel
+    enrichment → deduplication.
 
     Usage:
         pipeline = Pipeline()
@@ -233,6 +241,7 @@ class Pipeline:
         sessionize: bool | None = None,
         window_observer: Any | None = None,
         detection_mode: str | None = None,
+        intel: IntelMatcher | None = None,
     ):
         """
         Args:
@@ -246,6 +255,9 @@ class Pipeline:
             detection_mode: ``rules``, ``hybrid`` or ``ml`` for the default
                 detector set (see ``default_detectors``); defaults to
                 ``models.detection_mode`` in the config.
+            intel: Imported threat-intelligence indicators (IntelStore.matcher()).
+                Used for INTEL_MATCH alerts, the JA3 blocklist and enriching
+                other alerts; ignored when ``intel.enabled`` is false.
         """
         config = get_config()
         self._config = config
@@ -257,6 +269,10 @@ class Pipeline:
         self.slide_interval_sec = slide_interval_sec or config.processing.slide_interval_sec
         self.window = self._new_window()
 
+        # Threat intelligence imported by the operator (empty unless supplied)
+        self.intel = intel if intel is not None and config.intel.enabled else IntelMatcher()
+        self._intel_escalate = config.intel.escalate_severity
+
         # Feature extractors
         self.extractors = extractors or [
             VolumeFeatureExtractor(),
@@ -264,7 +280,8 @@ class Pipeline:
             BeaconingFeatureExtractor(),
             ExfiltrationFeatureExtractor(),
             DNSFeatureExtractor(),
-            EncryptedSessionFeatureExtractor(),
+            EncryptedSessionFeatureExtractor(extra_ja3=self.intel.ja3_labels()),
+            IntelFeatureExtractor(self.intel),
         ]
 
         # Detectors: rule detectors first; detectors with runs_after_rules
@@ -424,6 +441,8 @@ class Pipeline:
         result.features_history.append(features)
 
         alerts = self._run_detectors(window.records, features, window.start, window.end)
+        if alerts and not self.intel.empty:
+            enrich_alerts(alerts, self.intel, escalate=self._intel_escalate)
         if self._window_observer is not None:
             try:
                 self._window_observer(window, features, list(alerts), set(self._last_rule_classes))

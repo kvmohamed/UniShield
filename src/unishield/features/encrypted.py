@@ -10,6 +10,7 @@ For every client → server → port triple with TLS metadata in the window it
 reports:
     - outdated protocol versions seen (``outdated_versions``)
     - JA3 fingerprints and whether any is on the operator's blocklist
+      (``ja3_blocklist`` plus JA3 indicators imported as threat intelligence)
     - whether the port is a usual TLS port
     - the longest session and its average byte rate
 
@@ -44,10 +45,11 @@ def _normalise_hashes(values: Iterable[str] | dict | None) -> dict[str, str]:
 class EncryptedSessionFeatureExtractor(BaseFeatureExtractor):
     """Extract per-session TLS metadata features (no decryption)."""
 
-    def __init__(self, thresholds: dict[str, Any] | None = None):
+    def __init__(self, thresholds: dict[str, Any] | None = None, extra_ja3: dict[str, str] | None = None):
+        """``extra_ja3``: {fingerprint: label} from imported threat intelligence, added to ``ja3_blocklist``."""
         t = thresholds if thresholds is not None else get_thresholds().get("encrypted", {})
         self.outdated_versions = frozenset(t.get("outdated_tls_versions", ["SSLv3", "TLSv1.0", "TLSv1.1"]))
-        self.ja3_blocklist = _normalise_hashes(t.get("ja3_blocklist"))
+        self.ja3_blocklist = {**_normalise_hashes(extra_ja3), **_normalise_hashes(t.get("ja3_blocklist"))}
         self.tls_ports = frozenset(t.get("tls_ports", TLS_PORTS))
 
     @property
