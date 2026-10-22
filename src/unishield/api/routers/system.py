@@ -16,7 +16,7 @@ from unishield.api.deps import get_context
 from unishield.api.security import auth_mode, public, require_viewer
 from unishield.api.state import AppContext
 from unishield.assets import AssetInventory
-from unishield.config import assets_source, get_config
+from unishield.config import assets_source, get_config, threshold_sources
 from unishield.processing.pipeline import DETECTION_MODES, default_detectors
 from unishield.schemas.metrics import HealthStatus, PipelineMetrics
 
@@ -168,6 +168,7 @@ def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
                       for d in detectors],
         "detection_modes": list(DETECTION_MODES),
         "models": models,
+        "thresholds_sources": threshold_sources(),
         "assets_source": assets_source(),
     }
 

@@ -210,6 +210,8 @@ outbound:
 site:
   # Per-site files; relative paths are resolved against the configs directory.
   assets_file: "assets.yaml"        # asset inventory (roles); UNISHIELD_ASSETS_FILE
+  thresholds_file: null             # overlay over thresholds.yaml, e.g. "thresholds.site.yaml"
+                                    # (written by scripts/learn_baseline.py); UNISHIELD_THRESHOLDS_FILE
 
 paths:
   data_dir: "./data"                # replay API input directory

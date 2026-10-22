@@ -10,12 +10,14 @@ Precedence (highest first):
     2. ``configs/config.yaml``
     3. Model defaults below
 
-Site files (section ``site``): ``assets.yaml``, the asset inventory,
-validated by ``AssetInventoryConfig``.
+Site files (section ``site``): ``assets.yaml`` (asset inventory, validated
+by ``AssetInventoryConfig``) and an optional thresholds overlay such as
+``thresholds.site.yaml``, merged over ``thresholds.yaml`` key by key.
 """
 
 from __future__ import annotations
 
+import copy
 import ipaddress
 import logging
 import os
@@ -397,6 +399,7 @@ DEFAULT_ASSETS_FILE = "assets.yaml"
 class SiteConfig(BaseModel):
     """Per-site files; relative paths are resolved against the configs directory."""
     assets_file: Optional[str] = DEFAULT_ASSETS_FILE    # asset inventory (roles of known hosts)
+    thresholds_file: Optional[str] = None               # overlay over thresholds.yaml, e.g. thresholds.site.yaml
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +539,7 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_AUTH_MODE": ("auth", "mode"),
     "UNISHIELD_COOKIE_SECURE": ("auth", "cookie_secure"),
     "UNISHIELD_ASSETS_FILE": ("site", "assets_file"),
+    "UNISHIELD_THRESHOLDS_FILE": ("site", "thresholds_file"),
 }
 
 
@@ -621,26 +625,92 @@ def reset_config() -> None:
 # ---------------------------------------------------------------------------
 
 _thresholds: dict[str, Any] | None = None
+_threshold_sources: list[str] = []
 
 
-def load_thresholds(path: Path | None = None) -> dict[str, Any]:
-    """Load detection thresholds from YAML."""
-    global _thresholds
+def site_thresholds_path() -> Optional[Path]:
+    """The configured site thresholds overlay (``site.thresholds_file``), if any."""
+    name = get_config().site.thresholds_file
+    return resolve_site_path(name) if name else None
+
+
+def _same_kind(default: Any, value: Any) -> bool:
+    if isinstance(default, bool) or isinstance(value, bool):
+        return isinstance(default, bool) and isinstance(value, bool)
+    if isinstance(default, (int, float)):
+        return isinstance(value, (int, float))
+    return isinstance(value, type(default))
+
+
+def merge_thresholds(base: dict[str, Any], overlay: dict[str, Any], source: str = "overlay") -> dict[str, Any]:
+    """
+    ``base`` with the values of ``overlay`` replacing it key by key.
+
+    Every overlay key must already exist in ``base`` with a value of the same
+    kind, so a typo cannot be ignored silently. Empty mappings in ``base``
+    (``ja3_blocklist``) are free-form and replaced whole. Top-level keys
+    starting with ``_`` are metadata (learning provenance) and skipped.
+    """
+    merged = copy.deepcopy(base)
+
+    def merge(target: dict[str, Any], values: Any, prefix: str) -> None:
+        if not isinstance(values, dict):
+            raise ValueError(f"{source}: '{prefix}' must be a mapping")
+        for key, value in values.items():
+            name = f"{prefix}.{key}" if prefix else str(key)
+            if key not in target:
+                raise ValueError(f"{source}: unknown threshold '{name}' (not in thresholds.yaml)")
+            default = target[key]
+            if isinstance(default, dict) and default:
+                merge(default, value, name)
+            elif not _same_kind(default, value):
+                raise ValueError(f"{source}: '{name}' must be a {type(default).__name__}, got {value!r}")
+            else:
+                target[key] = copy.deepcopy(value)
+
+    merge(merged, {k: v for k, v in overlay.items() if not str(k).startswith("_")}, "")
+    return merged
+
+
+def load_thresholds(path: Path | None = None, site_path: Path | None = None) -> dict[str, Any]:
+    """
+    Load detection thresholds from YAML, then merge the site overlay over
+    them (``site_path``, else ``site.thresholds_file`` / ``UNISHIELD_THRESHOLDS_FILE``).
+    A configured overlay that is missing or invalid raises an error.
+    """
+    global _thresholds, _threshold_sources
     if _thresholds is not None:
         return _thresholds
 
     if path is None:
         path = _resolve_config_path("thresholds.yaml")
 
+    sources: list[str] = []
     if path.exists():
-        _thresholds = load_yaml(path)
+        thresholds = load_yaml(path)
+        sources.append(str(path))
     else:
         logger.warning(
             "Thresholds file not found at %s; detectors will use built-in defaults", path
         )
-        _thresholds = {}
+        thresholds = {}
 
+    site_path = site_path if site_path is not None else site_thresholds_path()
+    if site_path is not None:
+        if not site_path.is_file():
+            raise FileNotFoundError(f"Site thresholds file not found: {site_path}")
+        thresholds = merge_thresholds(thresholds, load_yaml(site_path), source=str(site_path))
+        sources.append(str(site_path))
+        logger.info("Site thresholds loaded from %s", site_path)
+
+    _thresholds, _threshold_sources = thresholds, sources
     return _thresholds
+
+
+def threshold_sources() -> list[str]:
+    """Files the loaded thresholds came from (defaults first, then the site overlay)."""
+    get_thresholds()
+    return list(_threshold_sources)
 
 
 def get_thresholds() -> dict[str, Any]:
@@ -653,8 +723,9 @@ def get_thresholds() -> dict[str, Any]:
 
 def reset_thresholds() -> None:
     """Reset cached thresholds (used in testing)."""
-    global _thresholds
+    global _thresholds, _threshold_sources
     _thresholds = None
+    _threshold_sources = []
 
 
 # ---------------------------------------------------------------------------
