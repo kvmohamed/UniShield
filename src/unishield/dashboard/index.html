@@ -205,6 +205,16 @@ a { color: var(--accent); }
   <div class="card" style="margin-top:14px"><h2>Detectors</h2><div class="table-wrap"><table><thead><tr><th>Detector</th>
     <th>Version</th><th>Windows analysed</th><th>Alerts</th><th>Threat classes</th></tr></thead>
     <tbody id="detectors"></tbody></table></div></div>
+  <div class="grid two" style="margin-top:14px">
+    <div class="card"><h2>Exports &amp; analyst-side outputs</h2>
+      <div class="msg" style="margin-bottom:8px">Outbound traffic goes only to allow-listed analyst-side destinations outside the monitored networks; nothing is ever sent into the monitored network.</div>
+      <dl class="kv" id="outputs"></dl>
+      <h2 style="margin-top:16px">Syslog destinations</h2><div id="out-syslog"></div>
+      <h2 style="margin-top:16px">Notification channels</h2><div id="out-notify"></div></div>
+    <div class="card"><h2>Threat intelligence (offline imports)</h2><dl class="kv" id="intel"></dl>
+      <h2 style="margin-top:16px">Sources</h2><div id="intel-sources"></div>
+      <h2 style="margin-top:16px">Recent imports</h2><div id="intel-imports"></div></div>
+  </div>
 </section>
 
 </main>
@@ -416,7 +426,16 @@ function showDetail(a, tr) {
       target: "_blank", rel: "noopener noreferrer", text: t })); });
   if (!(a.mitre_techniques || []).length) mitre.textContent = "–";
   kv.append(el("dt", { text: "MITRE ATT&CK" }), mitre);
-  box.append(kv, el("h2", { style: "margin-top:14px", text: "Evidence" }), el("pre", { text: JSON.stringify(a.evidence, null, 2) }));
+  box.append(kv);
+  const matches = Array.isArray((a.evidence || {}).intel_matches) ? a.evidence.intel_matches : [];
+  if (matches.length) {
+    box.append(el("h2", { style: "margin-top:14px", text: "Threat-intelligence matches" }),
+      table(["Field", "Observed", "Kind", "Indicator", "Source", "Label", "Expires"],
+        matches.map((m) => [m.field, m.observed, m.kind, m.indicator, m.source, m.label || "–", m.expires_at ? fmtTime(m.expires_at) : "never"]
+          .map((v) => (v === null || v === undefined) ? "–" : String(v)))));
+    if (a.evidence.intel_escalated_from) box.append(el("div", { class: "msg", text: `Severity raised from ${a.evidence.intel_escalated_from} because the alert involves a listed indicator.` }));
+  }
+  box.append(el("h2", { style: "margin-top:14px", text: "Evidence" }), el("pre", { text: JSON.stringify(a.evidence, null, 2) }));
   const note = a.detector_name === "ml_detector" ? "Confidence is a calibrated probability from the window model." :
     "Confidence is a rule or anomaly score, not a calibrated probability.";
   box.append(el("div", { class: "msg", style: "margin-top:8px", text: note }));
@@ -482,6 +501,58 @@ async function loadArchitecture() {
   body.detectors.forEach((d) => tb.append(el("tr", {}, el("td", { text: d.name }), el("td", { class: "mono", text: d.version }),
     el("td", { class: "mono", text: fmtNum(d.windows_analysed) }), el("td", { class: "mono", text: fmtNum(d.alerts_generated) }),
     el("td", { text: d.threat_classes.join(", ") }))));
+  renderOutputs(body.outputs || {});
+  renderIntel(body.intel || {});
+}
+
+function kvList(node, rows) {
+  clear(node);
+  rows.forEach(([k, v]) => node.append(el("dt", { text: k }), el("dd", { class: "mono", text: (v === null || v === undefined || v === "") ? "–" : String(v) })));
+}
+
+function renderOutputs(o) {
+  const q = o.queue || {}, f = o.files || {};
+  kvList($("outputs"), [
+    ["Monitored networks (never a destination)", (o.monitored_networks || []).join(", ")],
+    ["Allowed analyst destinations", (o.allowed_destinations || []).join(", ") || "none (outbound off)"],
+    ["Continuous file export", f.enabled ? "on" : "off (on demand: POST /export)"],
+    ["Export directory / formats", `${f.directory || "–"} · ${(f.formats || []).join(", ")}`],
+    ["Alerts / incidents written", f.enabled ? `${fmtNum(f.alerts_written)} / ${fmtNum(f.incidents_written)}` : "–"],
+    ["Last export write", f.last_write ? fmtTime(f.last_write) : "–"],
+    ["Export errors", f.enabled ? `${fmtNum(f.errors)}${f.last_error ? " · " + f.last_error : ""}` : "–"],
+    ["Delivery queue", `${fmtNum(q.size)} / ${fmtNum(q.capacity)} · processed ${fmtNum(q.processed)} · dropped ${fmtNum(q.dropped)}`],
+  ]);
+  const sys = ((o.syslog || {}).destinations) || [];
+  const s = clear($("out-syslog"));
+  if (!sys.length) s.append(el("div", { class: "empty", text: "Syslog forwarding off" }));
+  else s.append(table(["Name", "Protocol", "Destination", "Format", "Sent", "Failed", "Dropped", "Last error"],
+    sys.map((d) => [d.name, d.protocol + (d.tls_verify === false ? " (no verify)" : ""), `${d.host}:${d.port}`, d.format + (d.redact_ips ? ", redacted" : ""),
+      fmtNum(d.sent), fmtNum(d.failed_batches), fmtNum(d.dropped), d.last_error || "–"])));
+  const ch = o.notifications || [];
+  const n = clear($("out-notify"));
+  if (!ch.length) n.append(el("div", { class: "empty", text: "Email and webhook notifications off" }));
+  else n.append(table(["Kind", "Name", "Target", "Min severity", "Messages", "Digests", "Pending", "Failures", "Last error"],
+    ch.map((c) => [c.kind, c.name, c.target, c.min_severity + (c.redact_ips ? " · redacted" : ""), fmtNum(c.messages_sent),
+      fmtNum(c.digests_sent), fmtNum(c.pending), fmtNum(c.failures), c.last_error || "–"])));
+}
+
+function renderIntel(i) {
+  const kinds = i.by_kind || {};
+  kvList($("intel"), [
+    ["Active / expired indicators", `${fmtNum(i.active_total)} / ${fmtNum(i.expired_total)}`],
+    ...Object.entries(kinds).map(([k, v]) => [k, `${fmtNum(v.active)} active · ${fmtNum(v.expired)} expired`]),
+    ["Fetched from the internet", "never (import files: scripts/import_intel.py or POST /intel/import)"],
+  ]);
+  const src = i.sources || [];
+  const s = clear($("intel-sources"));
+  if (!src.length) s.append(el("div", { class: "empty", text: "No indicators imported" }));
+  else s.append(table(["Source", "Active", "Expired", "Imported", "Next expiry"],
+    src.map((x) => [x.source, fmtNum(x.active), fmtNum(x.expired), fmtTime(x.imported_at), x.next_expiry ? fmtTime(x.next_expiry) : "none"])));
+  const imp = i.recent_imports || [];
+  const r = clear($("intel-imports"));
+  if (!imp.length) r.append(el("div", { class: "empty", text: "No imports yet" }));
+  else r.append(table(["When", "Source", "File", "Format", "Mode", "Accepted", "Rejected"],
+    imp.map((x) => [fmtTime(x.imported_at), x.source, x.filename || "–", x.format, x.mode, fmtNum(x.accepted), fmtNum(x.rejected)])));
 }
 
 async function refreshTab() {

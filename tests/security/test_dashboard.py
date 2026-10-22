@@ -21,3 +21,19 @@ def test_dashboard_has_no_html_injection_sinks_or_external_resources():
     assert urls <= {"https://attack.mitre.org/techniques/", "http://www.w3.org/2000/svg"}, urls
     assert "This system is a passive defensive research prototype. It does not probe, block, decrypt, " \
            "or send commands to monitored systems." in html
+
+
+def test_dashboard_shows_outputs_intel_and_intel_matches():
+    from pathlib import Path
+
+    import unishield
+
+    html = (Path(unishield.__file__).parent / "dashboard" / "index.html").read_text(encoding="utf-8")
+    script = html.split("<script>", 1)[1]
+    assert '"INTEL_MATCH"' in script
+    for element in ('id="outputs"', 'id="out-syslog"', 'id="out-notify"', 'id="intel"', 'id="intel-sources"',
+                    'id="intel-imports"'):
+        assert element in html, element
+    assert "renderOutputs(body.outputs" in script and "renderIntel(body.intel" in script
+    assert "evidence || {}).intel_matches" in script and "Threat-intelligence matches" in script
+    assert "nothing is ever sent into the monitored network" in html
