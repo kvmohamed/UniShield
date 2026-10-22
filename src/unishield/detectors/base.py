@@ -15,11 +15,56 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
 from typing import Any
 
+from unishield.correlation.severity import RANK
 from unishield.correlation.severity import from_levels as severity_from_levels
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
+from unishield.schemas.timeutil import from_epoch_us, to_epoch_us
+
+
+class ReportMemory:
+    """
+    When each finding (key) was last reported, and at what severity, for
+    re-alert suppression: a finding is reported again only after ``horizon``
+    of traffic time or when its severity rises.
+
+    Entries older than the horizon no longer suppress anything; they are
+    pruned whenever more than ``limit`` keys are held, so memory stays
+    bounded on long runs. The memory is part of the restart-safe state.
+    """
+
+    def __init__(self, horizon: timedelta, limit: int = 20_000):
+        self.horizon = horizon
+        self.limit = limit
+        self._last: dict[tuple, tuple[datetime, Severity]] = {}
+
+    def __len__(self) -> int:
+        return len(self._last)
+
+    def should_report(self, key: tuple, now: datetime, severity: Severity) -> bool:
+        """False if ``key`` was reported within the horizon at this severity or higher; else record it."""
+        previous = self._last.get(key)
+        if previous is not None and now - previous[0] < self.horizon and RANK[severity] <= RANK[previous[1]]:
+            return False
+        self._last[key] = (now, severity)
+        if len(self._last) > self.limit:
+            self._prune(now)
+        return True
+
+    def _prune(self, now: datetime) -> None:
+        live = {k: v for k, v in self._last.items() if now - v[0] < self.horizon}
+        if len(live) > self.limit:            # more live findings than the limit: keep the newest 90%
+            live = dict(sorted(live.items(), key=lambda kv: kv[1][0])[-int(self.limit * 0.9):])
+        self._last = live
+
+    def state_dict(self) -> list[list[Any]]:
+        return [[list(key), to_epoch_us(t), s.value] for key, (t, s) in self._last.items()]
+
+    def load_state_dict(self, entries: list[list[Any]]) -> None:
+        self._last = {tuple(key): (from_epoch_us(t), Severity(s)) for key, t, s in entries}
 
 
 class BaseDetector(ABC):

@@ -19,6 +19,7 @@ from unishield.api.state import AppContext
 from unishield.config import get_config
 from unishield.data.sample_generator import SCENARIO_NAMES, SimulatedReader, build_scenario, generate_mixed_scenario
 from unishield.ingest.detect import UnsupportedFormatError, open_reader
+from unishield.processing.state_store import PipelineStateStore
 
 router = APIRouter(tags=["replay"])
 
@@ -61,9 +62,9 @@ def resolve_replay_path(file_path: str) -> Path:
 
 
 def _start(request: Request, ctx: AppContext, reader, source: str, fmt: str, clear: bool,
-           mode: Optional[str], action: str) -> dict[str, Any]:
+           mode: Optional[str], action: str, state_store: PipelineStateStore | None = None) -> dict[str, Any]:
     try:
-        started = ctx.start_replay(reader, source, fmt, clear=clear, detection_mode=mode)
+        started = ctx.start_replay(reader, source, fmt, clear=clear, detection_mode=mode, state_store=state_store)
     except RuntimeError as exc:
         audit(request, action, "failure", target=source, details={"error": str(exc)})
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -79,9 +80,14 @@ def replay_start(
     file_path: str = Query(..., max_length=4096, description="Path under the data directory"),
     clear: bool = Query(default=True, description="Delete stored alerts before the run"),
     mode: Optional[DetectionMode] = Query(default=None, description="Detection mode (default: config)"),
+    state: Optional[bool] = Query(default=None, description="Restore and snapshot detector state "
+                                                            "(default: state.enabled in the config)"),
     ctx: AppContext = Depends(get_context),
 ) -> dict[str, Any]:
-    """Analyse a PCAP/PCAPNG, Zeek (JSON/TSV, file or directory) or flow CSV/JSON file. Read-only."""
+    """
+    Analyse a PCAP/PCAPNG, Zeek (JSON/TSV, file or directory) or flow CSV/JSON file. Read-only.
+    With state persistence the run continues from the last snapshot and leaves a new one.
+    """
     if ctx.running:
         raise HTTPException(status_code=409, detail="Replay already running")
     path = resolve_replay_path(file_path)
@@ -89,7 +95,10 @@ def replay_start(
         reader, fmt = open_reader(path)
     except UnsupportedFormatError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _start(request, ctx, reader, str(path), fmt, clear, mode, "replay.start")
+    cfg = get_config().state
+    store = PipelineStateStore(cfg.path, cfg.snapshot_interval_sec) if (cfg.enabled if state is None else state) \
+        else None
+    return _start(request, ctx, reader, str(path), fmt, clear, mode, "replay.start", store)
 
 
 @router.post("/replay/demo", summary="Analyse synthetic attack traffic", dependencies=[Depends(require_admin)])

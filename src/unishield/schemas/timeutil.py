@@ -8,7 +8,10 @@ its datetime fields through ``ensure_utc``.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_MICROSECOND = timedelta(microseconds=1)
 
 
 def utc_now() -> datetime:
@@ -21,3 +24,13 @@ def ensure_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def to_epoch_us(value: datetime) -> int:
+    """Microseconds since the Unix epoch, exactly (compact, lossless serialisation)."""
+    return (ensure_utc(value) - _EPOCH) // _MICROSECOND
+
+
+def from_epoch_us(value: int) -> datetime:
+    """Inverse of ``to_epoch_us``: a timezone-aware UTC datetime."""
+    return _EPOCH + int(value) * _MICROSECOND

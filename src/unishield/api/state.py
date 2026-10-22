@@ -19,6 +19,10 @@ starts housekeeping; ``shutdown`` (SIGTERM / Ctrl+C under uvicorn) stops
 housekeeping and any replay, waits for the replay to record its state,
 drains the output service, records ``system.stop`` and releases the
 database connections.
+File replays can restore and snapshot the detectors' cross-window state
+(``state`` in the config), so consecutive files of one site's feed, and
+restarts between them, keep beacon histories and baselines; the replay
+writes its final snapshot as it stops, before ``shutdown`` returns.
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ from unishield.export.service import OutputService
 from unishield.intel.matcher import IntelMatcher
 from unishield.intel.store import IntelStore
 from unishield.processing.pipeline import Pipeline
+from unishield.processing.state_store import PipelineStateStore
 from unishield.schemas.alert import Alert
 from unishield.storage import AlertRepository, AuditLog, AuditQuery, migrate
 from unishield.storage.retention import MaintenanceWorker, housekeeping
@@ -171,13 +176,15 @@ class AppContext:
         return self.replay["status"] == "running"
 
     def start_replay(self, reader, source: str, fmt: str, clear: bool = True,
-                     detection_mode: str | None = None) -> dict[str, Any]:
+                     detection_mode: str | None = None,
+                     state_store: PipelineStateStore | None = None) -> dict[str, Any]:
         """Start the pipeline on ``reader`` in a background thread. Raises RuntimeError if one is running."""
         intel = self.intel_matcher()                    # outside the lock: may create the repository
         with self._lock:
             if self.running:
                 raise RuntimeError("Replay already running")
-            pipeline = Pipeline(alert_callback=self._store_alert, detection_mode=detection_mode, intel=intel)
+            pipeline = Pipeline(alert_callback=self._store_alert, detection_mode=detection_mode, intel=intel,
+                                state_store=state_store)
             run_id = f"run-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
             self.pipeline = pipeline
             self.replay = dict(_IDLE, status="running", run_id=run_id, source=source, format=fmt,
@@ -188,7 +195,8 @@ class AppContext:
                                        name=f"replay-{run_id}", daemon=True)
         self.thread.start()
         return {"status": "started", "run_id": run_id, "source": source, "format": fmt,
-                "detection_mode": pipeline.detection_mode, "alerts_deleted": deleted}
+                "detection_mode": pipeline.detection_mode, "alerts_deleted": deleted,
+                "state_persistence": state_store is not None}
 
     def _store_alert(self, alert: Alert) -> None:
         alert.run_id = self.replay.get("run_id")
@@ -232,6 +240,8 @@ class AppContext:
         state = dict(self.replay)
         if self.pipeline is not None and self.running:
             state["records_processed"] = self.pipeline.get_metrics().total_records_ingested
+        store = self.pipeline.state_store if self.pipeline is not None else None
+        state["state"] = store.stats() if store is not None else None
         start, end = state.get("started_at"), state.get("finished_at")
         state["elapsed_seconds"] = round((end or time.time()) - start, 3) if start else 0.0
         return state

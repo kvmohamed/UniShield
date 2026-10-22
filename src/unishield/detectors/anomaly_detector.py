@@ -94,6 +94,7 @@ class AnomalyDetector(BaseDetector):
         self._medians: Optional[np.ndarray] = None
         self._scales: Optional[np.ndarray] = None
         self._training: list[list[float]] = []
+        self._fit_rows: list[list[float]] = []      # online warm-up windows the model was fitted on
         self._is_fitted = False
         self.model_info: dict[str, Any] = {"source": "online warm-up"}
         if model_path is not None:
@@ -171,6 +172,44 @@ class AnomalyDetector(BaseDetector):
         self.model_info = {"source": str(path), **bundle.get("info", {})}
         logger.info("Anomaly model loaded from %s", path)
 
+    # ---------------------------------------------------------- persistence
+
+    @property
+    def online(self) -> bool:
+        """True unless a saved model was loaded."""
+        return self.model_info.get("source") == "online warm-up"
+
+    def state_dict(self) -> dict[str, Any]:
+        """
+        Online model: its warm-up windows (fitted or still collecting). Refitting
+        on the same windows with the same random_state rebuilds the same
+        forest, so no model object is serialised. A saved model is referenced
+        by path only; it is loaded from its file as at start-up.
+        """
+        if not self.online:
+            return {"mode": "saved_model", "source": self.model_info.get("source")}
+        return {
+            "mode": "online",
+            "feature_keys": self._feature_keys,
+            "n_estimators": self._n_estimators,
+            "random_state": self._random_state,
+            "fitted": self._is_fitted,
+            "rows": self._fit_rows if self._is_fitted else self._training,
+        }
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        if state["mode"] != "online" or not self.online:
+            return                          # saved models are loaded from their files, not from snapshots
+        if state["feature_keys"] != self._feature_keys:
+            raise ValueError("snapshot was taken with different anomaly features")
+        rows = [[float(v) for v in row] for row in state["rows"]]
+        self._n_estimators, self._random_state = int(state["n_estimators"]), int(state["random_state"])
+        if state["fitted"]:
+            self.fit(rows)
+            self._fit_rows, self._training = rows, []
+        else:
+            self._training = rows
+
     # ------------------------------------------------------------ detection
 
     def score(self, vector: list[float]) -> tuple[float, float]:
@@ -198,7 +237,7 @@ class AnomalyDetector(BaseDetector):
             self._training.append(vec)
             if len(self._training) >= self._min_training_windows:
                 self.fit(self._training)
-                self._training = []
+                self._fit_rows, self._training = self._training, []
             return []
 
         quantile = self._thresholds.get("quantile", 0.995)

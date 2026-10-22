@@ -28,13 +28,12 @@ MITRE ATT&CK: T1071, plus T1573 when the pair used TLS.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from unishield.config import get_thresholds
 from unishield.correlation.mitre_mapping import ENCRYPTED_CHANNEL, techniques_for
-from unishield.correlation.severity import RANK
-from unishield.detectors.base import BaseDetector
+from unishield.detectors.base import BaseDetector, ReportMemory
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
 
@@ -46,7 +45,7 @@ class BeaconingDetector(BaseDetector):
         if thresholds is None:
             thresholds = get_thresholds().get("beaconing", {})
         super().__init__(thresholds)
-        self._last_reported: dict[tuple, tuple[datetime, Severity]] = {}
+        self._reported = ReportMemory(timedelta(seconds=thresholds.get("realert_after_sec", 900)))
 
     @property
     def name(self) -> str:
@@ -59,6 +58,12 @@ class BeaconingDetector(BaseDetector):
     @property
     def mitre_techniques(self) -> list[str]:
         return techniques_for(ThreatClass.C2_BEACONING, ENCRYPTED_CHANNEL)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"reported": self._reported.state_dict()}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        self._reported.load_state_dict(state["reported"])
 
     def detect(
         self,
@@ -80,7 +85,6 @@ class BeaconingDetector(BaseDetector):
         cv_thr = t.get("regularity_cv_threshold", 0.3)
         periodicity_thr = t.get("periodicity_score", 0.7)
         max_sources = t.get("max_destination_sources", 3)
-        realert = timedelta(seconds=t.get("realert_after_sec", 900))
         alerts: list[Alert] = []
 
         for c in features.get("beacon_candidates", []):
@@ -102,12 +106,9 @@ class BeaconingDetector(BaseDetector):
                 severity = Severity.LOW
 
             key = (c["source_ip"], c["destination_ip"], c["destination_port"])
-            previous = self._last_reported.get(key)
-            if previous is not None and window_end - previous[0] < realert \
-                    and RANK[severity] <= RANK[previous[1]]:
+            if not self._reported.should_report(key, window_end, severity):
                 self.suppressed_classes.add(ThreatClass.C2_BEACONING)
                 continue
-            self._last_reported[key] = (window_end, severity)
 
             confidence = (0.5 * max(0.0, 1.0 - cv / cv_thr) + 0.3 * c["periodicity"]
                           + 0.2 * c["size_regularity"])

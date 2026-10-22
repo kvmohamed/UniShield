@@ -28,6 +28,7 @@ from typing import Any, Iterable
 
 from unishield.correlation import severity as sev
 from unishield.schemas.alert import Alert, Severity
+from unishield.schemas.timeutil import from_epoch_us, to_epoch_us
 
 logger = logging.getLogger("unishield.correlation")
 
@@ -77,6 +78,12 @@ class AlertCorrelator:
                 self._dedup_cache.popitem(last=False)
             unique.append(alert)
         return unique
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"dedup": [[key, to_epoch_us(t)] for key, t in self._dedup_cache.items()]}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        self._dedup_cache = OrderedDict((key, from_epoch_us(t)) for key, t in state["dedup"][-_DEDUP_CACHE_LIMIT:])
 
     def correlate(self, alerts: Iterable[Alert]) -> list[dict[str, Any]]:
         """

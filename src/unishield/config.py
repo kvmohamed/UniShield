@@ -402,6 +402,13 @@ class SiteConfig(BaseModel):
     thresholds_file: Optional[str] = None               # overlay over thresholds.yaml, e.g. thresholds.site.yaml
 
 
+class StateConfig(BaseModel):
+    """Restart-safe detector state (see processing/state_store.py)."""
+    enabled: bool = False
+    path: str = "./data/state/pipeline_state.json"
+    snapshot_interval_sec: float = Field(default=300.0, gt=0)
+
+
 # ---------------------------------------------------------------------------
 # Asset inventory (configs/assets.yaml)
 # ---------------------------------------------------------------------------
@@ -489,6 +496,7 @@ class UnishieldConfig(BaseModel):
     outbound: OutboundConfig = OutboundConfig()
     paths: PathsConfig = PathsConfig()
     site: SiteConfig = SiteConfig()
+    state: StateConfig = StateConfig()
 
     @model_validator(mode="after")
     def outbound_only_to_analyst_side(self) -> "UnishieldConfig":
@@ -540,6 +548,8 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_COOKIE_SECURE": ("auth", "cookie_secure"),
     "UNISHIELD_ASSETS_FILE": ("site", "assets_file"),
     "UNISHIELD_THRESHOLDS_FILE": ("site", "thresholds_file"),
+    "UNISHIELD_STATE_ENABLED": ("state", "enabled"),
+    "UNISHIELD_STATE_FILE": ("state", "path"),
 }
 
 

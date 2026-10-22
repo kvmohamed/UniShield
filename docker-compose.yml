@@ -23,13 +23,15 @@ services:
       - ./data:/app/data:ro              # replay inputs (read-only)
       - ./reports:/app/reports:ro        # benchmark / evaluation reports shown in the dashboard
       - ./models:/app/models:ro          # trained models for hybrid mode
-      - unishield-state:/app/state       # alert database (SQLite)
+      - unishield-state:/app/state       # alert database (SQLite) and detector state snapshot
       - unishield-exports:/app/exports   # JSON lines / CEF / STIX export files
       - unishield-logs:/app/logs
     environment:
       UNISHIELD_ENV: docker
       UNISHIELD_DEBUG: "false"
       UNISHIELD_DB_URL: sqlite:////app/state/unishield.db
+      UNISHIELD_STATE_ENABLED: ${UNISHIELD_STATE_ENABLED:-false}   # restart-safe detector state
+      UNISHIELD_STATE_FILE: /app/state/pipeline_state.json
       UNISHIELD_ADMIN_API_KEY: ${UNISHIELD_ADMIN_API_KEY:-}
       UNISHIELD_DETECTION_MODE: ${UNISHIELD_DETECTION_MODE:-rules}
       UNISHIELD_EXPORT_DIR: /app/exports

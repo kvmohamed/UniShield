@@ -40,6 +40,7 @@ from unishield.config import get_thresholds
 from unishield.features.base import BaseFeatureExtractor, WindowContext
 from unishield.schemas.alert import ThreatClass
 from unishield.schemas.flow import FlowDirection, NormalisedFlow
+from unishield.schemas.timeutil import from_epoch_us, to_epoch_us
 
 WELL_KNOWN_PORTS = frozenset({21, 22, 25, 53, 80, 110, 123, 143, 443, 587, 993, 995, 8080, 8443})
 _MIN_CANDIDATE_UPLOAD = 100_000          # bytes; smaller pairs are not profiled
@@ -120,6 +121,22 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
     def reset(self) -> None:
         self._baselines.clear()
         self._uploaders.clear()
+
+    def state_dict(self) -> dict[str, Any]:
+        """Per-source upload baselines and per-destination uploaders, JSON-serialisable."""
+        return {
+            "baselines": [[src, list(history)] for src, history in self._baselines.items()],
+            "uploaders": [[dst, [[src, to_epoch_us(t)] for src, t in sources.items()]]
+                          for dst, sources in self._uploaders.items()],
+        }
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore ``state_dict()`` output; this instance's baseline length and limits apply."""
+        self.reset()
+        for src, values in state["baselines"][-self.max_tracked:]:
+            self._baselines[src] = deque((float(v) for v in values), maxlen=self.baseline_windows)
+        for dst, sources in state["uploaders"][-self.max_tracked:]:
+            self._uploaders[dst] = {src: from_epoch_us(t) for src, t in sources}
 
     def extract(self, flows: list[NormalisedFlow], window: WindowContext | None = None) -> dict[str, Any]:
         empty: dict[str, Any] = {name: 0 for name in self.feature_names}

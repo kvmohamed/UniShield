@@ -25,13 +25,13 @@ MITRE ATT&CK: T1573 (+ T1571 on an unusual port).
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from unishield.config import get_thresholds
 from unishield.correlation import severity as sev
 from unishield.correlation.mitre_mapping import NON_STANDARD_PORT, techniques_for
-from unishield.detectors.base import BaseDetector
+from unishield.detectors.base import BaseDetector, ReportMemory
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
 
@@ -49,7 +49,7 @@ class EncryptedSessionDetector(BaseDetector):
         if thresholds is None:
             thresholds = get_thresholds().get("encrypted", {})
         super().__init__(thresholds)
-        self._last_reported: dict[tuple, tuple[datetime, Severity]] = {}
+        self._reported = ReportMemory(timedelta(seconds=thresholds.get("realert_after_sec", 900)))
 
     @property
     def name(self) -> str:
@@ -62,6 +62,12 @@ class EncryptedSessionDetector(BaseDetector):
     @property
     def mitre_techniques(self) -> list[str]:
         return techniques_for(ThreatClass.ENCRYPTED_SESSION_ANOMALY, NON_STANDARD_PORT)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"reported": self._reported.state_dict()}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        self._reported.load_state_dict(state["reported"])
 
     def detect(
         self,
@@ -79,7 +85,6 @@ class EncryptedSessionDetector(BaseDetector):
         t = self._thresholds
         long_sec = t.get("long_session_sec", 1800)
         low_rate = t.get("low_rate_bytes_per_sec", 200)
-        realert = timedelta(seconds=t.get("realert_after_sec", 900))
         alerts: list[Alert] = []
 
         for c in features.get("tls_candidates", []):
@@ -96,12 +101,9 @@ class EncryptedSessionDetector(BaseDetector):
 
             severity = sev.max_severity(_RULE_SEVERITY[r] for r in rules)
             key = (c["source_ip"], c["destination_ip"], c["destination_port"])
-            previous = self._last_reported.get(key)
-            if previous is not None and window_end - previous[0] < realert \
-                    and sev.RANK[severity] <= sev.RANK[previous[1]]:
+            if not self._reported.should_report(key, window_end, severity):
                 self.suppressed_classes.add(ThreatClass.ENCRYPTED_SESSION_ANOMALY)
                 continue
-            self._last_reported[key] = (window_end, severity)
 
             confidence = {Severity.HIGH: 0.8, Severity.MEDIUM: 0.6}.get(severity, 0.45) + 0.05 * (len(rules) - 1)
             extra = (NON_STANDARD_PORT,) if c["unusual_port"] else ()

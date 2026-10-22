@@ -112,6 +112,14 @@ def traffic(limit: int = Query(default=500, ge=1, le=10_000), ctx: AppContext = 
     }
 
 
+def _state_detail(ctx: AppContext, config) -> str:
+    store = ctx.pipeline.state_store if ctx.pipeline else None
+    if store is None:
+        return f"snapshot file {config.state.path}"
+    last = store.last_save.get("at", "none yet")
+    return f"snapshot file {store.path}, {store.saves} saves, last {last}"
+
+
 @router.get("/system/architecture", summary="Component status for the architecture view",
             dependencies=[Depends(require_viewer)])
 def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
@@ -151,6 +159,8 @@ def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
              "detail": f"mode {pipeline.detection_mode if pipeline else config.models.detection_mode}"},
             {"name": "storage", "status": "connected" if db_ok else "unavailable",
              "detail": f"{ctx.repository.backend}, {ctx.repository.count()} alerts"},
+            {"name": "state", "status": "enabled" if config.state.enabled else "disabled",
+             "detail": _state_detail(ctx, config)},
             {"name": "api", "status": "running", "detail": f"auth mode: {auth_mode()}"},
             {"name": "threat intel", "status": "ready" if config.intel.enabled else "disabled",
              "detail": f"{intel['active_total']} active indicators from {len(intel['sources'])} sources "

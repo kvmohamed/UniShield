@@ -33,6 +33,7 @@ from typing import Any, Optional
 from unishield.config import get_thresholds
 from unishield.features.base import BaseFeatureExtractor, WindowContext
 from unishield.schemas.flow import FlowDirection, NormalisedFlow
+from unishield.schemas.timeutil import from_epoch_us, to_epoch_us
 
 _MAX_CANDIDATES = 10
 _SEEN_LIMIT = 200_000
@@ -111,6 +112,25 @@ class BeaconingFeatureExtractor(BaseFeatureExtractor):
         self._pairs.clear()
         self._dst_sources.clear()
         self._seen.clear()
+
+    def state_dict(self) -> dict[str, Any]:
+        """Pair histories and destination sources (least recently used first), JSON-serialisable."""
+        return {
+            "pairs": [[src, dst, dport, [[to_epoch_us(t), up, tls] for t, up, tls in history]]
+                      for (src, dst, dport), history in self._pairs.items()],
+            "destination_sources": [[dst, [[src, to_epoch_us(t)] for src, t in sources.items()]]
+                                    for dst, sources in self._dst_sources.items()],
+        }
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore ``state_dict()`` output; the pair limits of this instance apply."""
+        self.reset()
+        for src, dst, dport, entries in state["pairs"][-self.max_pairs:]:
+            history = deque(((from_epoch_us(t), int(up), bool(tls)) for t, up, tls in entries),
+                            maxlen=self.max_per_pair)
+            self._pairs[(src, dst, dport)] = history
+        for dst, sources in state["destination_sources"][-self.max_pairs:]:
+            self._dst_sources[dst] = {src: from_epoch_us(t) for src, t in sources}
 
     def extract(self, flows: list[NormalisedFlow], window: WindowContext | None = None) -> dict[str, Any]:
         touched: set[tuple] = set()

@@ -213,6 +213,14 @@ site:
   thresholds_file: null             # overlay over thresholds.yaml, e.g. "thresholds.site.yaml"
                                     # (written by scripts/learn_baseline.py); UNISHIELD_THRESHOLDS_FILE
 
+state:
+  # Restart-safe detector state: beacon histories, upload baselines, the
+  # statistical baseline and the Isolation Forest are snapshotted to this
+  # JSON file (SHA-256 checked) and restored when a file replay starts.
+  enabled: false                    # UNISHIELD_STATE_ENABLED
+  path: "./data/state/pipeline_state.json"   # UNISHIELD_STATE_FILE
+  snapshot_interval_sec: 300        # wall-clock seconds between snapshots (also on stop and at end)
+
 paths:
   data_dir: "./data"                # replay API input directory
   raw_dir: "./data/raw"             # (planned)

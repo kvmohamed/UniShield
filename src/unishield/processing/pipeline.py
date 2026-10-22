@@ -13,6 +13,9 @@ DESIGN:
       records and latency/feature histories keep only recent entries.
     - A pipeline instance runs one input at a time; the API reads its
       counters from another thread (plain integer reads).
+    - With a ``PipelineStateStore`` the cross-window state of extractors,
+      detectors and the correlator is restored before the first run and
+      snapshotted periodically and when a run ends (processing/state_store.py).
 
 SECURITY CONSTRAINTS:
     - Read-only: no packets sent, no endpoints probed.
@@ -53,6 +56,7 @@ from unishield.intel.enrich import enrich_alerts
 from unishield.intel.matcher import IntelMatcher
 from unishield.processing.normalization import Normalizer
 from unishield.processing.sessionizer import Sessionizer
+from unishield.processing.state_store import PipelineStateStore
 from unishield.processing.window import SlidingWindow, Window
 from unishield.schemas.alert import Alert, SourceType
 from unishield.schemas.flow import InputSource, NormalisedFlow
@@ -121,6 +125,7 @@ class PipelineResult:
         self.errors: int = 0
         self.ingest: dict[str, Any] = {}
         self.asset_policy: dict[str, Any] = {}
+        self.state: Optional[dict[str, Any]] = None
 
     def record_latency(self, latency_ms: float) -> None:
         self.latencies_ms.append(latency_ms)
@@ -169,6 +174,7 @@ class PipelineResult:
             "errors": self.errors,
             "alerts_by_class": self._alerts_by_class(),
             "asset_policy": self.asset_policy,
+            "state": self.state,
             "ingest": self.ingest,
         }
 
@@ -246,6 +252,7 @@ class Pipeline:
         detection_mode: str | None = None,
         intel: IntelMatcher | None = None,
         assets: AssetInventory | None = None,
+        state_store: PipelineStateStore | None = None,
     ):
         """
         Args:
@@ -264,6 +271,8 @@ class Pipeline:
                 other alerts; ignored when ``intel.enabled`` is false.
             assets: Asset inventory whose role policies are applied to the
                 alerts (see ``unishield.assets``); defaults to ``site.assets_file``.
+            state_store: Restores cross-window state before the first run and
+                snapshots it periodically and at the end of every run.
         """
         config = get_config()
         self._config = config
@@ -311,6 +320,10 @@ class Pipeline:
         # Metrics callback for live metrics delivery to API
         self._metrics_callback: Any | None = None
 
+        self._state_store = state_store
+        self._state_restored = False
+        self._last_window_end: Any = None
+
         self._is_running = False
         self._should_stop = False
 
@@ -332,6 +345,50 @@ class Pipeline:
     @property
     def is_running(self) -> bool:
         return self._is_running
+
+    @property
+    def state_store(self) -> PipelineStateStore | None:
+        return self._state_store
+
+    def _stateful_components(self) -> dict[str, Any]:
+        parts: dict[str, Any] = {}
+        for kind, items in (("extractor", self.extractors), ("detector", self.detectors)):
+            for item in items:
+                if hasattr(item, "state_dict") and hasattr(item, "load_state_dict"):
+                    parts[f"{kind}:{item.name}"] = item
+        if self._correlator is not None:
+            parts["correlator"] = self._correlator
+        return parts
+
+    def state_dict(self) -> dict[str, Any]:
+        """Cross-window state of every stateful extractor, detector and the correlator (JSON-serialisable)."""
+        return {name: part.state_dict() for name, part in self._stateful_components().items()}
+
+    def load_state_dict(self, components: dict[str, Any]) -> dict[str, Any]:
+        """
+        Restore components independently. Returns the names restored and, for
+        each one not restored, why (a failing component starts cold).
+        """
+        restored: list[str] = []
+        skipped: dict[str, str] = {}
+        parts = self._stateful_components()
+        for name, part in parts.items():
+            if name not in components:
+                skipped[name] = "not in snapshot"
+                continue
+            try:
+                part.load_state_dict(components[name])
+                restored.append(name)
+            except Exception as e:
+                skipped[name] = f"failed: {e}"
+                logger.error("Could not restore %s from the state snapshot: %s", name, e)
+                fresh_reset = getattr(part, "reset", None)
+                if callable(fresh_reset):
+                    fresh_reset()
+        for name in components:
+            if name not in parts:
+                skipped[name] = "not in this pipeline"
+        return {"restored": sorted(restored), "skipped": skipped}
 
     def set_metrics_callback(self, callback: Any) -> None:
         """Set a callback for live metrics updates."""
@@ -364,6 +421,10 @@ class Pipeline:
             len(self.detectors),
             len(self.asset_policy.inventory),
         )
+
+        if self._state_store is not None and not self._state_restored:
+            self._state_store.restore(self)
+            self._state_restored = True
 
         self._reader = reader
         normalizer = self._normalizer_override or Normalizer.from_config(self._config)
@@ -419,6 +480,9 @@ class Pipeline:
                 "windowing": self.window.stats(),
             }
             result.asset_policy = self.asset_policy.stats()
+            if self._state_store is not None:
+                self._state_store.save(self, self._last_window_end)
+                result.state = self._state_store.stats()
             # Push final metrics
             if self._metrics_callback:
                 try:
@@ -491,6 +555,9 @@ class Pipeline:
             "alerts": len(alerts),
             "processing_ms": round(result.window_latencies_ms[-1], 3),
         })
+        self._last_window_end = window.end
+        if self._state_store is not None:
+            self._state_store.maybe_save(self, window.end)
 
     def _extract_features(
         self, flows: list[NormalisedFlow], window: WindowContext | None = None

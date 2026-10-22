@@ -27,13 +27,13 @@ MITRE ATT&CK: T1041, T1048 (+ T1573 over TLS, T1571 on an unusual port).
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from unishield.config import get_thresholds
 from unishield.correlation import severity as sev
 from unishield.correlation.mitre_mapping import ENCRYPTED_CHANNEL, NON_STANDARD_PORT, techniques_for
-from unishield.detectors.base import BaseDetector
+from unishield.detectors.base import BaseDetector, ReportMemory
 from unishield.schemas.alert import Alert, Severity, ThreatClass
 from unishield.schemas.flow import NormalisedFlow
 
@@ -47,7 +47,7 @@ class ExfiltrationDetector(BaseDetector):
         if thresholds is None:
             thresholds = get_thresholds().get("exfiltration", {})
         super().__init__(thresholds)
-        self._last_reported: dict[tuple[str, str], tuple[datetime, Severity]] = {}
+        self._reported = ReportMemory(timedelta(seconds=thresholds.get("realert_after_sec", 600)))
 
     @property
     def name(self) -> str:
@@ -60,6 +60,12 @@ class ExfiltrationDetector(BaseDetector):
     @property
     def mitre_techniques(self) -> list[str]:
         return techniques_for(ThreatClass.DATA_EXFILTRATION, ENCRYPTED_CHANNEL, NON_STANDARD_PORT)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"reported": self._reported.state_dict()}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        self._reported.load_state_dict(state["reported"])
 
     def detect(
         self,
@@ -83,7 +89,6 @@ class ExfiltrationDetector(BaseDetector):
         long_sec = t.get("long_session_duration_sec", 3600)
         long_min = t.get("long_session_min_upload_mb", 1) * _MB
         max_sources = t.get("max_destination_sources", 3)
-        realert = timedelta(seconds=t.get("realert_after_sec", 600))
         levels = t.get("severity_levels", {})
         alerts: list[Alert] = []
 
@@ -114,12 +119,9 @@ class ExfiltrationDetector(BaseDetector):
                 severity = sev.escalate(severity)
 
             key = (c["source_ip"], c["destination_ip"])
-            previous = self._last_reported.get(key)
-            if previous is not None and window_end - previous[0] < realert \
-                    and sev.RANK[severity] <= sev.RANK[previous[1]]:
+            if not self._reported.should_report(key, window_end, severity):
                 self.suppressed_classes.add(ThreatClass.DATA_EXFILTRATION)
                 continue
-            self._last_reported[key] = (window_end, severity)
 
             confidence = 0.4 + 0.1 * len(rules) + (0.15 if rare else 0.0)
             if "volume" in rules:

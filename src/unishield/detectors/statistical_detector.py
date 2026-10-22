@@ -81,6 +81,16 @@ class StatisticalDetector(BaseDetector):
     def baseline_size(self) -> int:
         return len(self._history)
 
+    def state_dict(self) -> dict[str, Any]:
+        return {"metrics": list(METRICS), "history": [[h[m] for m in METRICS] for h in self._history]}
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        if state["metrics"] != list(METRICS):
+            raise ValueError("snapshot baseline uses different metrics")
+        rows = [dict(zip(METRICS, map(float, row), strict=True)) for row in state["history"]]
+        self._history.clear()
+        self._history.extend(rows)
+
     def detect(
         self,
         flows: list[NormalisedFlow],
