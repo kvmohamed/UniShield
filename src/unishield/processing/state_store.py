@@ -40,6 +40,8 @@ SECURITY CONSTRAINTS:
 
 from __future__ import annotations
 
+import contextlib
+import gc
 import hashlib
 import json
 import logging
@@ -47,7 +49,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from unishield import __version__
 from unishield.schemas.timeutil import utc_now
@@ -56,6 +58,23 @@ logger = logging.getLogger("unishield.processing.state")
 
 STATE_FORMAT = "unishield-pipeline-state"
 STATE_VERSION = 1
+
+
+@contextlib.contextmanager
+def _collector_paused() -> Iterator[None]:
+    """
+    Pause the cyclic garbage collector while a snapshot is built or loaded.
+    Both create hundreds of thousands of small acyclic objects, which would
+    otherwise trigger full collections over the pipeline's large heap
+    (measured: about 4x slower).
+    """
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if was_enabled:
+            gc.enable()
 
 
 class StateSnapshotError(ValueError):
@@ -88,9 +107,9 @@ def read_snapshot(path: Path) -> dict[str, Any]:
 def write_snapshot(path: Path, payload: dict[str, Any]) -> int:
     """Write ``payload`` atomically with its checksum; returns the file size in bytes."""
     body = canonical_json(payload)
-    document = {"format": STATE_FORMAT, "version": STATE_VERSION,
-                "sha256": hashlib.sha256(body).hexdigest(), "payload": payload}
-    data = json.dumps(document, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    header = json.dumps({"format": STATE_FORMAT, "version": STATE_VERSION,
+                         "sha256": hashlib.sha256(body).hexdigest()}, separators=(",", ":"))
+    data = header[:-1].encode("utf-8") + b',"payload":' + body + b"}"     # the payload is serialised once
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "wb") as f:
@@ -128,13 +147,14 @@ class PipelineStateStore:
         """Snapshot ``pipeline`` now. Failures are logged and counted, not raised."""
         started = time.perf_counter()
         try:
-            payload = {
-                "created_at": utc_now().isoformat(),
-                "unishield_version": __version__,
-                "last_event_time": last_event_time.isoformat() if last_event_time else None,
-                "components": pipeline.state_dict(),
-            }
-            size = write_snapshot(self.path, payload)
+            with _collector_paused():
+                payload = {
+                    "created_at": utc_now().isoformat(),
+                    "unishield_version": __version__,
+                    "last_event_time": last_event_time.isoformat() if last_event_time else None,
+                    "components": pipeline.state_dict(),
+                }
+                size = write_snapshot(self.path, payload)
         except Exception as exc:                       # disk full, permissions, non-finite value...
             self.save_errors += 1
             logger.error("State snapshot to %s failed: %s", self.path, exc)
@@ -167,12 +187,14 @@ class PipelineStateStore:
             logger.info("No state snapshot at %s; starting cold", self.path)
         else:
             try:
-                payload = read_snapshot(self.path)
+                with _collector_paused():
+                    payload = read_snapshot(self.path)
             except StateSnapshotError as exc:
                 status["reason"] = f"refused: {exc}"
                 logger.error("State snapshot %s refused (%s); starting cold", self.path, exc)
             else:
-                outcome = pipeline.load_state_dict(payload.get("components") or {})
+                with _collector_paused():
+                    outcome = pipeline.load_state_dict(payload.get("components") or {})
                 status.update(restored=bool(outcome["restored"]), components=outcome["restored"],
                               skipped=outcome["skipped"], snapshot_created_at=payload.get("created_at"),
                               last_event_time=payload.get("last_event_time"))

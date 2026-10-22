@@ -100,3 +100,31 @@ class TestDetection:
         flows = generate_beacon_traffic(20, T0, interval_sec=45, jitter_percent=5, seed=4)
         alerts = run_beacon_only(flows).alerts
         assert alerts and alerts[0].evidence["connection_count"] >= 10
+
+
+class TestLongRunMemory:
+    def test_pairs_idle_longer_than_the_history_are_dropped(self):
+        ext = BeaconingFeatureExtractor(history_sec=600)
+        ext.extract([conn(i, dst=f"203.0.113.{i + 1}") for i in range(20)])
+        assert ext.extract([conn(300, dst="203.0.113.1")])["tracked_pairs"] == 20
+        features = ext.extract([conn(2000, dst="203.0.113.200")])       # 2000 s later: the 20 pairs are stale
+        assert features["tracked_pairs"] == 1
+        assert list(ext._dst_sources) == ["203.0.113.200"]
+
+    def test_active_pairs_survive_pruning(self):
+        ext = BeaconingFeatureExtractor(history_sec=600)
+        flows = periodic(60, 40)                                          # 40 minutes, one connection a minute
+        for f in flows:
+            ext.extract([f])
+        assert ext.extract([])["tracked_pairs"] == 1
+
+    def test_seen_ids_older_than_the_window_are_forgotten(self):
+        from unishield.features.base import WindowContext
+
+        ext = BeaconingFeatureExtractor()
+        first = [conn(t) for t in range(10)]
+        ext.extract(first, WindowContext(T0, T0 + timedelta(seconds=10), 10))
+        second = first[5:] + [conn(t) for t in range(10, 15)]
+        ext.extract(second, WindowContext(T0 + timedelta(seconds=5), T0 + timedelta(seconds=15), 10))
+        assert set(ext._seen) == {f.event_id for f in second}             # ids before the window start are gone
+        assert len(ext._pairs[("10.0.1.50", "198.51.100.42", 443)]) == 15  # overlap still counted once

@@ -28,7 +28,9 @@ def ensure_utc(value: datetime) -> datetime:
 
 def to_epoch_us(value: datetime) -> int:
     """Microseconds since the Unix epoch, exactly (compact, lossless serialisation)."""
-    return (ensure_utc(value) - _EPOCH) // _MICROSECOND
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return (value - _EPOCH) // _MICROSECOND            # aware subtraction handles any offset
 
 
 def from_epoch_us(value: int) -> datetime:

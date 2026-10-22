@@ -11,7 +11,8 @@ State kept across windows (bounded):
       (``baseline_windows`` values) → median, MAD and a robust z-score for
       the current window
     - per destination: which internal sources uploaded to it within
-      ``history_sec`` (destination rarity)
+      ``history_sec`` (destination rarity); destinations without an upload
+      in that time are dropped
 
 Replies from internal servers to inbound requests are not uploads: serving
 content is not exfiltration evidence. Flows without a direction fall back to
@@ -195,6 +196,12 @@ class ExfiltrationFeatureExtractor(BaseFeatureExtractor):
         for (src, dst), p in pairs.items():
             if p.upload > 0:
                 self._uploader_set(dst)[src] = now
+        cutoff = now - self.history
+        while self._uploaders:                      # least recently uploaded-to destinations first
+            dst, sources = next(iter(self._uploaders.items()))
+            if sources and max(sources.values()) >= cutoff:
+                break
+            del self._uploaders[dst]
 
         top_dest = max(dest_upload.items(), key=lambda kv: kv[1], default=(None, 0))
         outbound_flows = sum(p.flows for p in pairs.values())

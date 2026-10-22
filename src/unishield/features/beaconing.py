@@ -14,6 +14,12 @@ rolling history across windows:
 Each window adds only records not seen before (windows overlap) and then
 profiles every pair it touched: interval mean/std/CV, periodicity (share of
 intervals within 20% of the median), size regularity and destination rarity.
+
+Pairs and destinations with no connection within ``history_sec`` of the
+newest traffic are dropped (checked every few minutes of traffic time), so
+on a long run memory follows the pairs active recently rather than growing
+to the ``max_pairs`` limit; seen-record ids older than the window's start
+are forgotten, since overlapping windows can only repeat newer records.
 Inbound connections (an outside host contacting an internal one) are not
 tracked; beacons originate inside the monitored network.
 
@@ -27,7 +33,7 @@ from __future__ import annotations
 import math
 from collections import OrderedDict, deque
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from unishield.config import get_thresholds
@@ -37,6 +43,9 @@ from unishield.schemas.timeutil import from_epoch_us, to_epoch_us
 
 _MAX_CANDIDATES = 10
 _SEEN_LIMIT = 200_000
+_PRUNE_EVERY = timedelta(minutes=5)
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_MICROSECOND = timedelta(microseconds=1)
 
 
 @dataclass
@@ -84,7 +93,8 @@ class BeaconingFeatureExtractor(BaseFeatureExtractor):
         self._pairs: OrderedDict[tuple, deque] = OrderedDict()
         # dst -> {src: last seen}
         self._dst_sources: OrderedDict[str, dict[str, datetime]] = OrderedDict()
-        self._seen: OrderedDict[str, None] = OrderedDict()
+        self._seen: OrderedDict[str, datetime] = OrderedDict()
+        self._pruned_at: Optional[datetime] = None
 
     @property
     def name(self) -> str:
@@ -112,11 +122,18 @@ class BeaconingFeatureExtractor(BaseFeatureExtractor):
         self._pairs.clear()
         self._dst_sources.clear()
         self._seen.clear()
+        self._pruned_at = None
 
     def state_dict(self) -> dict[str, Any]:
-        """Pair histories and destination sources (least recently used first), JSON-serialisable."""
+        """
+        Pair histories (least recently used first) as ``[src, dst, dport, start
+        times in epoch microseconds, uploaded bytes, TLS flags]`` and destination
+        sources, JSON-serialisable.
+        """
+        epoch, us = _EPOCH, _MICROSECOND        # inline arithmetic: this runs for every stored connection
         return {
-            "pairs": [[src, dst, dport, [[to_epoch_us(t), up, tls] for t, up, tls in history]]
+            "pairs": [[src, dst, dport, [(t - epoch) // us for t, _, _ in history],
+                       [up for _, up, _ in history], [tls for _, _, tls in history]]
                       for (src, dst, dport), history in self._pairs.items()],
             "destination_sources": [[dst, [[src, to_epoch_us(t)] for src, t in sources.items()]]
                                     for dst, sources in self._dst_sources.items()],
@@ -125,8 +142,10 @@ class BeaconingFeatureExtractor(BaseFeatureExtractor):
     def load_state_dict(self, state: dict[str, Any]) -> None:
         """Restore ``state_dict()`` output; the pair limits of this instance apply."""
         self.reset()
-        for src, dst, dport, entries in state["pairs"][-self.max_pairs:]:
-            history = deque(((from_epoch_us(t), int(up), bool(tls)) for t, up, tls in entries),
+        for src, dst, dport, times, uploads, tls in state["pairs"][-self.max_pairs:]:
+            if not len(times) == len(uploads) == len(tls):
+                raise ValueError(f"inconsistent history for pair {src} -> {dst}:{dport}")
+            history = deque(((from_epoch_us(t), int(up), bool(flag)) for t, up, flag in zip(times, uploads, tls)),
                             maxlen=self.max_per_pair)
             self._pairs[(src, dst, dport)] = history
         for dst, sources in state["destination_sources"][-self.max_pairs:]:
@@ -137,12 +156,16 @@ class BeaconingFeatureExtractor(BaseFeatureExtractor):
         for f in sorted(flows, key=lambda x: x.timestamp):
             if f.event_id in self._seen or f.direction == FlowDirection.INBOUND:
                 continue
-            self._remember(f.event_id)
+            self._remember(f.event_id, f.timestamp)
             key = (f.source_ip, f.destination_ip, f.destination_port)
             self._add(key, f)
             touched.add(key)
 
         now = max((f.timestamp for f in flows), default=None)
+        if window is not None:
+            self._forget_seen_before(window.start)
+        if now is not None and (self._pruned_at is None or now - self._pruned_at >= _PRUNE_EVERY):
+            self._prune(now)
         candidates = []
         for key in touched:
             if key not in self._pairs:        # evicted by the pair limit within this window
@@ -177,10 +200,36 @@ class BeaconingFeatureExtractor(BaseFeatureExtractor):
 
     # ------------------------------------------------------------ internals
 
-    def _remember(self, event_id: str) -> None:
-        self._seen[event_id] = None
+    def _remember(self, event_id: str, timestamp: datetime) -> None:
+        self._seen[event_id] = timestamp
         if len(self._seen) > _SEEN_LIMIT:
             self._seen.popitem(last=False)
+
+    def _forget_seen_before(self, start: datetime) -> None:
+        """Records older than the current window's start cannot appear in a later window."""
+        seen = self._seen
+        while seen:
+            event_id, t = next(iter(seen.items()))
+            if t >= start:
+                break
+            del seen[event_id]
+
+    def _prune(self, now: datetime) -> None:
+        """Drop pairs and destinations with no connection within the history (least recently used first)."""
+        cutoff = now - self.history
+        pairs = self._pairs
+        while pairs:
+            key, history = next(iter(pairs.items()))
+            if history and history[-1][0] >= cutoff:
+                break
+            del pairs[key]
+        destinations = self._dst_sources
+        while destinations:
+            dst, sources = next(iter(destinations.items()))
+            if sources and max(sources.values()) >= cutoff:
+                break
+            del destinations[dst]
+        self._pruned_at = now
 
     def _add(self, key: tuple, f: NormalisedFlow) -> None:
         history = self._pairs.get(key)

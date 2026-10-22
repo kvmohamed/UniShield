@@ -94,3 +94,19 @@ class TestRules:
             batch = [flow(5 * w, up=6 * MB, down=40_000)]
             alerts += det.detect(batch, ext.extract(batch), T0, T0 + timedelta(seconds=5 * w + 10))
         assert len(alerts) == 1
+
+
+def test_destinations_without_recent_uploads_are_dropped():
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def up(t, dst):
+        return NormalisedFlow(timestamp=t0 + timedelta(seconds=t), source_ip="10.0.2.9", destination_ip=dst,
+                              source_port=50000, destination_port=443, protocol=ProtocolType.TCP, packet_count=10,
+                              byte_count=210_000, orig_bytes=200_000, resp_bytes=10_000, duration=1.0,
+                              conn_state="SF", direction=FlowDirection.OUTBOUND)
+
+    ext = ExfiltrationFeatureExtractor(history_sec=600)
+    ext.extract([up(i, f"203.0.113.{i + 1}") for i in range(5)])
+    assert len(ext._uploaders) == 5
+    ext.extract([up(1000, "203.0.113.99")])
+    assert list(ext._uploaders) == ["203.0.113.99"]
