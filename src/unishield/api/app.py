@@ -7,8 +7,10 @@ endpoints control local replay only.
 SECURITY NOTICE:
     This API is a passive, read-only interface. It does NOT send packets,
     probe endpoints, decrypt payloads, or issue remediation commands.
-    Administrative endpoints (replay, demo, clearing alerts) need the
-    X-API-Key header, or a loopback client when no key is configured.
+    Optional exports and notifications go only to allow-listed analyst-side
+    destinations (see unishield.export). Administrative endpoints (replay,
+    demo, clearing alerts, exports, intel imports) need the X-API-Key
+    header, or a loopback client when no key is configured.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from unishield import __app_name__, __version__
-from unishield.api.routers import alerts, replay, system
+from unishield.api.routers import alerts, exports, intel, replay, system
 from unishield.api.security import DASHBOARD_CSP, SECURITY_HEADERS, auth_mode
 from unishield.api.state import AppContext
 from unishield.config import get_config
@@ -47,6 +49,7 @@ def create_app(repository: AlertRepository | None = None) -> FastAPI:
         yield
         ctx: AppContext = _app.state.ctx
         ctx.stop_replay()
+        ctx.stop_outputs()
 
     app = FastAPI(
         lifespan=lifespan,
@@ -74,7 +77,8 @@ def create_app(repository: AlertRepository | None = None) -> FastAPI:
             response.headers.setdefault(name, value)
         if request.url.path in ("/", "/dashboard"):
             response.headers["Content-Security-Policy"] = DASHBOARD_CSP
-        if request.url.path.startswith(("/alerts", "/incidents", "/metrics", "/replay")):
+        if request.url.path.startswith(("/alerts", "/incidents", "/metrics", "/replay", "/export", "/outputs",
+                                        "/intel")):
             response.headers.setdefault("Cache-Control", "no-store")
         return response
 
@@ -88,6 +92,8 @@ def create_app(repository: AlertRepository | None = None) -> FastAPI:
     app.include_router(system.router)
     app.include_router(alerts.router)
     app.include_router(replay.router)
+    app.include_router(exports.router)
+    app.include_router(intel.router)
     return app
 
 

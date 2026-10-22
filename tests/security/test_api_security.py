@@ -14,6 +14,10 @@ ADMIN_CALLS = [
     ("post", "/replay/start", {"file_path": "x.pcap"}),
     ("post", "/replay/stop", {}),
     ("delete", "/alerts", {}),
+    ("post", "/export", {}),
+    ("post", "/intel/import", {"source": "feed"}),
+    ("delete", "/intel/sources/feed", {}),
+    ("post", "/intel/purge-expired", {}),
 ]
 
 
@@ -47,7 +51,8 @@ def test_admin_endpoints_require_the_configured_key(api_client, monkeypatch, met
 def test_read_endpoints_stay_open_to_remote_clients(api_client):
     client, _ = api_client
     remote = TestClient(client.app, client=("203.0.113.9", 40000))
-    for path in ("/health", "/alerts", "/alerts/summary", "/metrics", "/replay/status", "/incidents"):
+    for path in ("/health", "/alerts", "/alerts/summary", "/metrics", "/replay/status", "/incidents",
+                 "/intel/status", "/outputs/status"):
         assert remote.get(path).status_code == 200, path
 
 
@@ -114,7 +119,8 @@ def test_no_mutating_get_endpoints(api_client):
     """Every route that changes state is POST/DELETE and guarded; GET routes never mutate."""
     client, _ = api_client
     guarded = {("POST", "/replay/start"), ("POST", "/replay/demo"), ("POST", "/replay/stop"),
-               ("DELETE", "/alerts")}
+               ("DELETE", "/alerts"), ("POST", "/export"), ("POST", "/intel/import"),
+               ("DELETE", "/intel/sources/{source}"), ("POST", "/intel/purge-expired")}
     found = {(m.upper(), path) for path, ops in client.app.openapi()["paths"].items() for m in ops
              if m.upper() in ("POST", "PUT", "PATCH", "DELETE")}
     assert found == guarded

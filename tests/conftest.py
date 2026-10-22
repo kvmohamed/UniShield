@@ -24,6 +24,7 @@ def api_client(monkeypatch, tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     monkeypatch.setenv("UNISHIELD_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("UNISHIELD_EXPORT_DIR", str(tmp_path / "exports"))
     monkeypatch.delenv("UNISHIELD_ADMIN_API_KEY", raising=False)
     reset_config()
     app = create_app(AlertRepository.from_url("sqlite://"))

@@ -121,6 +121,9 @@ def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     except Exception:                                    # pragma: no cover - unreadable registry
         models = []
     db_ok = ctx.repository.ping()
+    outputs = ctx.outputs.status()
+    intel = ctx.intel.status()
+    channels = [d["name"] for d in outputs["syslog"]["destinations"]] + [c["name"] for c in outputs["notifications"]]
     return {
         "notice": "This system is a passive defensive research prototype. It does not probe, block, "
                   "decrypt, or send commands to monitored systems.",
@@ -141,7 +144,17 @@ def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
             {"name": "storage", "status": "connected" if db_ok else "unavailable",
              "detail": f"{ctx.repository.backend}, {ctx.repository.count()} alerts"},
             {"name": "api", "status": "running", "detail": f"admin auth: {auth_mode()}"},
+            {"name": "threat intel", "status": "ready" if config.intel.enabled else "disabled",
+             "detail": f"{intel['active_total']} active indicators from {len(intel['sources'])} sources "
+                       f"(offline imports only)"},
+            {"name": "exports", "status": "running" if outputs["files"]["enabled"] else "on demand",
+             "detail": f"{', '.join(outputs['files']['formats'])} → {outputs['files']['directory']}"},
+            {"name": "analyst-side outputs", "status": "running" if channels else "disabled",
+             "detail": (f"{', '.join(channels)} → allow-listed analyst destinations only" if channels
+                        else "syslog / email / webhook off; nothing is sent anywhere")},
         ],
+        "outputs": outputs,
+        "intel": intel,
         "detectors": [{"name": d.name, "version": d.version, "threat_classes": [c.value for c in d.threat_classes][:12],
                        "windows_analysed": d.windows_analysed, "alerts_generated": d.alerts_generated}
                       for d in detectors],
