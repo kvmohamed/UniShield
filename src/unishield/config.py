@@ -176,6 +176,24 @@ class IntelConfig(BaseModel):
     default_ttl_days: Optional[int] = Field(default=None, gt=0)   # expiry for indicators without one
 
 
+class ExportConfig(BaseModel):
+    """
+    Alert/incident files for the analyst side (JSON lines, CEF, STIX 2.1).
+    On-demand exports (POST /export, scripts/export_alerts.py) are always
+    available; ``continuous`` also writes new alerts as they are stored.
+    """
+    directory: str = "./exports"
+    continuous: bool = False
+    formats: list[Literal["jsonl", "cef", "stix"]] = Field(default_factory=lambda: ["jsonl", "cef", "stix"])
+    include_incidents: bool = True
+    incident_gap_sec: int = Field(default=300, ge=10)        # same meaning as GET /incidents?gap_sec
+    incident_min_alerts: int = Field(default=2, ge=1)
+    rotate_max_mb: float = Field(default=10.0, gt=0)
+    rotate_max_stix_objects: int = Field(default=5000, ge=10)
+    backup_count: int = Field(default=20, ge=0)               # rotated files kept per stream; 0 keeps all
+    stix_indicator_valid_days: int = Field(default=30, ge=0)  # valid_until of exported indicators; 0: none
+
+
 class PathsConfig(BaseModel):
     data_dir: str = "./data"
     raw_dir: str = "./data/raw"
@@ -207,6 +225,7 @@ class UnishieldConfig(BaseModel):
     sessionizer: SessionizerConfig = SessionizerConfig()
     models: ModelsConfig = ModelsConfig()
     intel: IntelConfig = IntelConfig()
+    export: ExportConfig = ExportConfig()
     paths: PathsConfig = PathsConfig()
 
 
@@ -231,6 +250,8 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_DETECTION_MODE": ("models", "detection_mode"),
     "UNISHIELD_DB_URL": ("database", "url"),
     "UNISHIELD_ADMIN_API_KEY": ("api", "admin_api_key"),
+    "UNISHIELD_EXPORT_DIR": ("export", "directory"),
+    "UNISHIELD_EXPORT_CONTINUOUS": ("export", "continuous"),
 }
 
 

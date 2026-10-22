@@ -105,6 +105,20 @@ intel:
   min_cidr_prefix_v6: 32
   default_ttl_days: null            # expiry for indicators without one (null: no expiry)
 
+export:
+  # Alert and incident files for the analyst side: JSON lines, CEF and a
+  # STIX 2.1 bundle. On demand: POST /export or scripts/export_alerts.py.
+  directory: "./exports"            # UNISHIELD_EXPORT_DIR overrides
+  continuous: false                 # also append new alerts/incidents as they are stored (UNISHIELD_EXPORT_CONTINUOUS)
+  formats: ["jsonl", "cef", "stix"]
+  include_incidents: true
+  incident_gap_sec: 300             # alerts of one entity further apart start a new incident
+  incident_min_alerts: 2
+  rotate_max_mb: 10                 # rotate JSON lines / CEF files at this size
+  rotate_max_stix_objects: 5000     # rotate the STIX bundle after this many objects
+  backup_count: 20                  # rotated files kept per stream (0 keeps all)
+  stix_indicator_valid_days: 30     # valid_until of exported indicators (0: open-ended)
+
 paths:
   data_dir: "./data"                # replay API input directory
   raw_dir: "./data/raw"             # (planned)
