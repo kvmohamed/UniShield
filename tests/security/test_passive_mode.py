@@ -1,4 +1,8 @@
-"""Passive-mode verification: the static scan finds real capabilities, and UniShield has none."""
+"""
+Passive-mode verification: the static scan finds real capabilities and UniShield has none outside the
+analyst-side transport; the tripwire confines that transport to allow-listed destinations outside the
+monitored network and refuses every network call from readers, pipeline and detectors.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,17 @@ import socket
 
 import pytest
 
-from unishield.evaluation.passive import _Tripwire, runtime_check, static_scan
+from unishield.evaluation.passive import (
+    OUTBOUND_MODULE,
+    _PolicyBypass,
+    _Tripwire,
+    runtime_check_detailed,
+    sample_intel,
+    scan_with_allowances,
+    static_scan,
+)
+from unishield.export import transport
+from unishield.export.policy import DestinationPolicy, DestinationRefused
 
 pytestmark = pytest.mark.security
 
@@ -42,6 +56,38 @@ def test_unishield_source_has_no_active_capabilities():
     assert findings == [], findings
 
 
+def test_only_the_outbound_transport_has_the_scoped_allowance():
+    findings, allowances, _ = scan_with_allowances()
+    assert findings == []
+    assert allowances and {a.file for a in allowances} == {OUTBOUND_MODULE}
+    assert {a.name for a in allowances if a.kind == "import"} == {"socket", "ssl", "smtplib", "http.client"}
+
+
+TRANSPORT_LIKE = """
+import socket
+import subprocess
+import urllib.request
+
+def deliver(host):
+    socket.create_connection((host, 514))
+    subprocess.Popen(["ping", host])
+    urllib.request.urlopen("http://" + host)
+"""
+
+
+def test_allowance_is_limited_to_that_file_and_those_names(tmp_path):
+    pkg = tmp_path / "unishield"
+    (pkg / "export").mkdir(parents=True)
+    (pkg / "export" / "transport.py").write_text(TRANSPORT_LIKE, encoding="utf-8")
+    (pkg / "export" / "syslog.py").write_text(TRANSPORT_LIKE, encoding="utf-8")
+    findings, allowances, _ = scan_with_allowances(pkg)
+    in_transport = {f.name for f in findings if f.file == OUTBOUND_MODULE}
+    assert in_transport == {"subprocess", "urllib.request", "subprocess.Popen", "urllib.request.urlopen"}
+    assert {a.name for a in allowances} == {"socket", "socket.create_connection"}
+    in_syslog = {f.name for f in findings if f.file == "unishield/export/syslog.py"}
+    assert "socket.create_connection" in in_syslog                   # the same call elsewhere is a finding
+
+
 def test_tripwire_blocks_remote_but_allows_loopback():
     with _Tripwire() as wire:
         with pytest.raises(PermissionError):
@@ -61,8 +107,57 @@ def test_tripwire_blocks_remote_but_allows_loopback():
     assert socket.create_connection.__module__ == "socket"     # restored
 
 
-def test_runtime_check_records_no_network_attempts():
-    attempts, exercised = runtime_check()
+HOME = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"]
+
+
+def test_transport_reaches_allow_listed_destinations_only():
+    """A monitored-network destination is refused even when the policy check is bypassed."""
+    policy = DestinationPolicy(["127.0.0.1"], HOME)
+    with _Tripwire(outbound_policy=policy) as wire:
+        with pytest.raises(DestinationRefused, match="monitored network"):
+            transport.deliver_datagrams(policy, "10.1.2.3", 514, [b"x"])       # policy refuses first
+        with pytest.raises(PermissionError):
+            transport.deliver_datagrams(_PolicyBypass(), "10.1.2.3", 514, [b"x"])   # tripwire refuses
+        with pytest.raises(PermissionError):
+            transport.deliver_datagrams(_PolicyBypass(), "203.0.113.5", 514, [b"x"])  # not allow-listed
+        assert transport.deliver_datagrams(policy, "127.0.0.1", 9, [b"x"]) == 1    # allow-listed (discard port)
+    assert len(wire.attempts) == 2 and all("not allowed by the destination policy" in a for a in wire.attempts)
+    assert "10.1.2.3" in wire.attempts[0] and len(wire.outbound) == 1
+
+
+def test_transport_is_refused_without_a_policy_and_other_code_cannot_use_the_allowance():
+    policy = DestinationPolicy(["192.0.2.0/24"], HOME)
+    with _Tripwire() as wire:                                   # no outbound policy given
+        with pytest.raises(PermissionError):
+            transport.deliver_datagrams(_PolicyBypass(), "192.0.2.10", 514, [b"x"])
+    with _Tripwire(outbound_policy=policy) as wire2:            # policy permits 192.0.2.10 ...
+        with pytest.raises(PermissionError):
+            socket.create_connection(("192.0.2.10", 514), timeout=0.1)   # ... but only for the transport
+    assert len(wire.attempts) == 1 and len(wire2.attempts) == 1 and not wire2.outbound
+
+
+def test_pipeline_readers_and_detectors_make_no_socket_calls(sample_capture, sample_zeek_dir, sample_flow_csv):
+    """With every socket operation refused (loopback too), detection with intel loaded still completes."""
+    from unishield.data.sample_generator import SimulatedReader, build_scenario
+    from unishield.ingest.detect import open_reader
+    from unishield.processing.pipeline import Pipeline
+
+    intel = sample_intel()
+    with _Tripwire(allow_loopback=False) as wire:
+        for path in (sample_capture.path, sample_zeek_dir, sample_flow_csv):
+            reader, _ = open_reader(path)
+            Pipeline(intel=intel).run(reader)
+        result = Pipeline(intel=intel).run(SimulatedReader(build_scenario("beacon_30s", 1).flows))
+    assert wire.attempts == [] and wire.loopback_calls == 0 and wire.outbound == []
+    assert any(a.threat_class.value == "INTEL_MATCH" for a in result.alerts)
+
+
+def test_runtime_check_records_no_unexpected_network_attempts():
+    attempts, exercised, outbound, refusals = runtime_check_detailed()
     assert attempts == []
     assert any(e.startswith("pipeline:pcap") for e in exercised)
     assert any(e.startswith("api:/replay/demo:completed") for e in exercised)
+    assert any(e.startswith("outbound:syslog/udp") for e in exercised)
+    assert any(e.startswith("outbound:email") for e in exercised)
+    assert outbound and all("127.0.0.1" in o for o in outbound)
+    assert len(refusals) == 3 and all("10.0.0.5" in r for r in refusals)

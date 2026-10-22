@@ -20,7 +20,7 @@ from typing import Any, Literal, Optional
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger("unishield.config")
 
@@ -194,6 +194,115 @@ class ExportConfig(BaseModel):
     stix_indicator_valid_days: int = Field(default=30, ge=0)  # valid_until of exported indicators; 0: none
 
 
+_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+_ENV_NAME_PATTERN = r"^[A-Z_][A-Z0-9_]{0,127}$"
+SeverityName = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+
+
+class TLSOptions(BaseModel):
+    ca_file: Optional[str] = None            # trust only this CA bundle (default: system store)
+    cert_file: Optional[str] = None          # client certificate (mutual TLS)
+    key_file: Optional[str] = None
+    verify: bool = True                      # verify certificate and host name
+
+
+class SyslogDestination(BaseModel):
+    """One analyst-side syslog receiver (SIEM). The host must be in outbound.allowed_destinations."""
+    name: str = Field(pattern=_NAME_PATTERN)
+    host: str = Field(min_length=1, max_length=253)
+    port: Optional[int] = Field(default=None, ge=1, le=65535)     # default 514 (udp/tcp), 6514 (tls)
+    protocol: Literal["udp", "tcp", "tls"] = "udp"
+    message_format: Literal["cef", "json"] = "cef"
+    min_severity: SeverityName = "INFO"
+    include_incidents: bool = True
+    redact_ips: bool = False
+    max_message_bytes: Optional[int] = Field(default=None, ge=480, le=1_048_576)
+    tls: TLSOptions = TLSOptions()
+
+
+class SyslogConfig(BaseModel):
+    enabled: bool = False
+    facility: Literal["kern", "user", "mail", "daemon", "auth", "syslog", "lpr", "news", "uucp", "cron",
+                      "authpriv", "ftp", "local0", "local1", "local2", "local3", "local4", "local5",
+                      "local6", "local7"] = "local4"
+    app_name: str = Field(default="unishield", max_length=48)
+    hostname: Optional[str] = Field(default=None, max_length=255)   # default: this machine's name
+    sd_id: str = Field(default="unishield@32473", max_length=32)     # 32473: documentation PEN (RFC 5612)
+    destinations: list[SyslogDestination] = Field(default_factory=list)
+
+
+class NotificationSettings(BaseModel):
+    """Severity filter, rate limit, digest and content of one notification channel."""
+    min_severity: SeverityName = "HIGH"
+    min_interval_sec: float = Field(default=300, ge=0)       # at most one message per interval...
+    max_per_hour: int = Field(default=12, ge=1)              # ...and this many per rolling hour
+    digest_max_alerts: int = Field(default=50, ge=1)         # alerts listed in a digest (the rest counted)
+    redact_ips: bool = False
+    fields: list[str] = Field(default_factory=lambda: [
+        "alert_id", "window_end", "threat_class", "severity", "confidence", "detector_name",
+        "source_ip", "destination_ip", "mitre_techniques", "summary"])
+
+    @field_validator("fields")
+    @classmethod
+    def known_fields(cls, v: list[str]) -> list[str]:
+        from unishield.export.notify import ALLOWED_FIELDS
+
+        unknown = sorted(set(v) - set(ALLOWED_FIELDS))
+        if unknown:
+            raise ValueError(f"unknown notification fields {unknown}; choose from {list(ALLOWED_FIELDS)}")
+        return v
+
+
+class EmailConfig(NotificationSettings):
+    enabled: bool = False
+    smtp_host: str = ""                      # analyst-side relay; must be in outbound.allowed_destinations
+    smtp_port: Optional[int] = Field(default=None, ge=1, le=65535)   # default 587 / 465 / 25
+    security: Literal["starttls", "ssl", "none"] = "starttls"
+    username: Optional[str] = None
+    password_env: Optional[str] = Field(default="UNISHIELD_SMTP_PASSWORD", pattern=_ENV_NAME_PATTERN)
+    sender: str = ""
+    recipients: list[str] = Field(default_factory=list)
+    subject_prefix: str = Field(default="[UniShield]", max_length=64)
+    tls: TLSOptions = TLSOptions()
+
+
+class WebhookDestination(NotificationSettings):
+    name: str = Field(pattern=_NAME_PATTERN)
+    url: str = Field(min_length=8, max_length=2048)          # http(s)://host[:port]/path, host allow-listed
+    headers_from_env: dict[str, str] = Field(default_factory=dict)   # header → environment variable
+    tls: TLSOptions = TLSOptions()
+
+    @field_validator("headers_from_env")
+    @classmethod
+    def env_names(cls, v: dict[str, str]) -> dict[str, str]:
+        import re
+
+        for header, variable in v.items():
+            if not re.match(r"^[A-Za-z0-9-]{1,64}$", header) or not re.match(_ENV_NAME_PATTERN, variable):
+                raise ValueError(f"headers_from_env: invalid header {header!r} or variable name {variable!r}")
+        return v
+
+
+class WebhookConfig(BaseModel):
+    enabled: bool = False
+    destinations: list[WebhookDestination] = Field(default_factory=list)
+
+
+class OutboundConfig(BaseModel):
+    """
+    Delivery to the analyst network only: syslog to a SIEM, email to a relay,
+    JSON webhooks. All off by default. Destinations must be listed in
+    ``allowed_destinations`` and lie outside ``network.home_networks``;
+    this is checked at load time and before every connection.
+    """
+    allowed_destinations: list[str] = Field(default_factory=list)   # analyst-side IPs, CIDRs, host names
+    connect_timeout_sec: float = Field(default=5.0, gt=0, le=60)
+    queue_size: int = Field(default=10_000, ge=10)
+    syslog: SyslogConfig = SyslogConfig()
+    email: EmailConfig = EmailConfig()
+    webhook: WebhookConfig = WebhookConfig()
+
+
 class PathsConfig(BaseModel):
     data_dir: str = "./data"
     raw_dir: str = "./data/raw"
@@ -226,7 +335,16 @@ class UnishieldConfig(BaseModel):
     models: ModelsConfig = ModelsConfig()
     intel: IntelConfig = IntelConfig()
     export: ExportConfig = ExportConfig()
+    outbound: OutboundConfig = OutboundConfig()
     paths: PathsConfig = PathsConfig()
+
+    @model_validator(mode="after")
+    def outbound_only_to_analyst_side(self) -> "UnishieldConfig":
+        """Refuse outbound destinations that are not allow-listed or lie in the monitored network."""
+        from unishield.export.policy import validate_outbound
+
+        validate_outbound(self)
+        return self
 
 
 # ---------------------------------------------------------------------------

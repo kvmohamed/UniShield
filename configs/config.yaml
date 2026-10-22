@@ -119,6 +119,62 @@ export:
   backup_count: 20                  # rotated files kept per stream (0 keeps all)
   stix_indicator_valid_days: 30     # valid_until of exported indicators (0: open-ended)
 
+outbound:
+  # Optional delivery to the ANALYST network only (all off by default):
+  # syslog to a SIEM, email to a relay, JSON webhooks. UniShield never sends
+  # anything into the monitored network. Every destination must be listed in
+  # allowed_destinations AND lie outside network.home_networks; both are
+  # checked when the config loads and again before every connection (names
+  # are resolved and every address checked). With the default home_networks
+  # (all private ranges) private analyst addresses are refused: set
+  # home_networks to the monitored network's real ranges first.
+  allowed_destinations: []          # e.g. ["198.18.10.5", "198.18.20.0/28", "siem.analyst.example"]
+  connect_timeout_sec: 5
+  queue_size: 10000                 # alerts waiting for delivery; beyond this they are dropped and counted
+  syslog:
+    enabled: false
+    facility: local4
+    app_name: unishield
+    hostname: null                  # default: this machine's name
+    sd_id: "unishield@32473"        # structured-data ID (32473 is the documentation PEN; use your own)
+    destinations: []
+    # - name: siem
+    #   host: siem.analyst.example  # must be in allowed_destinations
+    #   protocol: tls               # udp | tcp | tls (RFC 5426 / 6587 / 5425)
+    #   port: 6514                  # default 514 (udp/tcp), 6514 (tls)
+    #   message_format: cef         # cef | json
+    #   min_severity: INFO
+    #   include_incidents: true
+    #   redact_ips: false
+    #   tls: {ca_file: /etc/unishield/siem-ca.pem, cert_file: null, key_file: null, verify: true}
+  email:
+    enabled: false
+    smtp_host: ""                   # analyst-side relay, must be in allowed_destinations
+    smtp_port: null                 # default 587 (starttls), 465 (ssl), 25 (none)
+    security: starttls              # starttls | ssl | none
+    username: null
+    password_env: UNISHIELD_SMTP_PASSWORD   # the password is read from this environment variable
+    sender: ""
+    recipients: []
+    subject_prefix: "[UniShield]"
+    min_severity: HIGH              # notify for alerts at or above this severity
+    min_interval_sec: 300           # at most one message per interval; alerts in between form a digest
+    max_per_hour: 12
+    digest_max_alerts: 50
+    redact_ips: false               # replace addresses with "redacted"
+    fields: [alert_id, window_end, threat_class, severity, confidence, detector_name,
+             source_ip, destination_ip, mitre_techniques, summary]   # nothing else is sent
+  webhook:
+    enabled: false
+    destinations: []
+    # - name: soar
+    #   url: https://soar.analyst.example/hooks/unishield   # host must be in allowed_destinations
+    #   headers_from_env: {Authorization: UNISHIELD_WEBHOOK_AUTH}
+    #   min_severity: HIGH
+    #   min_interval_sec: 60
+    #   max_per_hour: 30
+    #   redact_ips: true
+
 paths:
   data_dir: "./data"                # replay API input directory
   raw_dir: "./data/raw"             # (planned)
