@@ -165,6 +165,17 @@ class ModelsConfig(BaseModel):
     ml_alert_probability: float = Field(default=0.9, gt=0, le=1)
 
 
+class IntelConfig(BaseModel):
+    """Offline threat intelligence (scripts/import_intel.py, POST /intel/import). Nothing is fetched."""
+    enabled: bool = True                     # match imported indicators during detection
+    escalate_severity: bool = True           # raise other alerts one level when they involve a listed indicator
+    max_file_mb: int = Field(default=50, gt=0)
+    max_indicators: int = Field(default=1_000_000, gt=0)   # per import
+    min_cidr_prefix_v4: int = Field(default=8, ge=0, le=32)     # reject broader networks
+    min_cidr_prefix_v6: int = Field(default=32, ge=0, le=128)
+    default_ttl_days: Optional[int] = Field(default=None, gt=0)   # expiry for indicators without one
+
+
 class PathsConfig(BaseModel):
     data_dir: str = "./data"
     raw_dir: str = "./data/raw"
@@ -195,6 +206,7 @@ class UnishieldConfig(BaseModel):
     network: NetworkConfig = NetworkConfig()
     sessionizer: SessionizerConfig = SessionizerConfig()
     models: ModelsConfig = ModelsConfig()
+    intel: IntelConfig = IntelConfig()
     paths: PathsConfig = PathsConfig()
 
 

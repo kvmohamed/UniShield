@@ -79,6 +79,37 @@ runs_table = Table(
     Column("summary", JSON),
 )
 
+# Operator-imported threat-intelligence indicators (see unishield.intel)
+intel_table = Table(
+    "intel_indicators",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("source", String(128), nullable=False),
+    Column("kind", String(16), nullable=False),
+    Column("value", String(256), nullable=False),
+    Column("label", String(256)),
+    Column("severity", String(16)),
+    Column("techniques", JSON),
+    Column("expires_at", DateTime),
+    Column("imported_at", DateTime, nullable=False),
+    Index("ux_intel_source_kind_value", "source", "kind", "value", unique=True),
+    Index("ix_intel_kind", "kind"),
+)
+
+intel_imports_table = Table(
+    "intel_imports",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("source", String(128), nullable=False),
+    Column("filename", String(256)),
+    Column("format", String(16)),
+    Column("mode", String(16)),
+    Column("sha256", String(64)),
+    Column("accepted", Integer),
+    Column("rejected", Integer),
+    Column("imported_at", DateTime, nullable=False),
+)
+
 
 def make_engine(url: str, echo: bool = False) -> Engine:
     """Engine for ``url`` with the schema created. In-memory SQLite shares one connection."""

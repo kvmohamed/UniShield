@@ -92,6 +92,19 @@ models:
   window_model: "window_rf"
   ml_alert_probability: 0.9         # calibrated P(attack) needed for an ML alert
 
+intel:
+  # Offline threat intelligence: operator-supplied files of known-bad IPs/CIDRs,
+  # domains and JA3 hashes, imported with scripts/import_intel.py or
+  # POST /intel/import and stored in the alert database. UniShield never
+  # downloads feeds; bring the files across to the analyst side yourself.
+  enabled: true                     # match imported indicators during detection
+  escalate_severity: true           # other alerts involving a listed indicator are raised one level
+  max_file_mb: 50                   # largest file accepted by one import
+  max_indicators: 1000000           # most indicators accepted by one import
+  min_cidr_prefix_v4: 8             # broader IPv4 networks are rejected (they would match too much)
+  min_cidr_prefix_v6: 32
+  default_ttl_days: null            # expiry for indicators without one (null: no expiry)
+
 paths:
   data_dir: "./data"                # replay API input directory
   raw_dir: "./data/raw"             # (planned)
