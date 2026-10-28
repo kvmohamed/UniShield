@@ -1,0 +1,73 @@
+# UniShield as a systemd service (see docs/deployment.md).
+#
+#   sudo install -m 0644 deploy/systemd/unishield.service /etc/systemd/system/
+#   sudo install -m 0640 -o root -g unishield deploy/systemd/unishield.env /etc/unishield/unishield.env
+#   sudo systemctl daemon-reload && sudo systemctl enable --now unishield
+#
+# Assumes: user/group "unishield", the code and its virtualenv in
+# /opt/unishield (configs/ inside it), state in /var/lib/unishield, logs in
+# /var/log/unishield. UniShield only reads capture files and listens for API
+# requests; it needs no capabilities and opens no outbound connections.
+
+[Unit]
+Description=UniShield passive threat detection for one-way networks
+Documentation=file:///opt/unishield/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+# With PostgreSQL on the same host, also: After=postgresql.service
+
+[Service]
+Type=exec
+User=unishield
+Group=unishield
+WorkingDirectory=/opt/unishield
+EnvironmentFile=/etc/unishield/unishield.env
+# Apply pending schema migrations explicitly before every start (also safe
+# with database.auto_migrate: true).
+ExecStartPre=/opt/unishield/.venv/bin/unishield-admin db upgrade
+ExecStart=/opt/unishield/.venv/bin/python -m unishield.main
+# uvicorn stops on SIGTERM: it waits api.shutdown_timeout_sec for open
+# requests, then UniShield stops a running replay, records it and the
+# shutdown in the database, and closes it. Keep TimeoutStopSec above twice
+# api.shutdown_timeout_sec (default 15 s).
+KillSignal=SIGTERM
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=5
+
+StateDirectory=unishield
+LogsDirectory=unishield
+UMask=0027
+
+# Hardening
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+# AF_UNIX for a local PostgreSQL socket; IPv4/IPv6 for the API listener.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+# ProtectSystem=strict leaves the code and the capture directories
+# (paths.data_dir, ingest.allowed_dirs) read-only; only state and logs are
+# writable.
+ReadWritePaths=/var/lib/unishield /var/log/unishield
+
+[Install]
+WantedBy=multi-user.target

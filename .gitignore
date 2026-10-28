@@ -70,3 +70,6 @@ htmlcov/
 
 # Ruff
 .ruff_cache/
+
+# SBOMs generated locally (CI uploads them as artifacts)
+*.cdx.json

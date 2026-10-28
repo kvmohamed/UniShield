@@ -2,12 +2,14 @@
 # UniShield - Docker Compose
 # ============================================================
 # Single service: the FastAPI backend, which also serves the dashboard at
-# http://127.0.0.1:8000/dashboard
+# http://127.0.0.1:8000/dashboard (sign in there).
 #
-# Administrative endpoints (replay, demo, clear alerts) need the X-API-Key
-# header: requests reach the container from the Docker bridge, not from
-# loopback, so set UNISHIELD_ADMIN_API_KEY in a .env file next to this file
-# (see .env.example) and enter the same key in the dashboard header.
+# There are no default accounts. Create the first administrator once:
+#   docker compose run --rm api unishield-admin user create admin --role admin
+# Automation uses service tokens (unishield-admin token create) or the
+# static UNISHIELD_ADMIN_API_KEY from a .env file next to this file.
+# For access from other machines put a TLS reverse proxy in front
+# (deploy/nginx, deploy/caddy) and see docs/deployment.md.
 
 services:
   api:
@@ -34,6 +36,8 @@ services:
       UNISHIELD_EXPORT_CONTINUOUS: ${UNISHIELD_EXPORT_CONTINUOUS:-false}
       # Secret for analyst-side email, if configured (docs/deployment.md)
       UNISHIELD_SMTP_PASSWORD: ${UNISHIELD_SMTP_PASSWORD:-}
+      UNISHIELD_ALERT_RETENTION_DAYS: ${UNISHIELD_ALERT_RETENTION_DAYS:-}
+      UNISHIELD_API_DOCS: "false"
     read_only: true
     tmpfs:
       - /tmp
@@ -42,6 +46,7 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+    stop_grace_period: 45s               # graceful shutdown: open requests, then the running replay
     healthcheck:
       test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"]
       interval: 30s

@@ -2,7 +2,7 @@
 # UniShield — Makefile (POSIX shells; Windows commands are in README.md)
 # ============================================================
 
-.PHONY: help install dev test test-unit test-integration test-performance test-security test-cov lint format run demo demo-quick benchmark verify-passive export intel-status models docker-build docker-up docker-down docker-logs clean
+.PHONY: help install dev test test-unit test-integration test-performance test-security test-cov lint format run demo demo-quick benchmark verify-passive export intel-status models db-upgrade admin audit-deps sbom docker-build docker-up docker-down docker-logs clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -54,12 +54,23 @@ models: ## Build dataset, train and evaluate models
 	python scripts/train_models.py
 	python scripts/evaluate_models.py
 
+db-upgrade: ## Apply pending database migrations
+	unishield-admin db upgrade
+
+admin: ## Create an administrator (prompts for name and password)
+	@read -p "Administrator name: " name; unishield-admin user create "$$name" --role admin
+
+audit-deps: ## Check the pinned requirements for known vulnerabilities (needs pip-audit)
+	pip-audit --no-deps --disable-pip -r requirements.txt -r requirements-dev.txt -r requirements-ml.txt
+
+sbom: ## CycloneDX SBOM of the runtime requirements (needs cyclonedx-bom)
+	cyclonedx-py requirements requirements.txt --pyproject pyproject.toml --of JSON -o unishield-runtime.cdx.json
+
 test-cov: ## Run tests with coverage
 	pytest tests/ -v --cov=unishield --cov-report=html --cov-report=term-missing
 
-lint: ## Run linter
-	ruff check src/ tests/
-	ruff format --check src/ tests/
+lint: ## Run linter (CI fails on pyflakes and syntax errors)
+	ruff check --select F,E9 src/ tests/ scripts/
 
 format: ## Format code
 	ruff format src/ tests/

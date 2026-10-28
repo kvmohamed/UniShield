@@ -111,3 +111,28 @@ jobs:
           name: sbom-cyclonedx
           path: sbom/
           if-no-files-found: error
+
+  deploy-files:
+    name: systemd unit and nginx example
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: systemd-analyze verify the unit
+        run: |
+          # Stand-ins for the installed virtualenv so ExecStart/ExecStartPre resolve.
+          sudo mkdir -p /opt/unishield/.venv/bin
+          sudo ln -sf "$(command -v python3)" /opt/unishield/.venv/bin/python
+          sudo ln -sf /bin/true /opt/unishield/.venv/bin/unishield-admin
+          sudo useradd --system --no-create-home unishield || true
+          systemd-analyze verify deploy/systemd/unishield.service
+          systemd-analyze security --offline=yes deploy/systemd/unishield.service || true
+
+      - name: nginx -t on the reverse-proxy example
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq nginx >/dev/null
+          sudo mkdir -p /etc/unishield/tls
+          sudo openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=unishield.example.internal" \
+            -keyout /etc/unishield/tls/privkey.pem -out /etc/unishield/tls/fullchain.pem 2>/dev/null
+          sudo cp deploy/nginx/unishield.conf /etc/nginx/conf.d/unishield.conf
+          sudo nginx -t

@@ -1,0 +1,16 @@
+# Caddy in front of UniShield (see docs/deployment.md, "Reverse proxy").
+# Caddy obtains and renews the certificate (or use "tls internal" for an
+# internal CA on an isolated network) and sends X-Forwarded-For/-Proto,
+# which UniShield trusts from 127.0.0.1 (api.forwarded_allow_ips).
+
+unishield.example.internal {
+	# tls internal
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy 127.0.0.1:8000 {
+		transport http {
+			read_timeout 150s
+		}
+	}
+}
