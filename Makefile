@@ -2,7 +2,7 @@
 # UniShield — Makefile (POSIX shells; Windows commands are in README.md)
 # ============================================================
 
-.PHONY: help install dev test test-unit test-integration test-performance test-security test-cov lint format run demo demo-quick benchmark verify-passive models docker-build docker-up docker-down docker-logs clean
+.PHONY: help install dev test test-unit test-integration test-performance test-security test-cov lint format run demo demo-quick benchmark verify-passive export intel-status models docker-build docker-up docker-down docker-logs clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -42,6 +42,12 @@ benchmark: ## Throughput / latency benchmark (reports/benchmark.md)
 
 verify-passive: ## Static + runtime passive-mode verification
 	python scripts/verify_passive_mode.py
+
+export: ## Export stored alerts/incidents (JSON lines, CEF, STIX 2.1) to exports/on-demand
+	python scripts/export_alerts.py
+
+intel-status: ## List imported threat-intelligence indicators per source
+	python scripts/import_intel.py --status
 
 models: ## Build dataset, train and evaluate models
 	python scripts/prepare_dataset.py --synthetic --seeds 1-20

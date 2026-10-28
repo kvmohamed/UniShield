@@ -10,10 +10,19 @@
 
 UniShield reads capture files, Zeek logs and flow exports (or a replayed
 stream), analyses them in 10-second sliding windows of traffic time, and
-reports DDoS, scanning, C2 beaconing, data exfiltration, DGA, DNS tunnelling
-and suspicious encrypted-session behaviour through a REST API and a
-dashboard. It has no packet-sending, capture, decryption or response path;
-`scripts/verify_passive_mode.py` checks this statically and at runtime.
+reports DDoS, scanning, C2 beaconing, data exfiltration, DGA, DNS tunnelling,
+suspicious encrypted-session behaviour and contact with known-bad
+infrastructure (offline threat-intel lists) through a REST API and a
+dashboard. It has no packet-sending, capture, decryption or response path
+towards the monitored network; `scripts/verify_passive_mode.py` checks this
+statically and at runtime.
+
+It fits into a security team's workflow on the **analyst side** of the
+one-way link: alerts and incidents can be exported as JSON lines, CEF and
+STIX 2.1 files, forwarded to a SIEM over syslog, and announced by email or
+webhook. All of that is off by default, and outbound traffic can only reach
+destinations you allow-list on the analyst network — never the monitored
+network ([docs/deployment.md](docs/deployment.md)).
 
 The project went through a phased audit and repair; the audit and the repair
 log are in [reports/realtime_readiness_report.md](reports/realtime_readiness_report.md).
@@ -67,6 +76,7 @@ Pick a scenario and press **Run demo**, or analyse a file under `data/`
 | DNS_TUNNELLING | many unique long / high-entropy subdomains of one base domain | T1071.004, T1572 |
 | ENCRYPTED_SESSION_ANOMALY | outdated TLS versions, operator JA3 blocklist, long low-rate sessions on unusual ports — never decrypted | T1573 (+T1571) |
 | STATISTICAL_ANOMALY | robust z-scores and Isolation Forest on windows no rule explained | — |
+| INTEL_MATCH | an address, network or domain from an imported threat-intel list in a flow or DNS query (other alerts involving one get the match as evidence and one level more severity) | techniques listed with the indicator |
 
 Detection modes (`UNISHIELD_DETECTION_MODE` or `mode=` on a replay):
 `rules` (default: rules + robust z + Isolation Forest), `hybrid` (adds the
@@ -87,6 +97,32 @@ Architecture, stage by stage: [docs/architecture.md](docs/architecture.md).
 
 The format is detected from file content. The replay API reads only under
 `paths.data_dir` / `ingest.allowed_dirs`.
+
+---
+
+## Analyst-side integrations
+
+Everything below is local files or traffic to the **analyst network**; none
+of it touches the monitored network, and nothing is fetched from the internet.
+
+| Feature | How | Details |
+|---|---|---|
+| Threat intelligence | `python scripts/import_intel.py --source feodo feodo.csv` or `POST /intel/import` | Known-bad IPs/CIDRs, domains and JA3 hashes from text, CSV or STIX 2.1 indicator files, with source and expiry; matches raise INTEL_MATCH, enrich other alerts and feed the JA3 blocklist |
+| File exports | `python scripts/export_alerts.py`, `POST /export`, or `export.continuous: true` | Alerts and incidents as JSON lines, CEF and a STIX 2.1 bundle (indicators, sightings, observed data, incidents, ATT&CK attack-patterns); continuous files rotate |
+| SIEM forwarding | `outbound.syslog` | RFC 5424 syslog over UDP, TCP or TLS with CEF or JSON payloads |
+| Notifications | `outbound.email`, `outbound.webhook` | Alerts at or above a severity; rate limit and digests; only the configured fields; optional IP redaction |
+
+Outbound rules: every destination must be listed in
+`outbound.allowed_destinations` and lie outside `network.home_networks`.
+This is checked when the configuration loads and again before every
+connection (names are resolved and every address checked; the connection
+goes to the checked address). Only `unishield/export/transport.py` can open
+connections, which the passive-mode verification checks statically and at
+runtime. With the default `home_networks` (all private ranges), private
+analyst addresses are refused, so set it to the monitored network's real
+ranges before enabling outputs. Placement, firewalling, TLS and secrets:
+[docs/deployment.md](docs/deployment.md); threats and mitigations:
+[docs/threat_model.md](docs/threat_model.md).
 
 ---
 
@@ -135,10 +171,13 @@ scores are optimistic: trained without a class, the random forest misses
 most unseen attack types (leave-one-attack-out table in the report). See
 [docs/model_card.md](docs/model_card.md) and [docs/evaluation.md](docs/evaluation.md).
 
-**Passive operation** (`reports/passive_mode_verification.md`): static scan
-of all modules finds no network, capture, process or crypto capability;
-the runtime tripwire records no network attempt across every input format
-and the API.
+**Passive operation** (`reports/passive_mode_verification.md`): the static
+scan finds no network, capture, process or crypto capability outside the
+analyst-side transport (whose allowed lines the report lists); under the
+runtime tripwire readers, pipeline and detectors make no socket call at all
+across every input format, the API makes only loopback calls, the outputs
+reach only allow-listed loopback receivers, and a monitored-network
+destination is refused at config load, at send time and at socket level.
 
 ---
 
@@ -155,12 +194,18 @@ and the API.
 | GET | `/incidents` | alerts grouped by entity and time |
 | GET | `/threats/{class}` | alerts of one class |
 | GET | `/replay/status`, `/replay/runs` | current run, recent runs |
-| GET | `/system/architecture` | stage, detector, model and safety status |
+| GET | `/system/architecture` | stage, detector, model, output, intel and safety status |
+| GET | `/outputs/status` | export, syslog and notification status (no secrets) |
+| GET | `/intel/status` | imported indicators per kind and source |
 | GET | `/benchmark/latest`, `/evaluation/latest` | measured reports |
 | POST | `/replay/start` | admin: analyse a file under the data directory |
 | POST | `/replay/demo` | admin: analyse a synthetic scenario (`wait=true` to block) |
 | POST | `/replay/stop` | admin: stop the run |
 | DELETE | `/alerts` | admin: delete stored alerts |
+| POST | `/export` | admin: write JSON lines / CEF / STIX files of stored alerts and incidents |
+| POST | `/intel/import` | admin: import an indicator file (request body) |
+| DELETE | `/intel/sources/{source}` | admin: remove a source's indicators |
+| POST | `/intel/purge-expired` | admin: delete expired indicators |
 
 Admin endpoints need `X-API-Key` matching `UNISHIELD_ADMIN_API_KEY`; when no
 key is set they accept loopback clients only. Read endpoints have no side
@@ -168,10 +213,12 @@ effects.
 
 ## Configuration
 
-`configs/config.yaml` (general), `configs/thresholds.yaml` (detection
-thresholds) and environment variables listed in `.env.example`
-(`UNISHIELD_DB_URL`, `UNISHIELD_ADMIN_API_KEY`, `UNISHIELD_DETECTION_MODE`,
-...). The four security flags cannot be disabled.
+`configs/config.yaml` (general, including the `intel`, `export` and
+`outbound` sections), `configs/thresholds.yaml` (detection thresholds) and
+environment variables listed in `.env.example` (`UNISHIELD_DB_URL`,
+`UNISHIELD_ADMIN_API_KEY`, `UNISHIELD_DETECTION_MODE`, `UNISHIELD_EXPORT_DIR`,
+`UNISHIELD_SMTP_PASSWORD`, ...). The four security flags cannot be disabled;
+outbound secrets are read only from the environment.
 
 Alerts are stored in SQLite (`data/unishield.db`) by default; PostgreSQL
 works with `UNISHIELD_DB_URL=postgresql+psycopg://...` and its driver.
@@ -217,6 +264,7 @@ venv (`pip install -e .` → `pip freeze --exclude-editable` for
 ## Documentation
 
 [architecture](docs/architecture.md) ·
+[deployment](docs/deployment.md) ·
 [threat model](docs/threat_model.md) ·
 [datasets](docs/dataset.md) ·
 [model card](docs/model_card.md) ·
@@ -228,7 +276,9 @@ venv (`pip install -e .` → `pip freeze --exclude-editable` for
 
 Not a live sensor (files and replayed streams only), not a SOC or IPS, no
 payload inspection; thresholds tuned on synthetic data; models trained on
-synthetic data and weak on unseen attack types; single process. Full list:
+synthetic data and weak on unseen attack types; single process; threat-intel
+matching only as good as the imported lists; outputs tested against
+UniShield's own loopback receivers, not specific SIEM products. Full list:
 [docs/limitations.md](docs/limitations.md).
 
 ## License

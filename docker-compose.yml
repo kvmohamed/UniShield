@@ -22,6 +22,7 @@ services:
       - ./reports:/app/reports:ro        # benchmark / evaluation reports shown in the dashboard
       - ./models:/app/models:ro          # trained models for hybrid mode
       - unishield-state:/app/state       # alert database (SQLite)
+      - unishield-exports:/app/exports   # JSON lines / CEF / STIX export files
       - unishield-logs:/app/logs
     environment:
       UNISHIELD_ENV: docker
@@ -29,6 +30,10 @@ services:
       UNISHIELD_DB_URL: sqlite:////app/state/unishield.db
       UNISHIELD_ADMIN_API_KEY: ${UNISHIELD_ADMIN_API_KEY:-}
       UNISHIELD_DETECTION_MODE: ${UNISHIELD_DETECTION_MODE:-rules}
+      UNISHIELD_EXPORT_DIR: /app/exports
+      UNISHIELD_EXPORT_CONTINUOUS: ${UNISHIELD_EXPORT_CONTINUOUS:-false}
+      # Secret for analyst-side email, if configured (docs/deployment.md)
+      UNISHIELD_SMTP_PASSWORD: ${UNISHIELD_SMTP_PASSWORD:-}
     read_only: true
     tmpfs:
       - /tmp
@@ -45,4 +50,5 @@ services:
 
 volumes:
   unishield-state:
+  unishield-exports:
   unishield-logs:

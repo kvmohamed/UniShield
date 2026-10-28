@@ -65,6 +65,8 @@ as confidence.
 python scripts/replay_pcap.py --input data/samples/attack_synflood.pcap
 python scripts/replay_pcap.py --input data/samples/zeek --json
 python scripts/verify_passive_mode.py
+python scripts/import_intel.py --source demo-c2 my_blocklist.txt   # offline threat intel
+python scripts/export_alerts.py --formats stix                     # JSON lines / CEF / STIX files
 pytest                       # unit, integration and security tests
 pytest -m performance        # performance targets on this machine
 ```
@@ -72,6 +74,9 @@ pytest -m performance        # performance targets on this machine
 ## Talking points
 
 - Detection is metadata only; TLS is never decrypted.
+- Nothing goes back into the monitored network. Optional exports, syslog,
+  email and webhooks reach only allow-listed analyst-side destinations, and
+  the passive-mode report shows the refused probes.
 - Rule confidences are scores; only the ML detector reports calibrated
   probabilities.
 - Every number in the reports is produced by the scripts on the machine that

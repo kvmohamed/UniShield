@@ -99,10 +99,16 @@ longer by design.
 ## 5. Passive operation
 
 `verify_passive_mode.py` parses every module for network, capture, process
-and crypto capabilities and runs every input format, all scenarios and the
-API under a tripwire that refuses any non-loopback socket operation, name
-resolution and scapy send/receive/sniff. Result: no static findings and no
-runtime attempts.
+and crypto capabilities, allowing them only in the analyst-side transport
+(`unishield/export/transport.py`, every allowed line listed in the report).
+It runs every input format and all scenarios (with sample threat
+intelligence loaded) under a tripwire that refuses every socket operation,
+the API with loopback allowed for the event loop, and the export/notification
+outputs against loopback receivers with only policy-permitted destinations
+allowed for the transport. Three probes must be refused: a monitored-network
+destination at config load, at send time and at socket level with the
+policy check bypassed. Result: no static findings and no unexpected runtime
+attempts (see the report for the counts).
 
 ## Reproducibility
 
