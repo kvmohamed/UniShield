@@ -23,9 +23,11 @@ from pathlib import Path
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     Float,
+    ForeignKey,
     Index,
     Integer,
     MetaData,
@@ -33,6 +35,7 @@ from sqlalchemy import (
     Table,
     create_engine,
     event,
+    false,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
@@ -134,6 +137,52 @@ audit_log_table = Table(
     Index("ix_audit_log_actor", "actor"),
 )
 
+users_table = Table(
+    "users",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("username", String(64), nullable=False, unique=True),
+    Column("password_hash", String(255), nullable=False),
+    Column("role", String(16), nullable=False),
+    Column("disabled", Boolean, nullable=False, server_default=false()),
+    Column("failed_logins", Integer, nullable=False, server_default="0"),
+    Column("locked_until", DateTime),
+    Column("created_at", DateTime, nullable=False),
+    Column("created_by", String(128)),
+    Column("updated_at", DateTime),
+    Column("password_changed_at", DateTime),
+    Column("last_login_at", DateTime),
+)
+
+sessions_table = Table(
+    "sessions",
+    metadata,
+    Column("id", String(64), primary_key=True),                 # SHA-256 of the cookie value
+    Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("csrf_token", String(64), nullable=False),
+    Column("created_at", DateTime, nullable=False),
+    Column("expires_at", DateTime, nullable=False),
+    Column("last_seen_at", DateTime, nullable=False),
+    Column("client_ip", String(64)),
+    Column("user_agent", String(256)),
+    Index("ix_sessions_user_id", "user_id"),
+    Index("ix_sessions_expires_at", "expires_at"),
+)
+
+api_tokens_table = Table(
+    "api_tokens",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("name", String(64), nullable=False, unique=True),
+    Column("token_hash", String(64), nullable=False, unique=True),   # SHA-256 of the token
+    Column("role", String(16), nullable=False),
+    Column("created_at", DateTime, nullable=False),
+    Column("created_by", String(128)),
+    Column("expires_at", DateTime),
+    Column("last_used_at", DateTime),
+    Column("revoked_at", DateTime),
+)
+
 _WRITE_LOCKS: "weakref.WeakKeyDictionary[Engine, threading.Lock]" = weakref.WeakKeyDictionary()
 _WRITE_LOCKS_GUARD = threading.Lock()
 
@@ -169,6 +218,7 @@ def make_engine(url: str, echo: bool = False, migrate: bool = True) -> Engine:
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
     if migrate:
         from unishield.storage import migrate as migrations

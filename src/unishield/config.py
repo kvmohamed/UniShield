@@ -106,11 +106,32 @@ class APIConfig(BaseModel):
     port: int = 8000
     workers: int = 1
     reload: bool = False
-    # Key for administrative endpoints (replay, demo, clearing alerts), sent as
-    # the X-API-Key header. Set it only through UNISHIELD_ADMIN_API_KEY. When it
-    # is unset, administrative endpoints accept loopback clients only.
+    # Static service token for automation, sent as the X-API-Key header. Set it
+    # only through UNISHIELD_ADMIN_API_KEY; it acts with api_key_role. Named,
+    # revocable tokens: unishield-admin token create.
     admin_api_key: Optional[str] = Field(default=None, repr=False)
+    api_key_role: Literal["viewer", "analyst", "admin"] = "admin"
     cors_origins: list[str] = Field(default_factory=list)   # the dashboard is same-origin
+
+
+class AuthConfig(BaseModel):
+    """Accounts, sessions and login protection (docs/deployment.md)."""
+    # accounts: every endpoint except /health, /auth/login, /auth/me and the
+    #           dashboard page needs a login session or a service token.
+    # open:     LAB ONLY. Read endpoints need no login; replay, deleting data,
+    #           user management and the audit log still need an administrator.
+    #           Refused when environment is "production".
+    mode: Literal["accounts", "open"] = "accounts"
+    session_ttl_minutes: int = Field(default=480, ge=5, le=10_080)      # absolute session lifetime
+    session_idle_minutes: int = Field(default=30, ge=1, le=1_440)       # sign out after this much inactivity
+    max_failed_logins: int = Field(default=5, ge=1, le=100)             # consecutive failures before lockout
+    lockout_minutes: int = Field(default=15, ge=1, le=1_440)
+    login_rate_limit: int = Field(default=10, ge=1, le=10_000)          # failed logins per client address...
+    login_rate_window_sec: int = Field(default=300, ge=10, le=86_400)   # ...within this window
+    min_password_length: int = Field(default=12, ge=8, le=128)
+    # Secure flag on the session cookie: auto = when the request arrived over
+    # HTTPS (directly or via a trusted proxy's X-Forwarded-Proto).
+    cookie_secure: Literal["auto", "always", "never"] = "auto"
 
 
 class DatabaseConfig(BaseModel):
@@ -331,6 +352,7 @@ class UnishieldConfig(BaseModel):
 
     security: SecurityConfig = SecurityConfig()
     api: APIConfig = APIConfig()
+    auth: AuthConfig = AuthConfig()
     database: DatabaseConfig = DatabaseConfig()
     processing: ProcessingConfig = ProcessingConfig()
     ingest: IngestConfig = IngestConfig()
@@ -348,6 +370,12 @@ class UnishieldConfig(BaseModel):
         from unishield.export.policy import validate_outbound
 
         validate_outbound(self)
+        return self
+
+    @model_validator(mode="after")
+    def _open_mode_is_lab_only(self) -> "UnishieldConfig":
+        if self.auth.mode == "open" and self.environment.lower() == "production":
+            raise ValueError("auth.mode 'open' is for labs only and cannot be used with environment 'production'")
         return self
 
 
@@ -374,6 +402,9 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_ADMIN_API_KEY": ("api", "admin_api_key"),
     "UNISHIELD_EXPORT_DIR": ("export", "directory"),
     "UNISHIELD_EXPORT_CONTINUOUS": ("export", "continuous"),
+    "UNISHIELD_API_KEY_ROLE": ("api", "api_key_role"),
+    "UNISHIELD_AUTH_MODE": ("auth", "mode"),
+    "UNISHIELD_COOKIE_SECURE": ("auth", "cookie_secure"),
 }
 
 

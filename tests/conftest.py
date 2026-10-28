@@ -12,6 +12,19 @@ os.environ.setdefault("UNISHIELD_DB_URL", "sqlite://")
 from unishield.data import sample_files  # noqa: E402
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _cheap_password_hashing():
+    """Argon2id with minimal parameters: tests hash many passwords; production keeps the defaults."""
+    from argon2 import PasswordHasher, profiles
+
+    from unishield.accounts import passwords
+
+    default = passwords._hasher
+    passwords._hasher = PasswordHasher.from_parameters(profiles.CHEAPEST)
+    yield
+    passwords._hasher = default
+
+
 @pytest.fixture
 def api_client(monkeypatch, tmp_path):
     """(TestClient from a loopback address, data dir) for a fresh app with an in-memory database."""
