@@ -312,31 +312,27 @@ def test_policy_without_assets_changes_nothing():
     assert policy.stats() == {"assets": 0, "suppressed": 0, "downgraded_to_info": 0, "by_action": {}}
 
 
-def test_api_shows_inventory_and_policy_effects(clean_assets, monkeypatch, tmp_path):
-    from fastapi.testclient import TestClient
-
-    from unishield.api.app import create_app
-    from unishield.storage import AlertRepository
-
+def test_api_shows_inventory_and_policy_effects(clean_assets, api_client, monkeypatch, tmp_path):
+    client, _ = api_client
     path = tmp_path / "assets.yaml"
     path.write_text(yaml.safe_dump({"assets": [{"name": "scanner", "addresses": [SCANNERS],
                                                 "roles": ["vulnerability_scanner"]}]}))
     monkeypatch.setenv("UNISHIELD_ASSETS_FILE", str(path))
-    monkeypatch.delenv("UNISHIELD_ADMIN_API_KEY", raising=False)
-    reset_config()                    # importing the app module may have loaded the config already
-    app = create_app(AlertRepository.from_url("sqlite://"))
-    client = TestClient(app, client=("127.0.0.1", 50000))
-    try:
-        before = client.get("/system/assets").json()
-        assert before["assets"][0]["name"] == "scanner" and before["policy_effects"] is None
-        assert before["policies"]["backup_server"]["destination"] == {"DATA_EXFILTRATION": "suppress",
-                                                                      "C2_BEACONING": "info"}
-        assert client.post("/replay/demo", params={"scenario": "port_scan", "wait": True}).json()["status"] == "completed"
-        after = client.get("/system/assets").json()
-        assert after["policy_effects"]["downgraded_to_info"] > 0
-        assert client.get("/metrics").json()["alerts_downgraded_by_policy"] == after["policy_effects"]["downgraded_to_info"]
-        stored = client.get("/alerts", params={"threat_class": "PORT_SCAN"}).json()
-        assert stored and {a["severity"] for a in stored} == {"INFO"}
-        assert client.get("/system/architecture").json()["assets_source"] == str(path)
-    finally:
-        app.state.ctx.reset()
+    reset_config()
+    reset_assets()
+    before = client.get("/system/assets").json()
+    assert before["assets"][0]["name"] == "scanner" and before["policy_effects"] is None
+    assert before["policies"]["backup_server"]["destination"] == {"DATA_EXFILTRATION": "suppress",
+                                                                  "C2_BEACONING": "info"}
+    assert client.post("/replay/demo", params={"scenario": "port_scan", "wait": True}).json()["status"] == "completed"
+    after = client.get("/system/assets").json()
+    assert after["policy_effects"]["downgraded_to_info"] > 0
+    assert client.get("/metrics").json()["alerts_downgraded_by_policy"] == after["policy_effects"]["downgraded_to_info"]
+    stored = client.get("/alerts", params={"threat_class": "PORT_SCAN"}).json()
+    assert stored and {a["severity"] for a in stored} == {"INFO"}
+    assert client.get("/system/architecture").json()["assets_source"] == str(path)
+
+
+def test_asset_view_needs_a_viewer(client_as):
+    assert client_as(None).get("/system/assets").status_code == 401
+    assert client_as("viewer").get("/system/assets").status_code == 200

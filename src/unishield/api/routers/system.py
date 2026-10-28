@@ -183,7 +183,8 @@ def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     }
 
 
-@router.get("/system/assets", summary="Asset inventory and what its role policies changed")
+@router.get("/system/assets", summary="Asset inventory and what its role policies changed",
+            dependencies=[Depends(require_viewer)])
 def asset_inventory(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     """
     The loaded asset inventory, the effective role policies, and for the

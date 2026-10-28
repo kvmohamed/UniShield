@@ -204,3 +204,10 @@ def test_timestamps_in_meta_are_iso(learned_without_assets):
     meta = run.meta("now", 99.9, False)
     assert datetime.fromisoformat(meta["first_event"]) < datetime.fromisoformat(meta["last_event"])
     assert datetime.fromisoformat(meta["first_event"]).tzinfo == timezone.utc
+
+
+def test_learning_routes_need_their_roles(client_as):
+    assert client_as(None).get("/learning/latest").status_code == 401
+    viewer = client_as("viewer")
+    assert viewer.get("/learning/latest").status_code == 200
+    assert viewer.post("/replay/start", params={"file_path": "x", "learning": True}).status_code == 403
