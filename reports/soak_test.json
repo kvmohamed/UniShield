@@ -1,0 +1,1118 @@
+{
+  "generated_at": "2026-10-28T06:39:05+00:00",
+  "started_at": "2026-10-28T06:09:01+00:00",
+  "config": {
+    "duration_sec": 1800.0,
+    "rate": 1000.0,
+    "speedup": 8.0,
+    "sample_every_sec": 60.0,
+    "profile": "site",
+    "attack_every_sec": 900.0,
+    "use_assets": true,
+    "state_path": "C:\\Users\\Mohamed\\AppData\\Local\\Temp\\unishield-soak-n6un6d_4\\pipeline_state.json",
+    "snapshot_interval_sec": 60.0,
+    "seed": 7
+  },
+  "environment": {
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.12.10",
+    "logical_cpus": 12,
+    "total_memory_gb": 7.9
+  },
+  "summary": {
+    "records": 1818250,
+    "windows": 2881,
+    "errors": 0,
+    "wall_seconds": 1800.0,
+    "traffic_seconds": 14400.4,
+    "records_per_sec": 1010.1,
+    "rss_first_mb": 88.9,
+    "rss_last_mb": 243.0,
+    "rss_max_mb": 243.0,
+    "rss_slope_mb_per_hour_second_half": 113.7,
+    "rss_second_half_range_mb": 27.4,
+    "window_p50_ms_overall": 73.75,
+    "window_p95_ms_overall": 127.15,
+    "window_p95_ms_worst_interval": 198.31,
+    "window_max_ms": 392.95,
+    "max_lag_sec": 1.034,
+    "alerts": 366,
+    "alerts_by_class": {
+      "C2_BEACONING": 349,
+      "PORT_SCAN": 7,
+      "DATA_EXFILTRATION": 2,
+      "DGA_DETECTED": 2,
+      "HOST_SCAN": 2,
+      "DNS_TUNNELLING": 2,
+      "SYN_FLOOD": 2
+    },
+    "alerts_by_severity": {
+      "INFO": 352,
+      "HIGH": 8,
+      "MEDIUM": 4,
+      "CRITICAL": 2
+    },
+    "alerts_per_hour": 732.0,
+    "attacks_injected": {
+      "port_scan": 3,
+      "c2_beacon": 3,
+      "exfiltration": 2,
+      "dga": 2,
+      "host_sweep": 2,
+      "dns_tunnel": 2,
+      "syn_flood": 2
+    },
+    "asset_policy": {
+      "assets": 4,
+      "suppressed": 1,
+      "downgraded_to_info": 352,
+      "by_action": {
+        "info": {
+          "C2_BEACONING": {
+            "monitoring": 320,
+            "update_server": 28
+          },
+          "PORT_SCAN": {
+            "vulnerability_scanner": 4
+          }
+        },
+        "suppress": {
+          "DATA_EXFILTRATION": {
+            "backup_server": 1
+          }
+        }
+      }
+    },
+    "state": {
+      "path": "C:\\Users\\Mohamed\\AppData\\Local\\Temp\\unishield-soak-n6un6d_4\\pipeline_state.json",
+      "snapshot_interval_sec": 60.0,
+      "restore": {
+        "attempted": true,
+        "path": "C:\\Users\\Mohamed\\AppData\\Local\\Temp\\unishield-soak-n6un6d_4\\pipeline_state.json",
+        "restored": false,
+        "reason": "no snapshot (cold start)"
+      },
+      "saves": 30,
+      "save_errors": 0,
+      "last_save": {
+        "at": "2026-10-28T06:39:04.271248+00:00",
+        "bytes": 19645618,
+        "ms": 715.0,
+        "components": [
+          "correlator",
+          "detector:anomaly_detector",
+          "detector:beaconing_detector",
+          "detector:encrypted_session_detector",
+          "detector:exfiltration_detector",
+          "detector:statistical_detector",
+          "extractor:beaconing",
+          "extractor:exfiltration"
+        ]
+      }
+    },
+    "final_state_sizes": {
+      "beacon_pairs": 41924,
+      "beacon_seen_ids": 523,
+      "upload_baselines": 762,
+      "upload_destinations": 12,
+      "beaconing_detector_memory": 23,
+      "exfiltration_detector_memory": 2,
+      "encrypted_session_detector_memory": 0,
+      "statistical_baseline": 55,
+      "dedup_cache": 37
+    }
+  },
+  "samples": [
+    {
+      "elapsed_sec": 60.0,
+      "traffic_time": "2026-01-01T00:07:59.998000+00:00",
+      "records": 60356,
+      "records_per_sec": 1005.9,
+      "max_lag_sec": 0.117,
+      "rss_mb": 88.9,
+      "cpu_percent": 8.3,
+      "windows": 95,
+      "window_p50_ms": 30.29,
+      "window_p95_ms": 55.25,
+      "window_max_ms": 111.43,
+      "alerts": 20,
+      "alerts_by_class": {
+        "C2_BEACONING": 20
+      },
+      "state": {
+        "beacon_pairs": 23736,
+        "beacon_seen_ids": 1062,
+        "upload_baselines": 762,
+        "upload_destinations": 10,
+        "beaconing_detector_memory": 20,
+        "exfiltration_detector_memory": 0,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 20
+      },
+      "snapshot": null
+    },
+    {
+      "elapsed_sec": 120.0,
+      "traffic_time": "2026-01-01T00:16:00.009000+00:00",
+      "records": 120974,
+      "records_per_sec": 1009.7,
+      "max_lag_sec": 0.202,
+      "rss_mb": 110.3,
+      "cpu_percent": 10.2,
+      "windows": 192,
+      "window_p50_ms": 36.54,
+      "window_p95_ms": 85.66,
+      "window_max_ms": 182.19,
+      "alerts": 1,
+      "alerts_by_class": {
+        "PORT_SCAN": 1
+      },
+      "state": {
+        "beacon_pairs": 33378,
+        "beacon_seen_ids": 1079,
+        "upload_baselines": 762,
+        "upload_destinations": 10,
+        "beaconing_detector_memory": 20,
+        "exfiltration_detector_memory": 0,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 21
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:10:01.974737+00:00",
+        "bytes": 3172839,
+        "ms": 152.2
+      }
+    },
+    {
+      "elapsed_sec": 180.0,
+      "traffic_time": "2026-01-01T00:24:00.010000+00:00",
+      "records": 181162,
+      "records_per_sec": 1002.9,
+      "max_lag_sec": 0.269,
+      "rss_mb": 124.8,
+      "cpu_percent": 11.2,
+      "windows": 288,
+      "window_p50_ms": 42.26,
+      "window_p95_ms": 91.76,
+      "window_max_ms": 242.42,
+      "alerts": 22,
+      "alerts_by_class": {
+        "C2_BEACONING": 22
+      },
+      "state": {
+        "beacon_pairs": 37620,
+        "beacon_seen_ids": 1082,
+        "upload_baselines": 762,
+        "upload_destinations": 10,
+        "beaconing_detector_memory": 22,
+        "exfiltration_detector_memory": 0,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 23
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:11:02.598170+00:00",
+        "bytes": 4974833,
+        "ms": 219.5
+      }
+    },
+    {
+      "elapsed_sec": 240.0,
+      "traffic_time": "2026-01-01T00:31:59.973000+00:00",
+      "records": 242116,
+      "records_per_sec": 1016.7,
+      "max_lag_sec": 0.333,
+      "rss_mb": 136.7,
+      "cpu_percent": 11.2,
+      "windows": 383,
+      "window_p50_ms": 41.97,
+      "window_p95_ms": 64.91,
+      "window_max_ms": 114.7,
+      "alerts": 4,
+      "alerts_by_class": {
+        "PORT_SCAN": 4
+      },
+      "state": {
+        "beacon_pairs": 40293,
+        "beacon_seen_ids": 1071,
+        "upload_baselines": 762,
+        "upload_destinations": 11,
+        "beaconing_detector_memory": 22,
+        "exfiltration_detector_memory": 0,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 27
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:12:03.227380+00:00",
+        "bytes": 6513847,
+        "ms": 275.2
+      }
+    },
+    {
+      "elapsed_sec": 300.0,
+      "traffic_time": "2026-01-01T00:40:00.005000+00:00",
+      "records": 302525,
+      "records_per_sec": 1006.1,
+      "max_lag_sec": 0.402,
+      "rss_mb": 146.3,
+      "cpu_percent": 12.1,
+      "windows": 480,
+      "window_p50_ms": 47.78,
+      "window_p95_ms": 108.9,
+      "window_max_ms": 186.56,
+      "alerts": 23,
+      "alerts_by_class": {
+        "C2_BEACONING": 23
+      },
+      "state": {
+        "beacon_pairs": 41271,
+        "beacon_seen_ids": 1058,
+        "upload_baselines": 762,
+        "upload_destinations": 11,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 0,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 28
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:13:03.856445+00:00",
+        "bytes": 7746308,
+        "ms": 332.8
+      }
+    },
+    {
+      "elapsed_sec": 360.1,
+      "traffic_time": "2026-01-01T00:48:00.002000+00:00",
+      "records": 362931,
+      "records_per_sec": 1006.6,
+      "max_lag_sec": 0.447,
+      "rss_mb": 156.8,
+      "cpu_percent": 12.4,
+      "windows": 576,
+      "window_p50_ms": 48.26,
+      "window_p95_ms": 115.42,
+      "window_max_ms": 125.26,
+      "alerts": 1,
+      "alerts_by_class": {
+        "DATA_EXFILTRATION": 1
+      },
+      "state": {
+        "beacon_pairs": 41828,
+        "beacon_seen_ids": 1051,
+        "upload_baselines": 762,
+        "upload_destinations": 12,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 1,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 29
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:14:04.485292+00:00",
+        "bytes": 8773940,
+        "ms": 378.7
+      }
+    },
+    {
+      "elapsed_sec": 420.0,
+      "traffic_time": "2026-01-01T00:55:59.996000+00:00",
+      "records": 423206,
+      "records_per_sec": 1005.5,
+      "max_lag_sec": 0.522,
+      "rss_mb": 164.7,
+      "cpu_percent": 14.9,
+      "windows": 671,
+      "window_p50_ms": 58.64,
+      "window_p95_ms": 124.79,
+      "window_max_ms": 180.64,
+      "alerts": 22,
+      "alerts_by_class": {
+        "C2_BEACONING": 22
+      },
+      "state": {
+        "beacon_pairs": 42122,
+        "beacon_seen_ids": 1071,
+        "upload_baselines": 762,
+        "upload_destinations": 12,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 1,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 29
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:15:05.136694+00:00",
+        "bytes": 9785428,
+        "ms": 419.2
+      }
+    },
+    {
+      "elapsed_sec": 480.0,
+      "traffic_time": "2026-01-01T01:03:59.989000+00:00",
+      "records": 483719,
+      "records_per_sec": 1008.5,
+      "max_lag_sec": 0.538,
+      "rss_mb": 171.2,
+      "cpu_percent": 15.3,
+      "windows": 767,
+      "window_p50_ms": 59.48,
+      "window_p95_ms": 149.25,
+      "window_max_ms": 179.48,
+      "alerts": 1,
+      "alerts_by_class": {
+        "DGA_DETECTED": 1
+      },
+      "state": {
+        "beacon_pairs": 42294,
+        "beacon_seen_ids": 1059,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 31
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:16:05.737656+00:00",
+        "bytes": 10781801,
+        "ms": 454.6
+      }
+    },
+    {
+      "elapsed_sec": 540.1,
+      "traffic_time": "2026-01-01T01:12:00.002000+00:00",
+      "records": 544062,
+      "records_per_sec": 1004.8,
+      "max_lag_sec": 0.617,
+      "rss_mb": 178.2,
+      "cpu_percent": 14.2,
+      "windows": 864,
+      "window_p50_ms": 57.56,
+      "window_p95_ms": 146.26,
+      "window_max_ms": 156.98,
+      "alerts": 22,
+      "alerts_by_class": {
+        "C2_BEACONING": 22
+      },
+      "state": {
+        "beacon_pairs": 42386,
+        "beacon_seen_ids": 1080,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 31
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:17:06.378122+00:00",
+        "bytes": 11776848,
+        "ms": 524.3
+      }
+    },
+    {
+      "elapsed_sec": 600.1,
+      "traffic_time": "2026-01-01T01:20:00+00:00",
+      "records": 604687,
+      "records_per_sec": 1010.3,
+      "max_lag_sec": 0.599,
+      "rss_mb": 187.0,
+      "cpu_percent": 13.9,
+      "windows": 960,
+      "window_p50_ms": 59.01,
+      "window_p95_ms": 98.69,
+      "window_max_ms": 155.85,
+      "alerts": 21,
+      "alerts_by_class": {
+        "C2_BEACONING": 20,
+        "HOST_SCAN": 1
+      },
+      "state": {
+        "beacon_pairs": 42448,
+        "beacon_seen_ids": 1071,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 32
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:18:06.991958+00:00",
+        "bytes": 12773438,
+        "ms": 514.4
+      }
+    },
+    {
+      "elapsed_sec": 660.1,
+      "traffic_time": "2026-01-01T01:28:00.004000+00:00",
+      "records": 665081,
+      "records_per_sec": 1006.5,
+      "max_lag_sec": 0.651,
+      "rss_mb": 194.6,
+      "cpu_percent": 14.9,
+      "windows": 1056,
+      "window_p50_ms": 61.85,
+      "window_p95_ms": 155.09,
+      "window_max_ms": 168.77,
+      "alerts": 2,
+      "alerts_by_class": {
+        "C2_BEACONING": 2
+      },
+      "state": {
+        "beacon_pairs": 42480,
+        "beacon_seen_ids": 1048,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 32
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:19:07.660613+00:00",
+        "bytes": 13768147,
+        "ms": 523.6
+      }
+    },
+    {
+      "elapsed_sec": 720.1,
+      "traffic_time": "2026-01-01T01:36:00.005000+00:00",
+      "records": 725677,
+      "records_per_sec": 1009.9,
+      "max_lag_sec": 0.673,
+      "rss_mb": 200.0,
+      "cpu_percent": 14.9,
+      "windows": 1152,
+      "window_p50_ms": 65.39,
+      "window_p95_ms": 97.4,
+      "window_max_ms": 164.65,
+      "alerts": 21,
+      "alerts_by_class": {
+        "C2_BEACONING": 20,
+        "DNS_TUNNELLING": 1
+      },
+      "state": {
+        "beacon_pairs": 42501,
+        "beacon_seen_ids": 1082,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 33
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:20:08.251007+00:00",
+        "bytes": 14757789,
+        "ms": 578.7
+      }
+    },
+    {
+      "elapsed_sec": 780.0,
+      "traffic_time": "2026-01-01T01:43:59.996000+00:00",
+      "records": 786122,
+      "records_per_sec": 1008.5,
+      "max_lag_sec": 0.686,
+      "rss_mb": 199.6,
+      "cpu_percent": 17.0,
+      "windows": 1247,
+      "window_p50_ms": 74.59,
+      "window_p95_ms": 163.09,
+      "window_max_ms": 214.66,
+      "alerts": 2,
+      "alerts_by_class": {
+        "C2_BEACONING": 2
+      },
+      "state": {
+        "beacon_pairs": 42511,
+        "beacon_seen_ids": 1072,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 33
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:21:08.880296+00:00",
+        "bytes": 15747985,
+        "ms": 583.0
+      }
+    },
+    {
+      "elapsed_sec": 840.1,
+      "traffic_time": "2026-01-01T01:52:00.005000+00:00",
+      "records": 849449,
+      "records_per_sec": 1054.3,
+      "max_lag_sec": 1.034,
+      "rss_mb": 204.9,
+      "cpu_percent": 19.5,
+      "windows": 1344,
+      "window_p50_ms": 77.29,
+      "window_p95_ms": 190.98,
+      "window_max_ms": 247.71,
+      "alerts": 21,
+      "alerts_by_class": {
+        "C2_BEACONING": 20,
+        "SYN_FLOOD": 1
+      },
+      "state": {
+        "beacon_pairs": 42525,
+        "beacon_seen_ids": 1054,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 34
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:22:09.533524+00:00",
+        "bytes": 16733339,
+        "ms": 861.9
+      }
+    },
+    {
+      "elapsed_sec": 900.0,
+      "traffic_time": "2026-01-01T02:00:00+00:00",
+      "records": 909717,
+      "records_per_sec": 1005.6,
+      "max_lag_sec": 0.789,
+      "rss_mb": 210.5,
+      "cpu_percent": 17.3,
+      "windows": 1439,
+      "window_p50_ms": 73.93,
+      "window_p95_ms": 172.99,
+      "window_max_ms": 301.23,
+      "alerts": 2,
+      "alerts_by_class": {
+        "C2_BEACONING": 2
+      },
+      "state": {
+        "beacon_pairs": 42529,
+        "beacon_seen_ids": 1023,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 34
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:23:10.757061+00:00",
+        "bytes": 17729984,
+        "ms": 681.7
+      }
+    },
+    {
+      "elapsed_sec": 960.1,
+      "traffic_time": "2026-01-01T02:08:00.007000+00:00",
+      "records": 970281,
+      "records_per_sec": 1007.2,
+      "max_lag_sec": 0.92,
+      "rss_mb": 215.6,
+      "cpu_percent": 18.1,
+      "windows": 1536,
+      "window_p50_ms": 76.17,
+      "window_p95_ms": 176.8,
+      "window_max_ms": 195.8,
+      "alerts": 21,
+      "alerts_by_class": {
+        "C2_BEACONING": 20,
+        "PORT_SCAN": 1
+      },
+      "state": {
+        "beacon_pairs": 42529,
+        "beacon_seen_ids": 1081,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 35
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:24:12.008097+00:00",
+        "bytes": 18715116,
+        "ms": 812.1
+      }
+    },
+    {
+      "elapsed_sec": 1020.0,
+      "traffic_time": "2026-01-01T02:15:59.998000+00:00",
+      "records": 1030591,
+      "records_per_sec": 1007.4,
+      "max_lag_sec": 0.963,
+      "rss_mb": 218.2,
+      "cpu_percent": 19.1,
+      "windows": 1631,
+      "window_p50_ms": 78.52,
+      "window_p95_ms": 156.78,
+      "window_max_ms": 392.95,
+      "alerts": 2,
+      "alerts_by_class": {
+        "C2_BEACONING": 2
+      },
+      "state": {
+        "beacon_pairs": 42531,
+        "beacon_seen_ids": 1085,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 35
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:25:13.279103+00:00",
+        "bytes": 19255148,
+        "ms": 823.6
+      }
+    },
+    {
+      "elapsed_sec": 1080.0,
+      "traffic_time": "2026-01-01T02:24:00+00:00",
+      "records": 1090745,
+      "records_per_sec": 1002.6,
+      "max_lag_sec": 0.864,
+      "rss_mb": 219.7,
+      "cpu_percent": 19.0,
+      "windows": 1727,
+      "window_p50_ms": 77.84,
+      "window_p95_ms": 131.82,
+      "window_max_ms": 262.51,
+      "alerts": 20,
+      "alerts_by_class": {
+        "C2_BEACONING": 20
+      },
+      "state": {
+        "beacon_pairs": 42534,
+        "beacon_seen_ids": 1069,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 35
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:26:14.521321+00:00",
+        "bytes": 19476179,
+        "ms": 736.9
+      }
+    },
+    {
+      "elapsed_sec": 1140.0,
+      "traffic_time": "2026-01-01T02:32:00+00:00",
+      "records": 1151126,
+      "records_per_sec": 1006.3,
+      "max_lag_sec": 0.961,
+      "rss_mb": 221.6,
+      "cpu_percent": 20.2,
+      "windows": 1823,
+      "window_p50_ms": 82.02,
+      "window_p95_ms": 192.02,
+      "window_max_ms": 282.86,
+      "alerts": 3,
+      "alerts_by_class": {
+        "C2_BEACONING": 2,
+        "DATA_EXFILTRATION": 1
+      },
+      "state": {
+        "beacon_pairs": 41932,
+        "beacon_seen_ids": 1070,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 35
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:27:15.771511+00:00",
+        "bytes": 19583750,
+        "ms": 830.8
+      }
+    },
+    {
+      "elapsed_sec": 1200.1,
+      "traffic_time": "2026-01-01T02:40:00.006000+00:00",
+      "records": 1211495,
+      "records_per_sec": 1004.9,
+      "max_lag_sec": 0.98,
+      "rss_mb": 223.6,
+      "cpu_percent": 18.7,
+      "windows": 1920,
+      "window_p50_ms": 74.85,
+      "window_p95_ms": 91.79,
+      "window_max_ms": 182.76,
+      "alerts": 20,
+      "alerts_by_class": {
+        "C2_BEACONING": 20
+      },
+      "state": {
+        "beacon_pairs": 41931,
+        "beacon_seen_ids": 1064,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 35
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:28:17.024001+00:00",
+        "bytes": 19604345,
+        "ms": 857.1
+      }
+    },
+    {
+      "elapsed_sec": 1260.0,
+      "traffic_time": "2026-01-01T02:48:00+00:00",
+      "records": 1271857,
+      "records_per_sec": 1007.3,
+      "max_lag_sec": 0.844,
+      "rss_mb": 225.8,
+      "cpu_percent": 18.2,
+      "windows": 2015,
+      "window_p50_ms": 75.67,
+      "window_p95_ms": 185.54,
+      "window_max_ms": 246.82,
+      "alerts": 3,
+      "alerts_by_class": {
+        "C2_BEACONING": 2,
+        "DGA_DETECTED": 1
+      },
+      "state": {
+        "beacon_pairs": 41926,
+        "beacon_seen_ids": 1089,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 35
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:29:18.259527+00:00",
+        "bytes": 19627668,
+        "ms": 731.7
+      }
+    },
+    {
+      "elapsed_sec": 1320.0,
+      "traffic_time": "2026-01-01T02:56:00+00:00",
+      "records": 1332162,
+      "records_per_sec": 1005.1,
+      "max_lag_sec": 0.861,
+      "rss_mb": 228.2,
+      "cpu_percent": 17.4,
+      "windows": 2111,
+      "window_p50_ms": 75.3,
+      "window_p95_ms": 88.99,
+      "window_max_ms": 197.94,
+      "alerts": 20,
+      "alerts_by_class": {
+        "C2_BEACONING": 20
+      },
+      "state": {
+        "beacon_pairs": 41927,
+        "beacon_seen_ids": 1087,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 35
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:30:19.509178+00:00",
+        "bytes": 19642719,
+        "ms": 749.0
+      }
+    },
+    {
+      "elapsed_sec": 1380.1,
+      "traffic_time": "2026-01-01T03:04:00.001000+00:00",
+      "records": 1392848,
+      "records_per_sec": 1010.1,
+      "max_lag_sec": 0.865,
+      "rss_mb": 229.4,
+      "cpu_percent": 17.7,
+      "windows": 2208,
+      "window_p50_ms": 75.86,
+      "window_p95_ms": 89.98,
+      "window_max_ms": 196.14,
+      "alerts": 3,
+      "alerts_by_class": {
+        "C2_BEACONING": 2,
+        "HOST_SCAN": 1
+      },
+      "state": {
+        "beacon_pairs": 41923,
+        "beacon_seen_ids": 1073,
+        "upload_baselines": 762,
+        "upload_destinations": 13,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 36
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:31:20.762156+00:00",
+        "bytes": 19655735,
+        "ms": 752.4
+      }
+    },
+    {
+      "elapsed_sec": 1440.0,
+      "traffic_time": "2026-01-01T03:12:00+00:00",
+      "records": 1453137,
+      "records_per_sec": 1006.1,
+      "max_lag_sec": 0.955,
+      "rss_mb": 230.0,
+      "cpu_percent": 19.3,
+      "windows": 2303,
+      "window_p50_ms": 80.51,
+      "window_p95_ms": 196.83,
+      "window_max_ms": 252.89,
+      "alerts": 20,
+      "alerts_by_class": {
+        "C2_BEACONING": 20
+      },
+      "state": {
+        "beacon_pairs": 41924,
+        "beacon_seen_ids": 1064,
+        "upload_baselines": 762,
+        "upload_destinations": 12,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 36
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:32:22.014482+00:00",
+        "bytes": 19659120,
+        "ms": 824.2
+      }
+    },
+    {
+      "elapsed_sec": 1500.1,
+      "traffic_time": "2026-01-01T03:20:00.003000+00:00",
+      "records": 1513577,
+      "records_per_sec": 1006.1,
+      "max_lag_sec": 0.974,
+      "rss_mb": 233.9,
+      "cpu_percent": 18.2,
+      "windows": 2400,
+      "window_p50_ms": 75.3,
+      "window_p95_ms": 182.17,
+      "window_max_ms": 240.29,
+      "alerts": 23,
+      "alerts_by_class": {
+        "C2_BEACONING": 22,
+        "DNS_TUNNELLING": 1
+      },
+      "state": {
+        "beacon_pairs": 41926,
+        "beacon_seen_ids": 1080,
+        "upload_baselines": 762,
+        "upload_destinations": 12,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 36
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:33:25.523754+00:00",
+        "bytes": 19659682,
+        "ms": 849.1
+      }
+    },
+    {
+      "elapsed_sec": 1560.0,
+      "traffic_time": "2026-01-01T03:28:00+00:00",
+      "records": 1573873,
+      "records_per_sec": 1006.2,
+      "max_lag_sec": 0.847,
+      "rss_mb": 235.8,
+      "cpu_percent": 17.9,
+      "windows": 2495,
+      "window_p50_ms": 75.32,
+      "window_p95_ms": 102.56,
+      "window_max_ms": 187.91,
+      "alerts": 0,
+      "alerts_by_class": {},
+      "state": {
+        "beacon_pairs": 41921,
+        "beacon_seen_ids": 1057,
+        "upload_baselines": 762,
+        "upload_destinations": 12,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 36
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:34:26.760514+00:00",
+        "bytes": 19647602,
+        "ms": 734.9
+      }
+    },
+    {
+      "elapsed_sec": 1620.0,
+      "traffic_time": "2026-01-01T03:36:00+00:00",
+      "records": 1637173,
+      "records_per_sec": 1055.0,
+      "max_lag_sec": 0.861,
+      "rss_mb": 237.1,
+      "cpu_percent": 18.3,
+      "windows": 2591,
+      "window_p50_ms": 77.5,
+      "window_p95_ms": 189.6,
+      "window_max_ms": 207.52,
+      "alerts": 23,
+      "alerts_by_class": {
+        "C2_BEACONING": 22,
+        "SYN_FLOOD": 1
+      },
+      "state": {
+        "beacon_pairs": 41923,
+        "beacon_seen_ids": 1081,
+        "upload_baselines": 762,
+        "upload_destinations": 12,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 36
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:35:28.011553+00:00",
+        "bytes": 19647859,
+        "ms": 746.0
+      }
+    },
+    {
+      "elapsed_sec": 1680.0,
+      "traffic_time": "2026-01-01T03:44:00+00:00",
+      "records": 1697482,
+      "records_per_sec": 1005.2,
+      "max_lag_sec": 1.014,
+      "rss_mb": 237.5,
+      "cpu_percent": 18.2,
+      "windows": 2687,
+      "window_p50_ms": 76.54,
+      "window_p95_ms": 189.3,
+      "window_max_ms": 212.83,
+      "alerts": 0,
+      "alerts_by_class": {},
+      "state": {
+        "beacon_pairs": 41925,
+        "beacon_seen_ids": 1067,
+        "upload_baselines": 762,
+        "upload_destinations": 12,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 36
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:36:29.397796+00:00",
+        "bytes": 19653363,
+        "ms": 762.6
+      }
+    },
+    {
+      "elapsed_sec": 1740.1,
+      "traffic_time": "2026-01-01T03:52:00.008000+00:00",
+      "records": 1758019,
+      "records_per_sec": 1007.7,
+      "max_lag_sec": 0.946,
+      "rss_mb": 240.4,
+      "cpu_percent": 19.5,
+      "windows": 2784,
+      "window_p50_ms": 79.35,
+      "window_p95_ms": 198.31,
+      "window_max_ms": 298.07,
+      "alerts": 23,
+      "alerts_by_class": {
+        "C2_BEACONING": 22,
+        "PORT_SCAN": 1
+      },
+      "state": {
+        "beacon_pairs": 41927,
+        "beacon_seen_ids": 1083,
+        "upload_baselines": 762,
+        "upload_destinations": 12,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 54,
+        "dedup_cache": 37
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:37:30.532319+00:00",
+        "bytes": 19650257,
+        "ms": 805.6
+      }
+    },
+    {
+      "elapsed_sec": 1800.0,
+      "traffic_time": "2026-01-01T04:00:00.433000+00:00",
+      "records": 1818250,
+      "records_per_sec": 1005.1,
+      "max_lag_sec": 0.852,
+      "rss_mb": 243.0,
+      "cpu_percent": 19.0,
+      "windows": 2881,
+      "window_p50_ms": 75.85,
+      "window_p95_ms": 90.41,
+      "window_max_ms": 200.7,
+      "alerts": 0,
+      "alerts_by_class": {},
+      "state": {
+        "beacon_pairs": 41924,
+        "beacon_seen_ids": 523,
+        "upload_baselines": 762,
+        "upload_destinations": 12,
+        "beaconing_detector_memory": 23,
+        "exfiltration_detector_memory": 2,
+        "encrypted_session_detector_memory": 0,
+        "statistical_baseline": 55,
+        "dedup_cache": 37
+      },
+      "snapshot": {
+        "at": "2026-10-28T06:39:04.271248+00:00",
+        "bytes": 19645618,
+        "ms": 715.0
+      }
+    }
+  ],
+  "commit": "d65bcfe"
+}
