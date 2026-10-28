@@ -40,10 +40,13 @@
    for these classes is therefore lower than episode-level recall.
 6. **Evasion.** Jittered or slow beacons, uploads below baseline noise,
    dictionary DGAs and low-rate tunnels can stay below the rules. A beacon
-   that pauses and resumes on the same (source, destination, port) within
-   `beaconing.history_sec` (2 h) is not re-detected until the earlier
-   episode leaves the history, because the pause makes the intervals
-   irregular (found by the soak test; reproduced with a 93-minute pause).
+   that pauses and resumes on the same (source, destination, port) is
+   profiled on its newest run (the history is cut at a gap more than 5x the
+   recent median interval), so it is re-detected once the resumed run has
+   `beaconing.min_connections` connections (found by the soak test; tested
+   with pauses of 6 to 150 minutes on synthetic traffic). Until then, and
+   for a beacon whose pauses come more often than every 10 check-ins, the
+   whole history is profiled and the pauses make it look irregular.
 7. **Statistical and anomaly alerts are leads.** STATISTICAL_ANOMALY says a
    window is unusual, not why. The robust-z baseline drifts with the traffic
    it accepts as normal.

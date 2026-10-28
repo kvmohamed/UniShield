@@ -95,5 +95,8 @@ Reading the run (analysis added after it finished):
   after the first, while the first episode's connections were still in the pair's 2-hour history, so the
   gap made the intervals irregular. A follow-up check reproduced it (same pair, 93-minute gap: not
   re-detected; 150-minute gap: re-detected). This is a limit of the beaconing rule, not of the soak.
+  *Since this run* the beaconing profile uses the pair's newest run of connections, and the same
+  check re-detects the 93-minute case at the resumed episode's 10th connection; the soak itself has
+  not been re-run, so the table above is unchanged.
 - **Benign site behaviour.** 352 alerts from the monitoring poller, update checks and vulnerability scanner
   were reported as INFO and one backup upload was suppressed, all counted by the asset policy.
