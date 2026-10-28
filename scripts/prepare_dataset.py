@@ -31,6 +31,9 @@ def main() -> None:
     parser.add_argument("--scenarios", default="all", help="comma-separated scenario names (synthetic)")
     parser.add_argument("--seeds", default="1-20", help="seed list, e.g. 1-20 or 1,2,5 (synthetic)")
     parser.add_argument("--out", type=Path, default=None, help="output CSV")
+    parser.add_argument("--home-networks", default=None,
+                        help="comma-separated CIDRs of the monitored network for --input files "
+                             "(e.g. 147.32.0.0/16 for CTU-13); default: network.home_networks")
     args = parser.parse_args()
 
     if args.synthetic:
@@ -39,7 +42,7 @@ def main() -> None:
         manifest = prepare_synthetic(out, scenarios, parse_seeds(args.seeds))
     else:
         out = args.out or Path("data/processed/windows_files.csv")
-        manifest = prepare_files(out, args.input)
+        manifest = prepare_files(out, args.input, args.home_networks.split(",") if args.home_networks else None)
 
     print(f"Wrote {manifest['windows']} windows from {manifest['runs']} runs to {out}")
     print(json.dumps(manifest["labels"], indent=2))

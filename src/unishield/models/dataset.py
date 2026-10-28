@@ -44,8 +44,8 @@ _LABEL_MAP = {
     "DDOS": "DDOS_VOLUMETRIC", "DOS HULK": "DDOS_PROTOCOL", "DOS GOLDENEYE": "DDOS_PROTOCOL",
     "DOS SLOWLORIS": "DDOS_PROTOCOL", "DOS SLOWHTTPTEST": "DDOS_PROTOCOL",
     "PORTSCAN": "PORT_SCAN", "BOT": "C2_BEACONING", "INFILTRATION": "DATA_EXFILTRATION",
-    # CTU-13 style
-    "BOTNET": "C2_BEACONING",
+    # CTU-13 style: botnet traffic mixes C2, spam, scans and floods, so it keeps its own label
+    "BOTNET": "BOTNET",
 }
 _THREAT_NAMES = {
     "DDOS_VOLUMETRIC", "DDOS_PROTOCOL", "SYN_FLOOD", "UDP_FLOOD", "PORT_SCAN", "HOST_SCAN",
@@ -65,7 +65,7 @@ def normalise_label(label: Optional[str]) -> Optional[str]:
         return text
     if text.startswith("FLOW="):                      # CTU-13 binetflow labels
         if "BOTNET" in text:
-            return "C2_BEACONING"
+            return "BOTNET"
         if "NORMAL" in text or "BACKGROUND" in text:
             return BENIGN
     return "ATTACK"

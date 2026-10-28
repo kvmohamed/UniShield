@@ -73,7 +73,7 @@ def test_model_vector_handles_missing_and_bad_values():
 @pytest.mark.parametrize("label,expected", [
     ("BENIGN", BENIGN), ("Benign", BENIGN), ("DDoS", "DDOS_VOLUMETRIC"), ("PortScan", "PORT_SCAN"),
     ("DDOS_SYN_FLOOD", "SYN_FLOOD"), ("DGA", "DGA_DETECTED"), ("C2_BEACONING", "C2_BEACONING"),
-    ("flow=From-Botnet-V42-TCP", "C2_BEACONING"), ("flow=Background-UDP", BENIGN),
+    ("flow=From-Botnet-V42-TCP", "BOTNET"), ("flow=To-Botnet-V51-1-ICMP", "BOTNET"), ("flow=Background-UDP", BENIGN),
     ("Web Attack Brute Force", "ATTACK"), (None, None), ("  ", None),
 ])
 def test_normalise_label(label, expected):

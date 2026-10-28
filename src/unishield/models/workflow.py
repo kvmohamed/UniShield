@@ -53,16 +53,30 @@ def prepare_synthetic(out: Path, scenarios: Sequence[str], seeds: Sequence[int])
                                                  "seeds": list(seeds)})
 
 
-def prepare_files(out: Path, inputs: Iterable[Path]) -> dict[str, Any]:
+def prepare_files(out: Path, inputs: Iterable[Path], home_networks: Sequence[str] | None = None
+                  ) -> dict[str, Any]:
+    """
+    Window dataset from labelled files. ``home_networks`` replaces
+    ``network.home_networks`` for direction inference (e.g. 147.32.0.0/16 for
+    CTU-13, whose monitored hosts use public addresses).
+    """
     from unishield.ingest.detect import open_reader
 
+    kwargs: dict[str, Any] = {}
+    if home_networks:
+        from unishield.processing.normalization import Normalizer
+
+        kwargs["normalizer"] = Normalizer(home_networks=list(home_networks))
     records: list[WindowRecord] = []
     names = []
     for path in inputs:
         reader, fmt = open_reader(path)
-        records += windows_from_reader(reader, run=Path(path).name)
-        names.append({"file": str(path), "format": fmt})
-    return _write_dataset(records, out, source={"type": "files", "inputs": names})
+        run = Path(path).name
+        records += windows_from_reader(reader, run=run, **kwargs)
+        names.append({"file": str(path), "format": fmt, "records_read": reader.records_read,
+                      "reader_errors": reader.errors})
+    return _write_dataset(records, out, source={"type": "files", "inputs": names,
+                                                 "home_networks": list(home_networks or [])})
 
 
 def _write_dataset(records: list[WindowRecord], out: Path, source: dict[str, Any]) -> dict[str, Any]:
