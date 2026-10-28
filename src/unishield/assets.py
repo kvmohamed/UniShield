@@ -27,6 +27,11 @@ wins (suppress > info > alert): each matching role explains the behaviour.
 With IP anonymisation on, alerts carry salted hashes: single-address entries
 still match (their hash is indexed); network (CIDR) entries cannot.
 
+Threat intelligence wins over roles: an INTEL_MATCH alert, or any alert an
+imported indicator matched (``evidence["intel_matches"]``), is reported as
+it is even when a role would downgrade or suppress it; the overridden policy
+is recorded in its evidence and counted (``kept_for_intel_match``).
+
 SECURITY CONSTRAINTS:
     - Pure computation over alerts already produced. No lookups, no network I/O.
 """
@@ -222,6 +227,13 @@ class AssetPolicy:
                 kept.append(alert)
                 continue
             role = matches[0].role
+            if alert.threat_class == ThreatClass.INTEL_MATCH or alert.evidence.get("intel_matches"):
+                self.counts[("kept_for_intel_match", alert.threat_class.value, role)] += 1
+                alert.evidence["asset_policy"] = {"action": "alert", "overridden": action,
+                                                  "reason": "an imported threat-intel indicator matched",
+                                                  "matches": [m.to_dict() for m in matches]}
+                kept.append(alert)
+                continue
             self.counts[(action, alert.threat_class.value, role)] += 1
             record = {"action": action, "original_severity": alert.severity.value,
                       "matches": [m.to_dict() for m in matches]}
@@ -259,5 +271,6 @@ class AssetPolicy:
             "assets": len(self.inventory),
             "suppressed": self.suppressed,
             "downgraded_to_info": self.downgraded,
+            "kept_for_intel_match": sum(n for (a, _, _), n in self.counts.items() if a == "kept_for_intel_match"),
             "by_action": by,
         }

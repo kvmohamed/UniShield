@@ -309,7 +309,8 @@ def test_policy_without_assets_changes_nothing():
     alert = Alert(window_start=T0, window_end=T0, threat_class=ThreatClass.PORT_SCAN, severity=Severity.HIGH,
                   confidence=0.9, detector_name="scan_detector", source_ip="10.0.0.1")
     assert policy.apply([alert]) == [alert] and "assets" not in alert.evidence
-    assert policy.stats() == {"assets": 0, "suppressed": 0, "downgraded_to_info": 0, "by_action": {}}
+    assert policy.stats() == {"assets": 0, "suppressed": 0, "downgraded_to_info": 0, "kept_for_intel_match": 0,
+                              "by_action": {}}
 
 
 def test_api_shows_inventory_and_policy_effects(clean_assets, api_client, monkeypatch, tmp_path):
@@ -336,3 +337,28 @@ def test_api_shows_inventory_and_policy_effects(clean_assets, api_client, monkey
 def test_asset_view_needs_a_viewer(client_as):
     assert client_as(None).get("/system/assets").status_code == 401
     assert client_as("viewer").get("/system/assets").status_code == 200
+
+
+class TestThreatIntelWins:
+    def intel(self, address):
+        from unishield.intel.matcher import IntelEntry, IntelMatcher
+
+        return IntelMatcher([IntelEntry("feed", "ip", address, "known exfiltration server")])
+
+    def test_a_role_never_hides_an_intel_match(self):
+        flows = build_scenario("exfil_episodes", 1).flows
+        pipeline = Pipeline(assets=inventory(([EXFIL_DEST], ["backup_server"])), intel=self.intel(EXFIL_DEST))
+        result = pipeline.run(SimulatedReader(flows))
+        exfil = by_class(result, "DATA_EXFILTRATION")
+        assert len(exfil) == 3
+        assert all(a.evidence["asset_policy"] == {
+            "action": "alert", "overridden": "suppress", "reason": "an imported threat-intel indicator matched",
+            "matches": [{"asset": "a0", "role": "backup_server", "side": "destination", "address": EXFIL_DEST}]}
+            for a in exfil)
+        stats = result.summary()["asset_policy"]
+        assert stats["kept_for_intel_match"] == 3 and stats["suppressed"] == 0
+
+    def test_without_a_match_the_role_still_applies(self):
+        flows = build_scenario("exfil_episodes", 1).flows
+        pipeline = Pipeline(assets=inventory(([EXFIL_DEST], ["backup_server"])), intel=self.intel("192.0.2.77"))
+        assert by_class(pipeline.run(SimulatedReader(flows)), "DATA_EXFILTRATION") == []

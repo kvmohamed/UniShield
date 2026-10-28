@@ -580,6 +580,9 @@ Matching rules:
   role. A DNS tunnelling alert without a single source uses its client
   list, and only when that list is complete.
 - When several roles match, the most lenient action wins (suppress > info > alert).
+- Threat intelligence wins over roles: an INTEL_MATCH alert, or an alert an
+  imported indicator matched, is reported unchanged; the overridden policy is
+  in its evidence and counted as `kept_for_intel_match`.
 - With `security.anonymize_ips` on, alerts carry salted hashes. Single
   addresses still match through their hash; networks (CIDR) cannot.
 - Classes a policy handled still count as explained for that window, so
