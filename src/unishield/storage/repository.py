@@ -65,8 +65,8 @@ class AlertRepository:
         self._lock = threading.Lock()
 
     @classmethod
-    def from_url(cls, url: str, echo: bool = False) -> "AlertRepository":
-        return cls(make_engine(url, echo))
+    def from_url(cls, url: str, echo: bool = False, migrate: bool = True) -> "AlertRepository":
+        return cls(make_engine(url, echo, migrate))
 
     @property
     def backend(self) -> str:

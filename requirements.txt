@@ -3,6 +3,7 @@
 # Generated from pyproject.toml on Python 3.12 (do not edit by hand).
 # Regenerate: see 'Updating dependencies' in README.md
 # ============================================================
+alembic==1.20.0
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
@@ -13,6 +14,8 @@ h11==0.16.0
 httptools==0.9.0
 idna==3.20
 joblib==1.6.0
+Mako==1.4.3
+MarkupSafe==3.0.4
 narwhals==2.27.1
 numpy==2.5.4
 opentelemetry-api==1.45.1

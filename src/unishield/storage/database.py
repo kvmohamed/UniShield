@@ -6,6 +6,10 @@ SQLAlchemy engine and schema for alert storage. SQLite is the default
 (``postgresql+psycopg://user:pass@host/db``, driver installed separately).
 The URL comes from ``database.url`` or ``UNISHIELD_DB_URL``.
 
+The tables below describe the schema for queries; the schema itself is
+created and changed by the Alembic revisions in ``migrations/versions``
+(see ``storage/migrate.py``), and a test checks that the two agree.
+
 All queries go through SQLAlchemy expressions with bound parameters; no SQL
 is built from request strings. Times are stored as naive UTC and returned
 as timezone-aware UTC.
@@ -111,8 +115,11 @@ intel_imports_table = Table(
 )
 
 
-def make_engine(url: str, echo: bool = False) -> Engine:
-    """Engine for ``url`` with the schema created. In-memory SQLite shares one connection."""
+def make_engine(url: str, echo: bool = False, migrate: bool = True) -> Engine:
+    """
+    Engine for ``url``. In-memory SQLite shares one connection. With
+    ``migrate`` the database is upgraded to the latest schema revision.
+    """
     kwargs: dict = {"echo": echo, "future": True}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
@@ -130,5 +137,8 @@ def make_engine(url: str, echo: bool = False) -> Engine:
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
-    metadata.create_all(engine)
+    if migrate:
+        from unishield.storage import migrate as migrations
+
+        migrations.upgrade(engine)
     return engine

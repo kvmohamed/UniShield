@@ -29,7 +29,7 @@ from unishield.api.security import DASHBOARD_CSP, SECURITY_HEADERS, auth_mode
 from unishield.api.state import AppContext
 from unishield.config import get_config
 from unishield.logging_config import setup_logging
-from unishield.storage import AlertRepository
+from unishield.storage import AlertRepository, migrate
 
 logger = logging.getLogger("unishield.api")
 
@@ -43,11 +43,14 @@ def create_app(repository: AlertRepository | None = None) -> FastAPI:
     async def lifespan(_app: FastAPI):
         config = get_config()
         setup_logging(log_level=config.log_level)
+        ctx: AppContext = _app.state.ctx
+        if not migrate.is_current(ctx.repository.engine):
+            raise RuntimeError(f"Database schema is at revision {migrate.current_revision(ctx.repository.engine)}, "
+                               f"expected {migrate.head_revision()}: run 'unishield-admin db upgrade'")
         logger.info("UniShield API starting (env=%s, read_only=%s, admin auth=%s, detection mode=%s)",
                     config.environment, config.security.read_only_mode, auth_mode(),
                     config.models.detection_mode)
         yield
-        ctx: AppContext = _app.state.ctx
         ctx.stop_replay()
         ctx.stop_outputs()
 

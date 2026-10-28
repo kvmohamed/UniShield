@@ -117,6 +117,10 @@ class DatabaseConfig(BaseModel):
     url: str = "sqlite:///./data/unishield.db"
     echo: bool = False
     pool_size: int = 5
+    # Apply pending schema migrations when the API starts. When false, run
+    # ``unishield-admin db upgrade`` yourself; the API refuses to start on an
+    # outdated schema.
+    auto_migrate: bool = True
 
 
 class ProcessingConfig(BaseModel):

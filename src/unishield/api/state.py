@@ -67,7 +67,7 @@ class AppContext:
             with self._lock:
                 if self._repository is None:
                     cfg = get_config().database
-                    self._repository = AlertRepository.from_url(cfg.url, cfg.echo)
+                    self._repository = AlertRepository.from_url(cfg.url, cfg.echo, cfg.auto_migrate)
         return self._repository
 
     def use_repository(self, repository: AlertRepository) -> None:

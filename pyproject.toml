@@ -32,7 +32,11 @@ dependencies = [
     "scapy>=2.5",
     "psutil>=5.9",
     "sqlalchemy>=2.0",
+    "alembic>=1.13",
 ]
+
+[project.scripts]
+unishield-admin = "unishield.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -55,7 +59,7 @@ ml = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-unishield = ["dashboard/*.html"]
+unishield = ["dashboard/*.html", "storage/migrations/script.py.mako"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
