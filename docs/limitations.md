@@ -73,9 +73,17 @@
     supervised scores in `reports/model_evaluation.md` are optimistic; the
     leave-one-attack-out results show that unseen attack types are mostly
     missed by the supervised model.
-12. **No public-dataset results are included.** The pipeline reads CICIDS2017
-    CSVs and CTU-13 labels (`scripts/prepare_dataset.py --input ...`), but
-    those datasets were not downloaded or evaluated here.
+12. **Real-traffic results are limited and show low precision.** On five
+    CTU-13 scenarios (`reports/public_dataset_evaluation.md`) the default
+    rules flagged infected hosts in four of five scenarios (8 of 15 hosts),
+    but only 1–5 % of alerts named an infected host: beaconing, exfiltration
+    and scan rules tuned on synthetic data fire on a university network's
+    polling, peer-to-peer and upload traffic. There is no spam rule, bots
+    with very few flows are invisible, and the DDoS thresholds suit high-rate
+    floods only. The synthetic-trained window model does not transfer to real
+    windows (ROC-AUC 0.53). CTU-13 "Background" traffic is unverified, the
+    site-tuning features were not applied, and CIC-IDS2017 has not been
+    evaluated (its download needs a registration the user completes).
 13. **Calibration is distribution-specific.** Probabilities are calibrated on
     held-out runs of the same generator and may be miscalibrated elsewhere.
 14. **Window labels.** A window counts as an attack window if it contains any

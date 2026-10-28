@@ -1,0 +1,534 @@
+{
+  "generated_at": "2026-10-28 19:58 UTC",
+  "datasets": [
+    {
+      "dataset": "CTU-13 (Stratosphere Lab, CTU Prague, 2011)",
+      "key": "ctu13",
+      "description": "Botnet captures in a university network, as Argus bidirectional flows with labels Botnet / Normal / Background.",
+      "home_networks": [
+        "147.32.0.0/16"
+      ],
+      "caveats": [
+        "Background flows are unverified university traffic and are counted as benign; some may be malicious or misconfigured, so 'other hosts named' is an upper bound on false positives.",
+        "Botnet flows mix C2, spam, scanning and DDoS and are labelled BOTNET; window labels are binary here, so class-level accuracy is not measured.",
+        "Argus exports have no DNS names or TLS fields, so the DNS and encrypted-session detectors cannot fire.",
+        "Timestamps are local capture time read as UTC (consistent within a file).",
+        "Findings from inspecting the 2026-10 run: scenario 6's bot sends spam (4,398 failed SMTP attempts to at most 15 mail servers per 10 s, under the 20-host HOST_SCAN threshold; UniShield has no spam rule) and was caught only by its C2 beacon after about 6,300 s; scenario 7's bot made 63 flows in 21 minutes, too few for any rule; scenario 11's ICMP flood reaches only about 60 packets/s at the capture point, far below the 10,000 packets/s volumetric threshold.",
+        "Most other alerts name hosts inside 147.32.0.0/16: regular polling and peer-to-peer traffic (HTTP, SSH attempts, BitTorrent, POP3 were seen behind beacon alerts) raises C2_BEACONING, large uploads raise DATA_EXFILTRATION, and failed connection bursts raise PORT_SCAN. Default thresholds were tuned on synthetic traffic; the asset inventory and learning mode exist for this, but were not applied here."
+      ],
+      "files": [
+        {
+          "name": "scenario11_capture20110818-2.binetflow",
+          "format": "flow_csv",
+          "records": 107248,
+          "reader_errors": 3,
+          "traffic_hours": 0.27,
+          "labels": {
+            "BENIGN": 99084,
+            "BOTNET": 8164
+          },
+          "window": {
+            "windows": 196,
+            "attack_windows": 37,
+            "rules": {
+              "tp": 34,
+              "fp": 128,
+              "tn": 31,
+              "fn": 3,
+              "precision": 0.2099,
+              "recall": 0.9189,
+              "f1": 0.3417,
+              "false_positive_rate": 0.805,
+              "accuracy": 0.3316,
+              "recall_by_class": {
+                "BOTNET": 0.9189
+              },
+              "episodes": 1,
+              "episodes_detected": 1,
+              "episode_recall": 1.0,
+              "delay_median_sec": 0.0
+            },
+            "rules_statistical": {
+              "tp": 34,
+              "fp": 128,
+              "tn": 31,
+              "fn": 3,
+              "precision": 0.2099,
+              "recall": 0.9189,
+              "f1": 0.3417,
+              "false_positive_rate": 0.805,
+              "accuracy": 0.3316,
+              "recall_by_class": {
+                "BOTNET": 0.9189
+              },
+              "episodes": 1,
+              "episodes_detected": 1,
+              "episode_recall": 1.0,
+              "delay_median_sec": 0.0
+            }
+          },
+          "host": {
+            "attack_hosts": 3,
+            "attack_hosts_detected": 3,
+            "alerts": 61,
+            "alerts_involving_attack_hosts": 3,
+            "alert_precision_host_level": 0.0492,
+            "other_hosts_named": 70,
+            "first_alert_delay_sec": [
+              37.5,
+              77.0,
+              80.8
+            ],
+            "alerts_by_class": {
+              "C2_BEACONING": {
+                "alerts": 54,
+                "involving_attack_hosts": 0
+              },
+              "DATA_EXFILTRATION": {
+                "alerts": 2,
+                "involving_attack_hosts": 0
+              },
+              "DDOS_VOLUMETRIC": {
+                "alerts": 2,
+                "involving_attack_hosts": 0
+              },
+              "PORT_SCAN": {
+                "alerts": 3,
+                "involving_attack_hosts": 3
+              }
+            }
+          }
+        },
+        {
+          "name": "scenario12_capture20110819.binetflow",
+          "format": "flow_csv",
+          "records": 325468,
+          "reader_errors": 3,
+          "traffic_hours": 1.72,
+          "labels": {
+            "BENIGN": 323300,
+            "BOTNET": 2168
+          },
+          "window": {
+            "windows": 894,
+            "attack_windows": 394,
+            "rules": {
+              "tp": 389,
+              "fp": 468,
+              "tn": 32,
+              "fn": 5,
+              "precision": 0.4539,
+              "recall": 0.9873,
+              "f1": 0.6219,
+              "false_positive_rate": 0.936,
+              "accuracy": 0.4709,
+              "recall_by_class": {
+                "BOTNET": 0.9873
+              },
+              "episodes": 1,
+              "episodes_detected": 1,
+              "episode_recall": 1.0,
+              "delay_median_sec": 0.0
+            },
+            "rules_statistical": {
+              "tp": 389,
+              "fp": 468,
+              "tn": 32,
+              "fn": 5,
+              "precision": 0.4539,
+              "recall": 0.9873,
+              "f1": 0.6219,
+              "false_positive_rate": 0.936,
+              "accuracy": 0.4709,
+              "recall_by_class": {
+                "BOTNET": 0.9873
+              },
+              "episodes": 1,
+              "episodes_detected": 1,
+              "episode_recall": 1.0,
+              "delay_median_sec": 0.0
+            }
+          },
+          "host": {
+            "attack_hosts": 9,
+            "attack_hosts_detected": 3,
+            "alerts": 313,
+            "alerts_involving_attack_hosts": 5,
+            "alert_precision_host_level": 0.016,
+            "other_hosts_named": 199,
+            "first_alert_delay_sec": [
+              118.6,
+              140.1,
+              179.9
+            ],
+            "alerts_by_class": {
+              "C2_BEACONING": {
+                "alerts": 208,
+                "involving_attack_hosts": 0
+              },
+              "DATA_EXFILTRATION": {
+                "alerts": 88,
+                "involving_attack_hosts": 0
+              },
+              "HOST_SCAN": {
+                "alerts": 3,
+                "involving_attack_hosts": 2
+              },
+              "PORT_SCAN": {
+                "alerts": 14,
+                "involving_attack_hosts": 3
+              }
+            }
+          }
+        },
+        {
+          "name": "scenario5_capture20110815-2.binetflow",
+          "format": "flow_csv",
+          "records": 129831,
+          "reader_errors": 1,
+          "traffic_hours": 0.5,
+          "labels": {
+            "BENIGN": 128930,
+            "BOTNET": 901
+          },
+          "window": {
+            "windows": 363,
+            "attack_windows": 223,
+            "rules": {
+              "tp": 218,
+              "fp": 122,
+              "tn": 18,
+              "fn": 5,
+              "precision": 0.6412,
+              "recall": 0.9776,
+              "f1": 0.7744,
+              "false_positive_rate": 0.8714,
+              "accuracy": 0.6501,
+              "recall_by_class": {
+                "BOTNET": 0.9776
+              },
+              "episodes": 1,
+              "episodes_detected": 1,
+              "episode_recall": 1.0,
+              "delay_median_sec": 0.0
+            },
+            "rules_statistical": {
+              "tp": 218,
+              "fp": 122,
+              "tn": 18,
+              "fn": 5,
+              "precision": 0.6412,
+              "recall": 0.9776,
+              "f1": 0.7744,
+              "false_positive_rate": 0.8714,
+              "accuracy": 0.6501,
+              "recall_by_class": {
+                "BOTNET": 0.9776
+              },
+              "episodes": 1,
+              "episodes_detected": 1,
+              "episode_recall": 1.0,
+              "delay_median_sec": 0.0
+            }
+          },
+          "host": {
+            "attack_hosts": 1,
+            "attack_hosts_detected": 1,
+            "alerts": 46,
+            "alerts_involving_attack_hosts": 1,
+            "alert_precision_host_level": 0.0217,
+            "other_hosts_named": 40,
+            "first_alert_delay_sec": [
+              719.1
+            ],
+            "alerts_by_class": {
+              "C2_BEACONING": {
+                "alerts": 40,
+                "involving_attack_hosts": 0
+              },
+              "DATA_EXFILTRATION": {
+                "alerts": 4,
+                "involving_attack_hosts": 1
+              },
+              "HOST_SCAN": {
+                "alerts": 2,
+                "involving_attack_hosts": 0
+              }
+            }
+          }
+        },
+        {
+          "name": "scenario6_capture20110816.binetflow",
+          "format": "flow_csv",
+          "records": 558914,
+          "reader_errors": 5,
+          "traffic_hours": 2.15,
+          "labels": {
+            "BENIGN": 554284,
+            "BOTNET": 4630
+          },
+          "window": {
+            "windows": 1552,
+            "attack_windows": 1142,
+            "rules": {
+              "tp": 1124,
+              "fp": 394,
+              "tn": 16,
+              "fn": 18,
+              "precision": 0.7404,
+              "recall": 0.9842,
+              "f1": 0.8451,
+              "false_positive_rate": 0.961,
+              "accuracy": 0.7345,
+              "recall_by_class": {
+                "BOTNET": 0.9842
+              },
+              "episodes": 2,
+              "episodes_detected": 1,
+              "episode_recall": 0.5,
+              "delay_median_sec": 0.0
+            },
+            "rules_statistical": {
+              "tp": 1124,
+              "fp": 394,
+              "tn": 16,
+              "fn": 18,
+              "precision": 0.7404,
+              "recall": 0.9842,
+              "f1": 0.8451,
+              "false_positive_rate": 0.961,
+              "accuracy": 0.7345,
+              "recall_by_class": {
+                "BOTNET": 0.9842
+              },
+              "episodes": 2,
+              "episodes_detected": 1,
+              "episode_recall": 0.5,
+              "delay_median_sec": 0.0
+            }
+          },
+          "host": {
+            "attack_hosts": 1,
+            "attack_hosts_detected": 1,
+            "alerts": 557,
+            "alerts_involving_attack_hosts": 4,
+            "alert_precision_host_level": 0.0072,
+            "other_hosts_named": 197,
+            "first_alert_delay_sec": [
+              6266.3
+            ],
+            "alerts_by_class": {
+              "C2_BEACONING": {
+                "alerts": 396,
+                "involving_attack_hosts": 4
+              },
+              "DATA_EXFILTRATION": {
+                "alerts": 81,
+                "involving_attack_hosts": 0
+              },
+              "DDOS_VOLUMETRIC": {
+                "alerts": 1,
+                "involving_attack_hosts": 0
+              },
+              "HOST_SCAN": {
+                "alerts": 10,
+                "involving_attack_hosts": 0
+              },
+              "PORT_SCAN": {
+                "alerts": 69,
+                "involving_attack_hosts": 0
+              }
+            }
+          }
+        },
+        {
+          "name": "scenario7_capture20110816-2.binetflow",
+          "format": "flow_csv",
+          "records": 114075,
+          "reader_errors": 2,
+          "traffic_hours": 0.35,
+          "labels": {
+            "BENIGN": 114012,
+            "BOTNET": 63
+          },
+          "window": {
+            "windows": 258,
+            "attack_windows": 17,
+            "rules": {
+              "tp": 16,
+              "fp": 233,
+              "tn": 8,
+              "fn": 1,
+              "precision": 0.0643,
+              "recall": 0.9412,
+              "f1": 0.1204,
+              "false_positive_rate": 0.9668,
+              "accuracy": 0.093,
+              "recall_by_class": {
+                "BOTNET": 0.9412
+              },
+              "episodes": 1,
+              "episodes_detected": 1,
+              "episode_recall": 1.0,
+              "delay_median_sec": 0.0
+            },
+            "rules_statistical": {
+              "tp": 16,
+              "fp": 233,
+              "tn": 8,
+              "fn": 1,
+              "precision": 0.0643,
+              "recall": 0.9412,
+              "f1": 0.1204,
+              "false_positive_rate": 0.9668,
+              "accuracy": 0.093,
+              "recall_by_class": {
+                "BOTNET": 0.9412
+              },
+              "episodes": 1,
+              "episodes_detected": 1,
+              "episode_recall": 1.0,
+              "delay_median_sec": 0.0
+            }
+          },
+          "host": {
+            "attack_hosts": 1,
+            "attack_hosts_detected": 0,
+            "alerts": 84,
+            "alerts_involving_attack_hosts": 0,
+            "alert_precision_host_level": 0.0,
+            "other_hosts_named": 69,
+            "first_alert_delay_sec": [],
+            "alerts_by_class": {
+              "C2_BEACONING": {
+                "alerts": 30,
+                "involving_attack_hosts": 0
+              },
+              "DATA_EXFILTRATION": {
+                "alerts": 28,
+                "involving_attack_hosts": 0
+              },
+              "DDOS_VOLUMETRIC": {
+                "alerts": 5,
+                "involving_attack_hosts": 0
+              },
+              "HOST_SCAN": {
+                "alerts": 3,
+                "involving_attack_hosts": 0
+              },
+              "PORT_SCAN": {
+                "alerts": 18,
+                "involving_attack_hosts": 0
+              }
+            }
+          }
+        }
+      ],
+      "cross_domain": {
+        "trained_on": "windows_synthetic.csv",
+        "train_windows": 13757,
+        "pr_auc": 0.569,
+        "roc_auc": 0.5262,
+        "at_0.5": {
+          "precision": 0.5573,
+          "recall": 1.0,
+          "f1": 0.7157,
+          "false_positive_rate": 0.9931
+        },
+        "at_0.9": {
+          "precision": 0.5572,
+          "recall": 0.9994,
+          "f1": 0.7155,
+          "false_positive_rate": 0.9931
+        }
+      },
+      "leave_one_file_out": {
+        "scenario11_capture20110818-2.binetflow": {
+          "calibrated": true,
+          "pr_auc": 0.3044,
+          "roc_auc": 0.7234,
+          "at_0.5": {
+            "precision": 0.292,
+            "recall": 0.8919,
+            "f1": 0.44,
+            "false_positive_rate": 0.5031
+          },
+          "at_0.9": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "false_positive_rate": 0.0
+          }
+        },
+        "scenario12_capture20110819.binetflow": {
+          "calibrated": true,
+          "pr_auc": 0.4648,
+          "roc_auc": 0.5319,
+          "at_0.5": {
+            "precision": 0.44,
+            "recall": 0.4467,
+            "f1": 0.4433,
+            "false_positive_rate": 0.448
+          },
+          "at_0.9": {
+            "precision": 0.4819,
+            "recall": 0.1015,
+            "f1": 0.1677,
+            "false_positive_rate": 0.086
+          }
+        },
+        "scenario5_capture20110815-2.binetflow": {
+          "calibrated": true,
+          "pr_auc": 0.7044,
+          "roc_auc": 0.6606,
+          "at_0.5": {
+            "precision": 0.6627,
+            "recall": 0.9955,
+            "f1": 0.7957,
+            "false_positive_rate": 0.8071
+          },
+          "at_0.9": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "false_positive_rate": 0.0
+          }
+        },
+        "scenario6_capture20110816.binetflow": {
+          "calibrated": true,
+          "pr_auc": 0.7442,
+          "roc_auc": 0.524,
+          "at_0.5": {
+            "precision": 0.7524,
+            "recall": 0.9501,
+            "f1": 0.8398,
+            "false_positive_rate": 0.8707
+          },
+          "at_0.9": {
+            "precision": 0.6903,
+            "recall": 0.0683,
+            "f1": 0.1243,
+            "false_positive_rate": 0.0854
+          }
+        },
+        "scenario7_capture20110816-2.binetflow": {
+          "calibrated": true,
+          "pr_auc": 0.0541,
+          "roc_auc": 0.3298,
+          "at_0.5": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "false_positive_rate": 0.2158
+          },
+          "at_0.9": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "false_positive_rate": 0.0207
+          }
+        }
+      }
+    }
+  ]
+}

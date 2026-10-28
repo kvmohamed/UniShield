@@ -58,7 +58,37 @@ PCAP, a 3,000-packet SYN-flood PCAP, Zeek JSON and TSV logs, flow CSV/JSONL
 and a CICIDS2017-style CSV). Packets are written to files with scapy; none is
 sent.
 
-## Public datasets (supported, not evaluated)
+## Public datasets
+
+### CTU-13 (evaluated)
+
+Five scenarios were downloaded from the official Stratosphere Lab server
+(`mcfp.felk.cvut.cz/publicDatasets/CTU-Malware-Capture-Botnet-<n>/detailed-bidirectional-flow-labels/`)
+into `data/raw/ctu13/` (git-ignored), chosen for five different botnets:
+scenarios 5 (Virut), 6 (Menti), 7 (Sogou), 11 (Rbot) and 12 (NSIS.ay) —
+1,235,536 Argus bidirectional flows, about 5 hours of traffic in total, 15,926 of
+them labelled botnet. The `ctu13` flow-reader profile reads them
+(`.binetflow`, detected from the header), translating Argus states to the
+connection states the detectors use. The monitored network is
+147.32.0.0/16, passed with `--home-networks`. Results:
+`reports/public_dataset_evaluation.md`.
+
+```bash
+python scripts/evaluate_public_datasets.py --ctu13 "data/raw/ctu13/*.binetflow"
+```
+
+### CIC-IDS2017 (supported, not yet evaluated)
+
+Its official download (UNB / Canadian Institute for Cybersecurity) asks for a
+registration form. Use the **GeneratedLabelledFlows / TrafficLabelling** CSVs —
+the "MachineLearningCSV" files have no addresses or timestamps and cannot be
+replayed — in `data/raw/cicids2017/`, then:
+
+```bash
+python scripts/evaluate_public_datasets.py --cicids "data/raw/cicids2017/*.csv"
+```
+
+### Label mapping
 
 The readers accept the formats of common research datasets, and
 `normalise_label` maps their labels to UniShield classes:
@@ -66,7 +96,7 @@ The readers accept the formats of common research datasets, and
 | Dataset | Input | Label mapping |
 |---|---|---|
 | CICIDS2017 / CSE-CIC-IDS2018 | flow CSV (detected automatically) | DDoS → DDOS_VOLUMETRIC, DoS * → DDOS_PROTOCOL, PortScan → PORT_SCAN, Bot → C2_BEACONING, Infiltration → DATA_EXFILTRATION, others → ATTACK |
-| CTU-13 | binetflow labels | `flow=From-Botnet…` → C2_BEACONING, background/normal → BENIGN |
+| CTU-13 | binetflow (`ctu13` profile) | `flow=From-Botnet…` / `flow=To-Botnet…` → BOTNET (C2, spam, scans and floods mixed), background/normal → BENIGN |
 | Any Zeek deployment | `conn.log` (+`dns.log`, `ssl.log`) | needs a `label` field for evaluation |
 
 ```bash

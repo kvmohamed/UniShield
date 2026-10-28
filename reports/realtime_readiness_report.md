@@ -543,3 +543,16 @@ Branch `claude/heuristic-stonebraker-eec873`, rebased onto `main` @ `3eede09` (t
 Exit results on the development machine (Windows 10, Python 3.12.10): `pytest -q -W error::DeprecationWarning` → **754 passed, 5 skipped** (the PostgreSQL tests, which skip without `UNISHIELD_TEST_POSTGRES_URL`; they passed separately against PostgreSQL), 6 performance tests deselected; `scripts/verify_passive_mode.py` → PASSED (0 static findings outside the outbound transport's scoped allowance, 0 unexpected attempts, login flow included).
 
 Not verified here: the new CI jobs and the Ubuntu/Windows matrix on these commits (not pushed); `systemd-analyze verify` and `nginx -t` (CI only; no systemd or nginx on this machine); the Caddy example and the NSSM instructions; the Docker build.
+
+### Public-dataset evaluation: CTU-13 (2026-10-29)
+
+| Item | Change | Evidence |
+|---|---|---|
+| CTU-13 reader | `ctu13` flow-reader profile for Argus `.binetflow`: column mapping, reply bytes from TotBytes − SrcBytes, Argus states → S0/REJ/SF/S1/RST/OTH with originator TCP flags. | `tests/unit/test_ctu13.py` |
+| Labels | CTU-13 botnet flows labelled BOTNET instead of C2_BEACONING (they mix C2, spam, scans and floods); `prepare_dataset.py --home-networks`. | `tests/unit/test_models.py` |
+| Evaluation | `evaluation/public.py` + `scripts/evaluate_public_datasets.py`: host-level, window-level, cross-domain and leave-one-file-out scoring. | `tests/unit/test_public_eval.py` |
+| Volume features | Volumetric target chosen among the top 5 destinations by packets by peak rate, so long transfers to a busy host cannot hide a short flood elsewhere. | `tests/unit/test_ddos.py` |
+
+Run on five scenarios (5, 6, 7, 11, 12; 1,235,536 flows, ~5 h of traffic), default thresholds: infected hosts flagged in 4/5 scenarios (8/15 hosts), but 1–5 % of alerts name an infected host. False alerts come mainly from beaconing (regular polling, P2P), exfiltration (uploads) and scan rules on internal hosts. Misses: scenario 6 spam (no spam rule; under the HOST_SCAN fan-out threshold), scenario 7 (63 botnet flows), scenario 11's ICMP flood (~60 packets/s at the capture point). Synthetic-trained window model on real windows: ROC-AUC 0.53; leave-one-scenario-out: 0.33–0.72.
+
+Not done: CIC-IDS2017 (download needs the user's registration), site tuning (asset inventory, learning mode) on CTU-13, the remaining eight CTU-13 scenarios.

@@ -201,6 +201,30 @@ scores are optimistic: trained without a class, the random forest misses
 most unseen attack types (leave-one-attack-out table in the report). See
 [docs/model_card.md](docs/model_card.md) and [docs/evaluation.md](docs/evaluation.md).
 
+**Real traffic: CTU-13** (`reports/public_dataset_evaluation.md`, five botnet
+scenarios, 1.24 million Argus flows from a university network, default
+thresholds with no tuning):
+
+| Scenario (botnet) | Infected hosts flagged | Alerts | Alerts naming an infected host | First alert after first botnet flow |
+|---|---|---|---|---|
+| 5 (Virut) | 1/1 | 46 | 1 | 719 s |
+| 6 (Menti, spam) | 1/1 | 557 | 4 | 6,266 s |
+| 7 (Sogou, 63 botnet flows) | 0/1 | 84 | 0 | – |
+| 11 (Rbot) | 3/3 | 61 | 3 | 38–81 s |
+| 12 (NSIS.ay, P2P) | 3/9 | 313 | 5 | 119–180 s |
+
+Infected hosts were flagged in four of five scenarios (8 of 15 hosts), but
+only 1–5 % of alerts name an infected host: on a busy real network the
+beaconing, exfiltration and scan rules tuned on synthetic data fire on
+regular polling, peer-to-peer traffic and large uploads. Gaps found: no spam
+rule (scenario 6), very low-volume bots are invisible (scenario 7), and the
+DDoS thresholds suit high-rate floods only (scenario 11's ICMP flood is about
+60 packets/s at the capture point). The window model trained on synthetic data
+does not transfer (ROC-AUC 0.53 on these windows), and one trained on four
+scenarios and tested on the fifth reaches ROC-AUC 0.33–0.72. Site tuning
+(asset inventory, learning mode) was not applied; CTU-13 "Background" traffic
+is unverified and counted as benign. CIC-IDS2017 is not evaluated yet.
+
 **Soak test** (`reports/soak_test.md`, 30 minutes of wall time at 1,000
 records/s covering 4 h of synthetic site traffic, state snapshots every
 60 s): 1,818,250 records with 0 errors; lag behind schedule stayed below
@@ -359,7 +383,7 @@ Not a live sensor (files and replayed streams only), not a SOC or IPS, no
 payload inspection; default thresholds tuned on synthetic data (learning
 mode assumes an attack-free learning period and has only been exercised on
 synthetic site traffic); asset roles are trust decisions; models trained on
-synthetic data and weak on unseen attack types; single process; threat-intel
+synthetic data and weak on unseen attack types; on real CTU-13 traffic the default rules flag most infected hosts but with low alert precision (see results); single process; threat-intel
 matching only as good as the imported lists; outputs tested against
 UniShield's own loopback receivers, not specific SIEM products; local
 accounts only (no SSO or MFA). Full list:
