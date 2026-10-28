@@ -33,6 +33,7 @@ from sqlalchemy import (
     MetaData,
     String,
     Table,
+    Connection,
     create_engine,
     event,
     false,
@@ -184,18 +185,63 @@ api_tokens_table = Table(
     Column("revoked_at", DateTime),
 )
 
-_WRITE_LOCKS: "weakref.WeakKeyDictionary[Engine, threading.Lock]" = weakref.WeakKeyDictionary()
+_WRITE_LOCKS: "weakref.WeakKeyDictionary[Engine, threading.RLock]" = weakref.WeakKeyDictionary()
 _WRITE_LOCKS_GUARD = threading.Lock()
 
 
-def write_lock(engine: Engine) -> threading.Lock:
+def write_lock(engine: Engine) -> threading.RLock:
     """One lock per engine, shared by every store writing through it (the pipeline thread and API
-    requests share one SQLite database, and in-memory SQLite shares a single connection)."""
+    requests share one SQLite database, and in-memory SQLite shares a single connection).
+    Re-entrant: for in-memory SQLite the same lock also guards every use of the connection."""
     with _WRITE_LOCKS_GUARD:
         lock = _WRITE_LOCKS.get(engine)
         if lock is None:
-            lock = _WRITE_LOCKS[engine] = threading.Lock()
+            lock = _WRITE_LOCKS[engine] = threading.RLock()
         return lock
+
+
+class _SerialisedConnection(Connection):
+    """
+    Connection of an in-memory SQLite engine. Holds the engine's write lock
+    from open to close, so only one thread at a time uses the single shared
+    database connection (see ``_serialise_shared_connection``).
+    """
+
+    def __init__(self, engine: Engine, *args, **kwargs):
+        self._guard = write_lock(engine)
+        self._guard.acquire()
+        self._guard_held = True
+        try:
+            super().__init__(engine, *args, **kwargs)
+        except BaseException:
+            self._release_guard()
+            raise
+
+    def _release_guard(self) -> None:
+        if self._guard_held:
+            self._guard_held = False
+            self._guard.release()
+
+    def close(self) -> None:
+        try:
+            super().close()
+        finally:
+            self._release_guard()
+
+
+def _serialise_shared_connection(engine: Engine) -> None:
+    """
+    In-memory SQLite has one connection shared by every thread (StaticPool).
+    Closing a SQLAlchemy connection rolls back its transaction on that shared
+    connection, so a reader in one thread finishing while a writer in another
+    was inside its transaction silently undid the write (seen as alerts
+    missing from a replay polled through the API). Every connection of such
+    an engine now holds the engine's write lock (the one all stores already
+    take to write) from open to close. It is re-entrant, so a writer that
+    holds it opens its connection without an ordering problem. File
+    databases and PostgreSQL keep separate connections and are unaffected.
+    """
+    engine._connection_cls = _SerialisedConnection
 
 
 def make_engine(url: str, echo: bool = False, migrate: bool = True) -> Engine:
@@ -213,6 +259,8 @@ def make_engine(url: str, echo: bool = False, migrate: bool = True) -> Engine:
             if db_path:
                 Path(db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(url, **kwargs)
+    if kwargs.get("poolclass") is StaticPool:
+        _serialise_shared_connection(engine)
     if url.startswith("sqlite"):
         @event.listens_for(engine, "connect")
         def _sqlite_pragmas(dbapi_connection, _record):       # pragma: no cover - driver hook
