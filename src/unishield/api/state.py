@@ -12,6 +12,13 @@ Replays run the pipeline in a background thread with the imported
 indicators loaded at start; alerts are written to the repository as the
 pipeline emits them, so they are visible through the API while the replay
 is still running, and then handed to the output service.
+
+Lifecycle (driven by the application's lifespan): ``start_services``
+records ``system.start`` with the security-relevant configuration and
+starts housekeeping; ``shutdown`` (SIGTERM / Ctrl+C under uvicorn) stops
+housekeeping and any replay, waits for the replay to record its state,
+drains the output service, records ``system.stop`` and releases the
+database connections.
 """
 
 from __future__ import annotations
@@ -22,15 +29,16 @@ import time
 import uuid
 from typing import Any, Optional
 
-from unishield.accounts import AccountStore
+from unishield.accounts import AccountStore, Role
 from unishield.accounts.ratelimit import LoginRateLimiter
-from unishield.config import get_config
+from unishield.config import UnishieldConfig, get_config
 from unishield.export.service import OutputService
 from unishield.intel.matcher import IntelMatcher
 from unishield.intel.store import IntelStore
 from unishield.processing.pipeline import Pipeline
 from unishield.schemas.alert import Alert
-from unishield.storage import AlertRepository, AuditLog
+from unishield.storage import AlertRepository, AuditLog, AuditQuery, migrate
+from unishield.storage.retention import MaintenanceWorker, housekeeping
 
 logger = logging.getLogger("unishield.api.state")
 
@@ -49,6 +57,26 @@ _IDLE = {
 }
 
 
+def config_summary(config: UnishieldConfig) -> dict[str, Any]:
+    """Configuration that affects security and data handling (no secrets, no database credentials)."""
+    return {
+        "environment": config.environment,
+        "auth_mode": config.auth.mode,
+        "cookie_secure": config.auth.cookie_secure,
+        "session_ttl_minutes": config.auth.session_ttl_minutes,
+        "session_idle_minutes": config.auth.session_idle_minutes,
+        "max_failed_logins": config.auth.max_failed_logins,
+        "static_api_key": bool(config.api.admin_api_key),
+        "static_api_key_role": config.api.api_key_role if config.api.admin_api_key else None,
+        "docs_enabled": config.api.docs_enabled,
+        "cors_origins": list(config.api.cors_origins),
+        "database_backend": config.database.url.split(":", 1)[0].split("+", 1)[0],
+        "alert_retention_days": config.retention.alert_days,
+        "detection_mode": config.models.detection_mode,
+        "anonymize_ips": config.security.anonymize_ips,
+    }
+
+
 class AppContext:
     """State shared by the API routes of one application instance."""
 
@@ -64,6 +92,8 @@ class AppContext:
         self.replay: dict[str, Any] = dict(_IDLE)
         self.pipeline: Optional[Pipeline] = None
         self.thread: Optional[threading.Thread] = None
+        self.maintenance: Optional[MaintenanceWorker] = None
+        self._model_status: Optional[str] = None
 
     # --- storage ------------------------------------------------------------
 
@@ -203,6 +233,122 @@ class AppContext:
         start, end = state.get("started_at"), state.get("finished_at")
         state["elapsed_seconds"] = round((end or time.time()) - start, 3) if start else 0.0
         return state
+
+    # --- service lifecycle ----------------------------------------------------------
+
+    def start_services(self) -> None:
+        config = get_config()
+        summary = config_summary(config)
+        previous, _ = self.audit.list(AuditQuery(action="system.start", limit=1))
+        changed = sorted(k for k, v in summary.items()
+                         if previous and previous[0]["details"].get(k, v) != v) if previous else []
+        from unishield import __version__
+
+        self.audit.record("system.start", details=dict(summary, version=__version__, changed_since_last_start=changed))
+        self._model_status = self._check_models()
+        self.maintenance = MaintenanceWorker(self.housekeeping, config.retention.interval_minutes * 60)
+        self.maintenance.start()
+
+    def housekeeping(self) -> dict[str, Any]:
+        config = get_config()
+        return housekeeping(self.repository, self.accounts, self.audit, config.retention.alert_days,
+                            config.auth.session_idle_minutes)
+
+    def shutdown(self, timeout: float) -> dict[str, Any]:
+        """Stop housekeeping and any replay (waiting up to ``timeout`` s), record the stop, release the database."""
+        if self.maintenance is not None:
+            self.maintenance.stop()
+        run_id = self.replay.get("run_id") if self.running else None
+        clean = True
+        if run_id:
+            logger.info("Shutting down: stopping replay %s", run_id)
+            self.stop_replay()
+            self.wait(timeout)
+            if self.thread is not None and self.thread.is_alive():
+                clean = False
+                logger.warning("Replay %s did not stop within %.0f s; recording it as interrupted", run_id, timeout)
+                self.replay.update(status="interrupted", finished_at=time.time())
+                try:
+                    self.repository.finish_run(run_id, "interrupted", None)
+                except Exception as e:                    # pragma: no cover - defensive
+                    logger.error("Could not record run %s: %s", run_id, e)
+        self.stop_outputs()                               # deliver queued exports/notifications, then stop
+        result = {"replay_stopped": run_id, "replay_finished_cleanly": clean}
+        try:
+            self.audit.record("system.stop", details=result)
+        except Exception as e:                            # pragma: no cover - database already gone
+            logger.error("Could not record the shutdown: %s", e)
+        self.repository.engine.dispose()
+        return result
+
+    # --- health ------------------------------------------------------------------------
+
+    def _check_models(self) -> str:
+        models = get_config().models
+        if models.detection_mode == "rules":
+            return "not used (rules mode)"
+        from unishield.models.registry import ModelRegistry
+
+        try:
+            results = ModelRegistry().verify(models.window_model)
+        except Exception as e:                            # pragma: no cover - unreadable registry
+            return f"error: {e}"
+        if not results:
+            return "missing (falls back to rules)"
+        return {"ok": "ok", "missing": "artifact missing", "mismatch": "SHA-256 mismatch"}[results[0]["status"]]
+
+    def health(self) -> dict[str, Any]:
+        """Component states; ``degraded`` lists the components that need attention."""
+        config = get_config()
+        components: dict[str, str] = {}
+        degraded: list[str] = []
+
+        storage_ok = self.repository.ping()
+        components["storage"] = "connected" if storage_ok else "unavailable"
+        if storage_ok:
+            current = migrate.is_current(self.repository.engine)
+            components["schema"] = "current" if current else "outdated (run unishield-admin db upgrade)"
+            if not current:
+                degraded.append("schema")
+            if config.auth.mode == "open":
+                components["accounts"] = "open mode (lab only)"
+            elif any(u.role == Role.ADMIN and not u.disabled for u in self.accounts.list_users()) or (
+                    config.api.admin_api_key and config.api.api_key_role == "admin"):
+                components["accounts"] = "ok"
+            else:
+                components["accounts"] = "no active administrator (unishield-admin user create)"
+                degraded.append("accounts")
+        else:
+            degraded.append("storage")
+
+        worker = self.maintenance
+        if worker is None:
+            components["housekeeping"] = "not started"
+        elif not worker.alive:
+            components["housekeeping"] = "stopped"
+            degraded.append("housekeeping")
+        elif worker.last_error:
+            components["housekeeping"] = f"failing: {worker.last_error}"
+            degraded.append("housekeeping")
+        else:
+            components["housekeeping"] = "ok" + ("" if config.retention.alert_days else " (alert retention off)")
+
+        replay = self.replay["status"]
+        components["replay"] = replay
+        if replay in ("failed", "interrupted"):
+            degraded.append("replay")
+
+        if self._model_status is None:
+            self._model_status = self._check_models()
+        components["models"] = self._model_status
+        if config.models.detection_mode != "rules" and self._model_status != "ok":
+            degraded.append("models")
+
+        running = self.running
+        components.update(ingest="running" if running else "idle", processing="running" if running else "idle",
+                          detection="running" if running else "idle", api="running")
+        status = "unhealthy" if not storage_ok else "degraded" if degraded else "healthy"
+        return {"status": status, "storage_ok": storage_ok, "components": components, "degraded": degraded}
 
     def reset(self) -> None:
         """Wait for any replay to finish and return to idle (tests)."""

@@ -24,6 +24,7 @@ def main() -> None:
         workers=config.api.workers,
         reload=config.api.reload,
         log_level=config.log_level.lower(),
+        timeout_graceful_shutdown=config.api.shutdown_timeout_sec,
     )
 
 

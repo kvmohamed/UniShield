@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import psutil
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from unishield import __version__
 from unishield.api.deps import get_context
@@ -37,14 +37,20 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 @router.get("/health", response_model=HealthStatus, summary="System health check",
-            dependencies=[Depends(public)])
-def health_check(ctx: AppContext = Depends(get_context)) -> HealthStatus:
+            dependencies=[Depends(public)], responses={503: {"description": "Storage unavailable"}})
+def health_check(response: Response, ctx: AppContext = Depends(get_context)) -> HealthStatus:
+    """
+    ``healthy``, ``degraded`` (working, but a component needs attention: see
+    ``degraded_components``) or ``unhealthy`` (storage unavailable; HTTP 503,
+    so container and service health checks fail).
+    """
     config = get_config()
-    db_ok = ctx.repository.ping()
+    state = ctx.health()
     pipeline = ctx.pipeline
-    running = ctx.running
+    if state["status"] == "unhealthy":
+        response.status_code = 503
     return HealthStatus(
-        status="healthy" if db_ok else "degraded",
+        status=state["status"],
         version=__version__,
         uptime_seconds=round(time.time() - ctx.started, 2),
         timestamp=datetime.now(timezone.utc),
@@ -52,17 +58,13 @@ def health_check(ctx: AppContext = Depends(get_context)) -> HealthStatus:
         no_payload_decryption=config.security.no_payload_decryption,
         no_active_scanning=config.security.no_active_scanning,
         no_response_path=config.security.no_response_path,
-        database_connected=db_ok,
-        pipeline_active=running,
+        auth_mode=auth_mode(),
+        database_connected=state["storage_ok"],
+        pipeline_active=ctx.running,
         detectors_loaded=len(pipeline.detectors) if pipeline else 0,
         models_loaded=sum(1 for d in pipeline.detectors if d.name == "ml_detector") if pipeline else 0,
-        components={
-            "ingest": "running" if running else "idle",
-            "processing": "running" if running else "idle",
-            "detection": "running" if running else "idle",
-            "storage": "connected" if db_ok else "unavailable",
-            "api": "running",
-        },
+        components=state["components"],
+        degraded_components=state["degraded"],
     )
 
 

@@ -71,6 +71,7 @@ alerts_table = Table(
     Index("ix_alerts_threat_class", "threat_class"),
     Index("ix_alerts_severity", "severity"),
     Index("ix_alerts_source_ip", "source_ip"),
+    Index("ix_alerts_stored_at", "stored_at"),
 )
 
 runs_table = Table(

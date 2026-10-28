@@ -11,6 +11,7 @@ run it with access to that database is trusted.
     unishield-admin user list | set-role | set-password | disable | enable | unlock | delete
     unishield-admin token create --name NAME --role viewer [--expires-days N]
     unishield-admin token list | revoke NAME
+    unishield-admin retention run [--days N]          delete old alerts/runs and expired sessions
 
 There are no default accounts: create the first administrator with
 ``user create``. Passwords are read from the terminal without echo, or with
@@ -28,8 +29,9 @@ from typing import Callable, Optional, Sequence
 
 from unishield.accounts import AccountConflict, AccountError, AccountStore, Role
 from unishield.config import get_config
-from unishield.storage import AuditLog, migrate
+from unishield.storage import AlertRepository, AuditLog, migrate
 from unishield.storage.database import make_engine
+from unishield.storage.retention import housekeeping
 
 
 class CLIError(Exception):
@@ -180,6 +182,22 @@ def cmd_token_revoke(args: argparse.Namespace) -> None:
     print(f"Revoked token {token.name!r}")
 
 
+# --- retention -------------------------------------------------------------------
+
+def cmd_retention_run(args: argparse.Namespace) -> None:
+    config = get_config()
+    if args.days is not None and args.days < 1:
+        raise CLIError("--days must be at least 1")
+    days = args.days or config.retention.alert_days
+    if not days:
+        raise CLIError("No retention period: set retention.alert_days (UNISHIELD_ALERT_RETENTION_DAYS) or pass --days")
+    engine = _engine(args, migrate_schema=True)
+    result = housekeeping(AlertRepository(engine), AccountStore(engine), AuditLog(engine), days,
+                          config.auth.session_idle_minutes, actor=_actor(), actor_type="cli")
+    print(f"Deleted {result['alerts']} alerts and {result['runs']} runs stored before {result['cutoff']}, "
+          f"and {result['sessions']} expired sessions")
+
+
 # --- parser --------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -228,6 +246,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = tokens.add_parser("revoke", help="revoke a service token")
     p.add_argument("name")
     p.set_defaults(func=cmd_token_revoke)
+
+    retention = groups.add_parser("retention", help="alert retention").add_subparsers(dest="command", required=True)
+    p = retention.add_parser("run", help="delete alerts and runs older than the retention period")
+    p.add_argument("--days", type=int, default=None, help="override retention.alert_days")
+    p.set_defaults(func=cmd_retention_run)
     return parser
 
 

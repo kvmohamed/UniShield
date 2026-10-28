@@ -153,6 +153,16 @@ class AlertRepository:
         with self.engine.connect() as conn:
             return int(conn.execute(select(func.count()).select_from(alerts_table)).scalar_one())
 
+    def delete_stored_before(self, cutoff: datetime) -> tuple[int, int]:
+        """Delete alerts stored before ``cutoff`` and finished runs that ended before it: (alerts, runs)."""
+        cutoff = _to_db(cutoff)
+        a, r = alerts_table.c, runs_table.c
+        with self._lock, self.engine.begin() as conn:
+            alerts = conn.execute(delete(alerts_table).where(
+                (a.stored_at < cutoff) | (a.stored_at.is_(None) & (a.timestamp < cutoff)))).rowcount or 0
+            runs = conn.execute(delete(runs_table).where(r.finished_at < cutoff, r.status != "running")).rowcount or 0
+        return alerts, runs
+
     def delete_all(self) -> int:
         with self._lock, self.engine.begin() as conn:
             return conn.execute(delete(alerts_table)).rowcount or 0

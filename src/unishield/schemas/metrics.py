@@ -64,7 +64,7 @@ class HealthStatus(BaseModel):
 
     status: str = Field(
         default="healthy",
-        description="Overall system status",
+        description="healthy | degraded (see degraded_components) | unhealthy (storage unavailable)",
     )
     version: str = Field(default="0.1.0")
     uptime_seconds: float = Field(default=0.0, ge=0.0)
@@ -88,6 +88,8 @@ class HealthStatus(BaseModel):
         description="Confirms no response is sent to monitored networks",
     )
 
+    auth_mode: str = Field(default="accounts", description="accounts | open (lab only)")
+
     # Component status
     database_connected: bool = Field(default=False)
     pipeline_active: bool = Field(default=False)
@@ -103,6 +105,7 @@ class HealthStatus(BaseModel):
             "api": "running",
         }
     )
+    degraded_components: list[str] = Field(default_factory=list)
 
 
 class BenchmarkResult(BaseModel):

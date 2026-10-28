@@ -67,9 +67,10 @@ def create_app(repository: AlertRepository | None = None) -> FastAPI:
         elif not ctx.accounts.has_users() and not config.api.admin_api_key:
             logger.warning("No user accounts exist: create an administrator with "
                            "'unishield-admin user create <name> --role admin'")
+        ctx.start_services()
         yield
-        ctx.stop_replay()
-        ctx.stop_outputs()
+        result = ctx.shutdown(config.api.shutdown_timeout_sec)
+        logger.info("UniShield API stopped (%s)", result)
 
     config = get_config()
     docs = config.api.docs_enabled

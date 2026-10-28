@@ -122,6 +122,28 @@ class ModelRegistry:
             raise ModelIntegrityError(f"{artifact} does not match the SHA-256 recorded at training time")
         return joblib.load(artifact), meta
 
+    def verify(self, name: Optional[str] = None, version: Optional[int] = None) -> list[dict[str, Any]]:
+        """
+        Check stored artifacts against the SHA-256 in their metadata without
+        loading them: every version, or the latest of ``name`` (``version``).
+        Each result has name, version, artifact and status: ok | missing | mismatch.
+        """
+        if name is not None:
+            meta = self.metadata(name, version)
+            metas = [meta] if meta is not None else []
+        else:
+            metas = self.list()
+        results = []
+        for meta in metas:
+            artifact = self._paths(meta["name"], meta["version"])[0]
+            if not artifact.is_file():
+                status = "missing"
+            else:
+                status = "ok" if file_sha256(artifact) == meta.get("sha256") else "mismatch"
+            results.append({"name": meta["name"], "version": meta["version"], "artifact": artifact.name,
+                            "status": status})
+        return results
+
     def list(self) -> list[dict[str, Any]]:
         """Metadata of every stored model version."""
         if not self.metadata_dir.is_dir():

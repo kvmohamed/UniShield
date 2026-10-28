@@ -112,6 +112,9 @@ class APIConfig(BaseModel):
     admin_api_key: Optional[str] = Field(default=None, repr=False)
     api_key_role: Literal["viewer", "analyst", "admin"] = "admin"
     cors_origins: list[str] = Field(default_factory=list)   # the dashboard is same-origin
+    # On shutdown (SIGTERM / Ctrl+C) wait this long for a running replay to stop
+    # and record its state; uvicorn also waits this long for open requests.
+    shutdown_timeout_sec: int = Field(default=15, ge=1, le=600)
     # Interactive API docs (/docs, /redoc, /openapi.json). They need no login and
     # Swagger UI loads its scripts from a CDN: turn them off in production.
     docs_enabled: bool = True
@@ -135,6 +138,14 @@ class AuthConfig(BaseModel):
     # Secure flag on the session cookie: auto = when the request arrived over
     # HTTPS (directly or via a trusted proxy's X-Forwarded-Proto).
     cookie_secure: Literal["auto", "always", "never"] = "auto"
+
+
+class RetentionConfig(BaseModel):
+    """Housekeeping run by the API every ``interval_minutes`` (and by ``unishield-admin retention run``)."""
+    # Delete alerts stored more than this many days ago, and finished runs
+    # older than that. None keeps them forever. The audit log is never purged.
+    alert_days: Optional[int] = Field(default=None, ge=1, le=36_500)
+    interval_minutes: int = Field(default=60, ge=1, le=10_080)
 
 
 class DatabaseConfig(BaseModel):
@@ -357,6 +368,7 @@ class UnishieldConfig(BaseModel):
     api: APIConfig = APIConfig()
     auth: AuthConfig = AuthConfig()
     database: DatabaseConfig = DatabaseConfig()
+    retention: RetentionConfig = RetentionConfig()
     processing: ProcessingConfig = ProcessingConfig()
     ingest: IngestConfig = IngestConfig()
     network: NetworkConfig = NetworkConfig()
@@ -403,6 +415,7 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_DATA_DIR": ("paths", "data_dir"),
     "UNISHIELD_DETECTION_MODE": ("models", "detection_mode"),
     "UNISHIELD_DB_URL": ("database", "url"),
+    "UNISHIELD_ALERT_RETENTION_DAYS": ("retention", "alert_days"),
     "UNISHIELD_ADMIN_API_KEY": ("api", "admin_api_key"),
     "UNISHIELD_EXPORT_DIR": ("export", "directory"),
     "UNISHIELD_EXPORT_CONTINUOUS": ("export", "continuous"),
