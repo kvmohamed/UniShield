@@ -8,7 +8,10 @@ observed duration, address entropy, protocol mix, SYN counts.
 
 Target features: a flood concentrates on a victim, so three destinations
 are profiled separately:
-    vol_target_*  — destination receiving the most packets (volumetric)
+    vol_target_*  — of the destinations receiving the most packets, the one
+                    with the highest peak packet rate (volumetric); ranking
+                    by total packets alone let a busy server's long transfers
+                    hide a short flood on another host
     syn_target_*  — destination receiving the most half-open attempts (SYN flood)
     udp_target_*  — destination receiving the most UDP packets (UDP flood)
 Peak rates are the busiest 1-second interval of the window, with each
@@ -38,6 +41,7 @@ from unishield.features.base import (
 from unishield.schemas.flow import NormalisedFlow, ProtocolType
 
 _HALF_OPEN_STATES = {"S0", "REJ"}
+_VOLUMETRIC_CANDIDATES = 5          # destinations by total packets whose peak rate is compared
 
 
 def is_half_open(flow: NormalisedFlow) -> bool:
@@ -170,13 +174,15 @@ class VolumeFeatureExtractor(BaseFeatureExtractor):
 
         out: dict[str, Any] = {}
 
-        vol_ip, vol_flows = max(by_dst.items(), key=lambda kv: packets(kv[1]))
+        candidates = sorted(by_dst.items(), key=lambda kv: packets(kv[1]), reverse=True)[:_VOLUMETRIC_CANDIDATES]
+        peaks = {ip: peak_per_second(fs, window, lambda f: f.packet_count) for ip, fs in candidates}
+        vol_ip, vol_flows = max(candidates, key=lambda kv: (peaks[kv[0]], packets(kv[1])))
         vol_sources = Counter(f.source_ip for f in vol_flows)
         out.update(
             vol_target_ip=vol_ip,
             vol_target_packets=packets(vol_flows),
             vol_target_pps_avg=round(packets(vol_flows) / window.observed_seconds, 2),
-            vol_target_pps_peak=round(peak_per_second(vol_flows, window, lambda f: f.packet_count), 2),
+            vol_target_pps_peak=round(peaks[vol_ip], 2),
             vol_target_bps_peak=round(peak_per_second(vol_flows, window, lambda f: f.byte_count), 2),
             vol_target_unique_sources=len(vol_sources),
             vol_target_source_entropy=round(entropy(vol_sources.values()), 4),

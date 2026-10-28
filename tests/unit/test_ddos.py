@@ -151,3 +151,22 @@ def test_flash_crowd_of_completed_connections_is_not_a_flood():
                             tcp_flags="ACK,FIN,PSH,SYN", conn_state="SF", direction=FlowDirection.INBOUND)
              for i in range(500)]
     assert ddos_classes(Pipeline(enable_correlation=False).run(SimulatedReader(crowd))) == set()
+
+
+def test_short_flood_is_not_hidden_by_a_busier_destination():
+    """A destination with more packets in long, steady transfers must not hide a short flood on another host."""
+    from datetime import datetime, timedelta, timezone
+
+    from unishield.features.base import WindowContext
+    from unishield.features.volume import VolumeFeatureExtractor
+    from unishield.schemas.flow import NormalisedFlow, ProtocolType
+
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    flows = [NormalisedFlow(timestamp=t0, source_ip="10.0.0.2", destination_ip="10.0.0.80", protocol=ProtocolType.TCP,
+                            packet_count=200_000, byte_count=200_000_000, duration=60.0)]          # long, steady
+    flows += [NormalisedFlow(timestamp=t0 + timedelta(seconds=3), source_ip=f"10.0.1.{i}", destination_ip="198.51.100.9",
+                             protocol=ProtocolType.ICMP, packet_count=300, byte_count=30_000, duration=0.0)
+              for i in range(50)]                                                                   # 15,000 pkts in 1 s
+    features = VolumeFeatureExtractor().extract(flows, WindowContext(t0, t0 + timedelta(seconds=10), 10.0))
+    assert features["vol_target_ip"] == "198.51.100.9"
+    assert features["vol_target_pps_peak"] >= 15_000
