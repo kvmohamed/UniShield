@@ -1,29 +1,119 @@
 {
   "passed": true,
-  "files_scanned": 76,
+  "files_scanned": 96,
   "static_findings": [],
+  "scoped_allowance": {
+    "module": "unishield/export/transport.py",
+    "allowed_imports": [
+      "http.client",
+      "smtplib",
+      "socket",
+      "ssl"
+    ],
+    "allowed_calls": [
+      "connect",
+      "create_connection",
+      "sendall",
+      "sendto"
+    ],
+    "occurrences": [
+      {
+        "file": "unishield/export/transport.py",
+        "line": 25,
+        "kind": "import",
+        "name": "http.client"
+      },
+      {
+        "file": "unishield/export/transport.py",
+        "line": 27,
+        "kind": "import",
+        "name": "smtplib"
+      },
+      {
+        "file": "unishield/export/transport.py",
+        "line": 28,
+        "kind": "import",
+        "name": "socket"
+      },
+      {
+        "file": "unishield/export/transport.py",
+        "line": 29,
+        "kind": "import",
+        "name": "ssl"
+      },
+      {
+        "file": "unishield/export/transport.py",
+        "line": 87,
+        "kind": "call",
+        "name": "socket.create_connection"
+      },
+      {
+        "file": "unishield/export/transport.py",
+        "line": 101,
+        "kind": "call",
+        "name": "sock.sendto"
+      },
+      {
+        "file": "unishield/export/transport.py",
+        "line": 115,
+        "kind": "call",
+        "name": "sock.sendall"
+      },
+      {
+        "file": "unishield/export/transport.py",
+        "line": 137,
+        "kind": "call",
+        "name": "socket.create_connection"
+      },
+      {
+        "file": "unishield/export/transport.py",
+        "line": 149,
+        "kind": "call",
+        "name": "socket.create_connection"
+      },
+      {
+        "file": "unishield/export/transport.py",
+        "line": 167,
+        "kind": "call",
+        "name": "smtp.connect"
+      },
+      {
+        "file": "unishield/export/transport.py",
+        "line": 187,
+        "kind": "call",
+        "name": "socket.create_connection"
+      },
+      {
+        "file": "unishield/export/transport.py",
+        "line": 197,
+        "kind": "call",
+        "name": "socket.create_connection"
+      }
+    ]
+  },
   "runtime_attempts": [],
   "runtime_exercised": [
-    "pipeline:pcap:pcap",
-    "pipeline:pcapng:pcapng",
-    "pipeline:port_scan_pcap:pcap",
-    "pipeline:syn_flood_pcap:pcap",
-    "pipeline:zeek_dir:zeek_dir",
-    "pipeline:zeek_tsv:zeek_tsv",
-    "pipeline:flow_csv:flow_csv",
-    "pipeline:flow_jsonl:flow_json",
-    "pipeline:cicids_csv:flow_csv",
-    "pipeline:scenario:benign_hard",
-    "pipeline:scenario:ddos_syn",
-    "pipeline:scenario:ddos_udp",
-    "pipeline:scenario:port_scan",
-    "pipeline:scenario:host_sweep",
-    "pipeline:scenario:beacon_30s",
-    "pipeline:scenario:exfil_episodes",
-    "pipeline:scenario:dga",
-    "pipeline:scenario:dns_tunnel",
-    "pipeline:scenario:encrypted_anomaly",
-    "pipeline:scenario:beacon_60s",
+    "pipeline:pcap:pcap (with threat intel)",
+    "pipeline:pcapng:pcapng (with threat intel)",
+    "pipeline:port_scan_pcap:pcap (with threat intel)",
+    "pipeline:syn_flood_pcap:pcap (with threat intel)",
+    "pipeline:zeek_dir:zeek_dir (with threat intel)",
+    "pipeline:zeek_tsv:zeek_tsv (with threat intel)",
+    "pipeline:flow_csv:flow_csv (with threat intel)",
+    "pipeline:flow_jsonl:flow_json (with threat intel)",
+    "pipeline:cicids_csv:flow_csv (with threat intel)",
+    "pipeline:scenario:benign_hard (5 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:ddos_syn (0 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:ddos_udp (0 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:port_scan (0 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:host_sweep (0 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:beacon_30s (1 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:exfil_episodes (0 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:dga (0 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:dns_tunnel (0 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:encrypted_anomaly (1 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:beacon_60s (2 INTEL_MATCH alerts from the sample indicators)",
+    "readers, pipeline and detectors: 0 socket operations of any kind (loopback refused too)",
     "api:/replay/demo:completed",
     "api:/health",
     "api:/alerts",
@@ -31,7 +121,41 @@
     "api:/metrics",
     "api:/metrics/traffic",
     "api:/system/architecture",
-    "loopback socket operations allowed (event-loop internals): 49"
+    "loopback socket operations allowed (event-loop internals): 49",
+    "outbound:syslog/udp \u2192 127.0.0.1:64223 (allow-listed): 4 messages",
+    "outbound:syslog/tcp \u2192 127.0.0.1:54838 (allow-listed): 4 messages",
+    "outbound:email \u2192 127.0.0.1:54839 (allow-listed): 1 message(s)",
+    "outbound:webhook \u2192 http://127.0.0.1:54840 (allow-listed): 1 message(s)",
+    "export files (local): 3 alerts written to 4 rotating files"
   ],
-  "generated_at": "2026-10-21T19:13:02+00:00"
+  "runtime_outbound_allowed": [
+    "socket.sendto(('127.0.0.1', 64223))",
+    "socket.sendto(('127.0.0.1', 64223))",
+    "socket.sendto(('127.0.0.1', 64223))",
+    "socket.sendto(('127.0.0.1', 64223))",
+    "socket.create_connection(('127.0.0.1', 54838))",
+    "socket.getaddrinfo('127.0.0.1')",
+    "socket.connect(('127.0.0.1', 54838))",
+    "socket.sendall(('127.0.0.1', 54838))",
+    "socket.create_connection(('127.0.0.1', 54839))",
+    "socket.getaddrinfo('127.0.0.1')",
+    "socket.connect(('127.0.0.1', 54839))",
+    "socket.sendall(('127.0.0.1', 54839))",
+    "socket.sendall(('127.0.0.1', 54839))",
+    "socket.sendall(('127.0.0.1', 54839))",
+    "socket.sendall(('127.0.0.1', 54839))",
+    "socket.sendall(('127.0.0.1', 54839))",
+    "socket.sendall(('127.0.0.1', 54839))",
+    "socket.create_connection(('127.0.0.1', 54840))",
+    "socket.getaddrinfo('127.0.0.1')",
+    "socket.connect(('127.0.0.1', 54840))",
+    "socket.sendall(('127.0.0.1', 54840))",
+    "socket.sendall(('127.0.0.1', 54840))"
+  ],
+  "runtime_expected_refusals": [
+    "config load: syslog destination 10.0.0.5 refused (inside network.home_networks)",
+    "send time: delivery to 10.0.0.5 refused by the destination policy before any socket use",
+    "socket level: with the policy check bypassed, the tripwire refused sendto(10.0.0.5, 514)"
+  ],
+  "generated_at": "2026-10-28T06:06:55+00:00"
 }
