@@ -78,9 +78,9 @@ def main() -> int:
               f"RSS {sample['rss_mb']:>6.1f} MB  window p95 {sample['window_p95_ms']:>7.2f} ms  "
               f"alerts {sample['alerts']}", flush=True)
 
+    commit = git_commit()                            # the code under test, before the run starts
     print(f"Soak test: {args.duration:.0f} s at {args.rate:,.0f} records/s, speedup {args.speedup:g}", flush=True)
     report = run_soak(cfg, progress)
-    commit = git_commit()
     report["commit"] = commit
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "soak_test.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
