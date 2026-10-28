@@ -64,6 +64,9 @@ class StatisticalDetector(BaseDetector):
             thresholds = get_thresholds().get("statistical", {})
         super().__init__(thresholds)
         self._history: deque[dict[str, float]] = deque(maxlen=thresholds.get("baseline_windows", 120))
+        #: Robust z per metric of the last window compared with the baseline (None if not compared);
+        #: learning mode records these to suggest a site-specific mad_threshold.
+        self.last_scores: dict[str, float] | None = None
 
     @property
     def name(self) -> str:
@@ -100,6 +103,7 @@ class StatisticalDetector(BaseDetector):
     ) -> list[Alert]:
         start_time = time.time()
         self._windows_analysed += 1
+        self.last_scores = None
         if not flows or not features or features.get("rule_alert_classes"):
             return []
 
@@ -112,12 +116,14 @@ class StatisticalDetector(BaseDetector):
 
         if len(self._history) >= min_samples and len(flows) >= t.get("min_window_flows", 5):
             deviations = {}
+            self.last_scores = {}
             for metric, floor in METRICS.items():
                 values = [h[metric] for h in self._history]
                 median = _median(values)
                 mad = _median([abs(v - median) for v in values])
                 scale = max(1.4826 * mad, 0.1 * abs(median), floor)
                 z = (current[metric] - median) / scale
+                self.last_scores[metric] = z
                 if z >= threshold:
                     deviations[metric] = {"value": round(current[metric], 3), "baseline_median": round(median, 3),
                                           "robust_z": round(z, 2)}

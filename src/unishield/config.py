@@ -685,11 +685,13 @@ def merge_thresholds(base: dict[str, Any], overlay: dict[str, Any], source: str 
     return merged
 
 
-def load_thresholds(path: Path | None = None, site_path: Path | None = None) -> dict[str, Any]:
+def load_thresholds(path: Path | None = None, site_path: Path | None = None,
+                    use_site: bool = True) -> dict[str, Any]:
     """
     Load detection thresholds from YAML, then merge the site overlay over
-    them (``site_path``, else ``site.thresholds_file`` / ``UNISHIELD_THRESHOLDS_FILE``).
-    A configured overlay that is missing or invalid raises an error.
+    them (``site_path``, else ``site.thresholds_file`` / ``UNISHIELD_THRESHOLDS_FILE``;
+    none with ``use_site=False``). A configured overlay that is missing or
+    invalid raises an error.
     """
     global _thresholds, _threshold_sources
     if _thresholds is not None:
@@ -708,7 +710,8 @@ def load_thresholds(path: Path | None = None, site_path: Path | None = None) -> 
         )
         thresholds = {}
 
-    site_path = site_path if site_path is not None else site_thresholds_path()
+    if site_path is None and use_site:
+        site_path = site_thresholds_path()
     if site_path is not None:
         if not site_path.is_file():
             raise FileNotFoundError(f"Site thresholds file not found: {site_path}")

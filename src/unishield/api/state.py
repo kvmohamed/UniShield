@@ -19,10 +19,16 @@ starts housekeeping; ``shutdown`` (SIGTERM / Ctrl+C under uvicorn) stops
 housekeeping and any replay, waits for the replay to record its state,
 drains the output service, records ``system.stop`` and releases the
 database connections.
+
 File replays can restore and snapshot the detectors' cross-window state
 (``state`` in the config), so consecutive files of one site's feed, and
 restarts between them, keep beacon histories and baselines; the replay
 writes its final snapshot as it stops, before ``shutdown`` returns.
+
+Learning runs (``learning=True``) analyse a file the same way but store no
+alerts: they only count them and record the metrics behind each threshold.
+The suggested thresholds overlay and report are kept in memory for
+``GET /learning/latest``; nothing is written to the configuration.
 """
 
 from __future__ import annotations
@@ -35,7 +41,7 @@ from typing import Any, Optional
 
 from unishield.accounts import AccountStore, Role
 from unishield.accounts.ratelimit import LoginRateLimiter
-from unishield.config import UnishieldConfig, get_config
+from unishield.config import UnishieldConfig, get_config, get_thresholds, resolve_site_path, threshold_sources
 from unishield.export.service import OutputService
 from unishield.intel.matcher import IntelMatcher
 from unishield.intel.store import IntelStore
@@ -101,6 +107,8 @@ class AppContext:
         self.thread: Optional[threading.Thread] = None
         self.maintenance: Optional[MaintenanceWorker] = None
         self._model_status: Optional[str] = None
+        self.learning: Optional[dict[str, Any]] = None
+        self._learner = None
 
     # --- storage ------------------------------------------------------------
 
@@ -177,26 +185,40 @@ class AppContext:
 
     def start_replay(self, reader, source: str, fmt: str, clear: bool = True,
                      detection_mode: str | None = None,
-                     state_store: PipelineStateStore | None = None) -> dict[str, Any]:
+                     state_store: PipelineStateStore | None = None,
+                     learning: bool = False) -> dict[str, Any]:
         """Start the pipeline on ``reader`` in a background thread. Raises RuntimeError if one is running."""
         intel = self.intel_matcher()                    # outside the lock: may create the repository
         with self._lock:
             if self.running:
                 raise RuntimeError("Replay already running")
-            pipeline = Pipeline(alert_callback=self._store_alert, detection_mode=detection_mode, intel=intel,
-                                state_store=state_store)
-            run_id = f"run-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+            learner = None
+            if learning:
+                from unishield.evaluation.learning import BaselineLearner
+
+                learner = BaselineLearner(get_thresholds())
+                pipeline = Pipeline(alert_callback=learner.count_alert, window_observer=learner.observe,
+                                    detection_mode=detection_mode, intel=intel, state_store=state_store)
+                learner.assets = pipeline.asset_policy.inventory
+                learner.attach(pipeline)
+            else:
+                pipeline = Pipeline(alert_callback=self._store_alert, detection_mode=detection_mode,
+                                    intel=intel, state_store=state_store)
+            run_id = f"{'learn' if learning else 'run'}-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
             self.pipeline = pipeline
+            self._learner = learner
             self.replay = dict(_IDLE, status="running", run_id=run_id, source=source, format=fmt,
-                               detection_mode=pipeline.detection_mode, started_at=time.time())
-        deleted = self.repository.delete_all() if clear else 0
+                               detection_mode=pipeline.detection_mode, started_at=time.time(), learning=learning)
+            if learning:
+                self.learning = {"status": "running", "run_id": run_id, "source": source}
+        deleted = self.repository.delete_all() if clear and not learning else 0
         self.repository.start_run(run_id, source, pipeline.detection_mode)
         self.thread = threading.Thread(target=self._run, args=(pipeline, reader, run_id),
                                        name=f"replay-{run_id}", daemon=True)
         self.thread.start()
         return {"status": "started", "run_id": run_id, "source": source, "format": fmt,
                 "detection_mode": pipeline.detection_mode, "alerts_deleted": deleted,
-                "state_persistence": state_store is not None}
+                "state_persistence": state_store is not None, "learning": learning}
 
     def _store_alert(self, alert: Alert) -> None:
         alert.run_id = self.replay.get("run_id")
@@ -220,10 +242,41 @@ class AppContext:
             status = "failed"
             self.replay["error"] = str(e)
         self.replay.update(status=status, finished_at=time.time(), result=summary)
+        if self._learner is not None:
+            self._finish_learning(run_id, status, summary)
         try:
             self.repository.finish_run(run_id, status, summary)
         except Exception as e:                            # pragma: no cover - defensive
             logger.error("Could not record run %s: %s", run_id, e)
+
+    def _finish_learning(self, run_id: str, status: str, summary: Optional[dict[str, Any]]) -> None:
+        """Turn the learner's records into a suggested overlay and report (kept in memory only)."""
+        from datetime import datetime, timezone
+
+        import yaml
+
+        from unishield.evaluation.learning import LearningRun, render_report, render_site_thresholds
+
+        learner = self._learner
+        try:
+            base = resolve_site_path("thresholds.yaml")
+            defaults = yaml.safe_load(base.read_text(encoding="utf-8")) if base.is_file() else learner.thresholds
+            run = LearningRun(learner, (summary or {}).get("total_records", 0), [self.replay.get("source")],
+                              threshold_sources(), len(learner.assets))
+            suggestions = learner.suggest(defaults)
+            meta = run.meta(datetime.now(timezone.utc).isoformat(timespec="seconds"), 99.9, False)
+            self.learning = {
+                "status": status, "run_id": run_id, "source": self.replay.get("source"),
+                "records": run.records, "windows": learner.windows,
+                "changed": {s.key: {"default": s.default, "suggested": s.suggested, "observed": s.observed}
+                            for s in suggestions if s.changed},
+                "would_alert": dict(learner.would_alert),
+                "thresholds_site_yaml": render_site_thresholds(suggestions, defaults, learner.thresholds, meta),
+                "report_markdown": render_report(learner, suggestions, meta),
+            }
+        except Exception as e:                            # pragma: no cover - defensive
+            logger.error("Learning run %s could not produce suggestions: %s", run_id, e, exc_info=True)
+            self.learning = {"status": "failed", "run_id": run_id, "error": str(e)}
 
     def stop_replay(self) -> bool:
         if self.pipeline is not None and self.running:

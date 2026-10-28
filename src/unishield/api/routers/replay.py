@@ -62,9 +62,11 @@ def resolve_replay_path(file_path: str) -> Path:
 
 
 def _start(request: Request, ctx: AppContext, reader, source: str, fmt: str, clear: bool,
-           mode: Optional[str], action: str, state_store: PipelineStateStore | None = None) -> dict[str, Any]:
+           mode: Optional[str], action: str, state_store: PipelineStateStore | None = None,
+           learning: bool = False) -> dict[str, Any]:
     try:
-        started = ctx.start_replay(reader, source, fmt, clear=clear, detection_mode=mode, state_store=state_store)
+        started = ctx.start_replay(reader, source, fmt, clear=clear, detection_mode=mode, state_store=state_store,
+                                   learning=learning)
     except RuntimeError as exc:
         audit(request, action, "failure", target=source, details={"error": str(exc)})
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -82,11 +84,15 @@ def replay_start(
     mode: Optional[DetectionMode] = Query(default=None, description="Detection mode (default: config)"),
     state: Optional[bool] = Query(default=None, description="Restore and snapshot detector state "
                                                             "(default: state.enabled in the config)"),
+    learning: bool = Query(default=False, description="Learning mode: store no alerts, record the metrics "
+                                                      "behind each threshold (GET /learning/latest)"),
     ctx: AppContext = Depends(get_context),
 ) -> dict[str, Any]:
     """
     Analyse a PCAP/PCAPNG, Zeek (JSON/TSV, file or directory) or flow CSV/JSON file. Read-only.
     With state persistence the run continues from the last snapshot and leaves a new one.
+    In learning mode no alert is stored; the suggested site thresholds are served by
+    GET /learning/latest and never written to the configuration.
     """
     if ctx.running:
         raise HTTPException(status_code=409, detail="Replay already running")
@@ -98,7 +104,8 @@ def replay_start(
     cfg = get_config().state
     store = PipelineStateStore(cfg.path, cfg.snapshot_interval_sec) if (cfg.enabled if state is None else state) \
         else None
-    return _start(request, ctx, reader, str(path), fmt, clear, mode, "replay.start", store)
+    return _start(request, ctx, reader, str(path), fmt, clear, mode,
+                  "replay.learn" if learning else "replay.start", store, learning)
 
 
 @router.post("/replay/demo", summary="Analyse synthetic attack traffic", dependencies=[Depends(require_admin)])
@@ -149,6 +156,20 @@ def replay_stop(request: Request, ctx: AppContext = Depends(get_context)) -> dic
 @router.get("/replay/status", summary="Replay status", dependencies=[Depends(require_viewer)])
 def replay_status(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     return ctx.status()
+
+
+@router.get("/learning/latest", summary="Suggested site thresholds from the last learning run",
+            dependencies=[Depends(require_viewer)])
+def learning_latest(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
+    """
+    Result of the last ``POST /replay/start?learning=true``: the suggested
+    ``thresholds.site.yaml`` text, the Markdown report and the changed values.
+    Review the YAML and save it as a site thresholds file yourself; the API
+    never writes configuration.
+    """
+    if ctx.learning is None:
+        return {"status": "no_learning_run", "message": "POST /replay/start?learning=true&file_path=... first"}
+    return ctx.learning
 
 
 @router.get("/replay/runs", summary="Recent analysis runs", dependencies=[Depends(require_viewer)])

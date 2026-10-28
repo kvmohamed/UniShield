@@ -96,6 +96,8 @@ class AnomalyDetector(BaseDetector):
         self._training: list[list[float]] = []
         self._fit_rows: list[list[float]] = []      # online warm-up windows the model was fitted on
         self._is_fitted = False
+        #: Anomaly score of the last window scored (None if not scored); recorded by learning mode.
+        self.last_score: Optional[float] = None
         self.model_info: dict[str, Any] = {"source": "online warm-up"}
         if model_path is not None:
             self.load_model(model_path)
@@ -227,6 +229,7 @@ class AnomalyDetector(BaseDetector):
     ) -> list[Alert]:
         start_time = time.time()
         self._windows_analysed += 1
+        self.last_score = None
         if not flows or not features or features.get("rule_alert_classes"):
             return []
         if len(flows) < self._thresholds.get("min_window_flows", 10):
@@ -243,6 +246,7 @@ class AnomalyDetector(BaseDetector):
         quantile = self._thresholds.get("quantile", 0.995)
         min_score = self._thresholds.get("min_score", 0.6)
         s, percentile = self.score(vec)
+        self.last_score = s
         if percentile < quantile or s < min_score:
             return []
 

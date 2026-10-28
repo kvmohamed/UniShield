@@ -123,3 +123,10 @@ class TestLoading:
         clean_env.setenv("UNISHIELD_THRESHOLDS_FILE", str(site))
         with pytest.raises(ValueError, match="ddos.packets_per_secnd"):
             get_thresholds()
+
+
+def test_overlay_can_be_left_out(clean_env, tmp_path):
+    site = write(tmp_path / "s.yaml", {"ddos": {"packets_per_second": 20000}})
+    clean_env.setenv("UNISHIELD_THRESHOLDS_FILE", str(site))
+    assert load_thresholds(use_site=False)["ddos"]["packets_per_second"] == 10000
+    assert len(threshold_sources()) == 1
