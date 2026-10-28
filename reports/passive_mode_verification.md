@@ -1,6 +1,6 @@
 # UniShield — Passive-Mode Verification
 
-Generated 2026-10-28T06:06:55+00:00 by `scripts/verify_passive_mode.py`.
+Generated 2026-10-28T06:49:32+00:00 by `scripts/verify_passive_mode.py`.
 
 **Result: PASSED**
 
@@ -8,7 +8,7 @@ UniShield never sends anything into the monitored network. Its only outbound pat
 
 ## Static scan
 
-96 Python modules under `src/unishield` were parsed. Forbidden imports: Crypto, aiohttp, asyncssh, cryptography, ftplib, http.client, httpx, nmap, paramiko, pexpect, requests, smtplib, ssl, subprocess, telnetlib, urllib.request. Forbidden calls: AsyncSniffer, Popen, arping, connect, connect_ex, create_connection, execv, execve, popen, send, send_raw, sendall, sendp, sendpfast, sendto, sniff, spawnl, sr, sr1, srloop, srp, srp1, srploop, system, traceroute, urlopen (allowed: engine.connect, self.engine.connect — the local alert database).
+116 Python modules under `src/unishield` were parsed. Forbidden imports: Crypto, aiohttp, asyncssh, cryptography, ftplib, http.client, httpx, nmap, paramiko, pexpect, requests, smtplib, ssl, subprocess, telnetlib, urllib.request. Forbidden calls: AsyncSniffer, Popen, arping, connect, connect_ex, create_connection, execv, execve, popen, send, send_raw, sendall, sendp, sendpfast, sendto, sniff, spawnl, sr, sr1, srloop, srp, srp1, srploop, system, traceroute, urlopen (allowed: engine.connect, self.engine.connect — the local alert database).
 
 No findings.
 
@@ -56,6 +56,7 @@ Socket connect/send and name-resolution functions and scapy's send/receive/sniff
 - pipeline:scenario:encrypted_anomaly (1 INTEL_MATCH alerts from the sample indicators)
 - pipeline:scenario:beacon_60s (2 INTEL_MATCH alerts from the sample indicators)
 - readers, pipeline and detectors: 0 socket operations of any kind (loopback refused too)
+- api:/auth/login:200
 - api:/replay/demo:completed
 - api:/health
 - api:/alerts
@@ -63,11 +64,15 @@ Socket connect/send and name-resolution functions and scapy's send/receive/sniff
 - api:/metrics
 - api:/metrics/traffic
 - api:/system/architecture
-- loopback socket operations allowed (event-loop internals): 49
-- outbound:syslog/udp → 127.0.0.1:64223 (allow-listed): 4 messages
-- outbound:syslog/tcp → 127.0.0.1:54838 (allow-listed): 4 messages
-- outbound:email → 127.0.0.1:54839 (allow-listed): 1 message(s)
-- outbound:webhook → http://127.0.0.1:54840 (allow-listed): 1 message(s)
+- api:/intel/status
+- api:/outputs/status
+- api:/auth/me
+- api:/audit
+- loopback socket operations allowed (event-loop internals): 95
+- outbound:syslog/udp → 127.0.0.1:49967 (allow-listed): 4 messages
+- outbound:syslog/tcp → 127.0.0.1:60269 (allow-listed): 4 messages
+- outbound:email → 127.0.0.1:60270 (allow-listed): 1 message(s)
+- outbound:webhook → http://127.0.0.1:60271 (allow-listed): 1 message(s)
 - export files (local): 3 alerts written to 4 rotating files
 
 Outbound socket operations allowed for the transport (loopback receivers standing in for the analyst-side SIEM, mail relay and webhook):

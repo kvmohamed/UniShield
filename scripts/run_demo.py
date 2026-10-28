@@ -130,11 +130,14 @@ def main() -> int:
     print("         reports/passive_mode_verification.md, reports/figures/")
     print("=" * 72)
 
+    signin = "Sign in with an account from: unishield-admin user create <name> --role admin"
     if args.serve:
         print("\nStarting the API and dashboard on http://127.0.0.1:8000/dashboard (Ctrl+C to stop)")
+        print(signin)
         return subprocess.call([sys.executable, "-m", "uvicorn", "unishield.api.app:app",
                                 "--host", "127.0.0.1", "--port", "8000"], cwd=ROOT)
     print("\nStart the dashboard with:  python -m unishield.main   (http://127.0.0.1:8000/dashboard)")
+    print(signin)
     failed = statuses["passive"] != "PASSED" or demo["passed"] != demo["total"] or "failed" in statuses.values()
     return 1 if failed else 0
 

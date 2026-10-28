@@ -55,12 +55,18 @@ See [docs/demo_guide.md](docs/demo_guide.md).
 
 ### Dashboard and API
 
+There are no default accounts. Create an administrator first (it asks for a
+password of at least 12 characters), then start the server and sign in:
+
 ```bash
+unishield-admin user create admin --role admin
 python -m unishield.main             # http://127.0.0.1:8000/dashboard  (API docs: /docs)
 ```
 
 Pick a scenario and press **Run demo**, or analyse a file under `data/`
 (e.g. `data/samples/attack_portscan.pcap` after `python scripts/make_samples.py`).
+Running it as a service — HTTPS, systemd or Windows, backups, monitoring —
+is covered in [docs/deployment.md](docs/deployment.md).
 
 ---
 
@@ -183,45 +189,75 @@ destination is refused at config load, at send time and at socket level.
 
 ## API
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/dashboard` | dashboard |
-| GET | `/health` | health, database status, security flags |
-| GET | `/metrics` | pipeline metrics, process CPU and memory |
-| GET | `/metrics/traffic` | per-window flows/bytes/alerts, top alert entities |
-| GET | `/alerts` | filters (class, severity, IPs, detector, run, time, confidence), sort, pagination (`X-Total-Count`) |
-| GET | `/alerts/summary`, `/alerts/timeline`, `/alerts/{id}` | summary, severity timeline, detail |
-| GET | `/incidents` | alerts grouped by entity and time |
-| GET | `/threats/{class}` | alerts of one class |
-| GET | `/replay/status`, `/replay/runs` | current run, recent runs |
-| GET | `/system/architecture` | stage, detector, model, output, intel and safety status |
-| GET | `/outputs/status` | export, syslog and notification status (no secrets) |
-| GET | `/intel/status` | imported indicators per kind and source |
-| GET | `/benchmark/latest`, `/evaluation/latest` | measured reports |
-| POST | `/replay/start` | admin: analyse a file under the data directory |
-| POST | `/replay/demo` | admin: analyse a synthetic scenario (`wait=true` to block) |
-| POST | `/replay/stop` | admin: stop the run |
-| DELETE | `/alerts` | admin: delete stored alerts |
-| POST | `/export` | admin: write JSON lines / CEF / STIX files of stored alerts and incidents |
-| POST | `/intel/import` | admin: import an indicator file (request body) |
-| DELETE | `/intel/sources/{source}` | admin: remove a source's indicators |
-| POST | `/intel/purge-expired` | admin: delete expired indicators |
+| Method | Endpoint | Role | Description |
+|---|---|---|---|
+| GET | `/dashboard` | public | dashboard (it asks for a login) |
+| GET | `/health` | public | healthy / degraded (with components) / unhealthy (503), security flags |
+| POST | `/auth/login`, `/auth/logout` | public | session cookie + CSRF token (JSON body) / end the session |
+| GET | `/auth/me` | public | the caller's identity, role and CSRF token |
+| POST | `/auth/password` | viewer (session) | change your own password |
+| GET | `/metrics`, `/metrics/traffic` | viewer | pipeline and process metrics; per-window traffic, top alert entities |
+| GET | `/alerts` | viewer | filters (class, severity, IPs, detector, run, time, confidence), sort, pagination (`X-Total-Count`) |
+| GET | `/alerts/summary`, `/alerts/timeline`, `/alerts/{id}` | viewer | summary, severity timeline, detail |
+| GET | `/incidents`, `/threats/{class}` | viewer | alerts grouped by entity and time; alerts of one class |
+| GET | `/replay/status`, `/replay/runs` | viewer | current run, recent runs |
+| GET | `/system/architecture`, `/benchmark/latest`, `/evaluation/latest` | viewer | stage, detector, model, output, intel and safety status; measured reports |
+| GET | `/outputs/status`, `/intel/status` | viewer | export, syslog and notification status (no secrets); imported indicators per kind and source |
+| POST | `/replay/start`, `/replay/demo`, `/replay/stop` | admin | analyse a file under the data directory / a synthetic scenario; stop |
+| DELETE | `/alerts` | admin | delete stored alerts |
+| POST | `/export` | admin | write JSON lines / CEF / STIX files of stored alerts and incidents |
+| POST | `/intel/import` | admin | import an indicator file (request body) |
+| DELETE | `/intel/sources/{source}` | admin | remove a source's indicators |
+| POST | `/intel/purge-expired` | admin | delete expired indicators |
+| GET, POST, PATCH, DELETE | `/users`, `/users/{name}` | admin (session) | user management |
+| GET | `/audit` | admin | audit log (filters, pagination) |
 
-Admin endpoints need `X-API-Key` matching `UNISHIELD_ADMIN_API_KEY`; when no
-key is set they accept loopback clients only. Read endpoints have no side
-effects.
+Roles: viewer < analyst < admin (analyst currently reads like a viewer).
+Browsers authenticate with the session cookie and send `X-CSRF-Token` on
+state-changing requests; automation sends a service token in `X-API-Key`
+(`unishield-admin token create --name siem --role viewer`). Every route
+declares its role (`x-unishield-role` in the OpenAPI schema) and the tests
+call each one as anonymous, every role and service tokens. Read endpoints
+have no side effects.
+
+## Security and operations
+
+- **Accounts**: no default credentials; Argon2id passwords; lockout after 5
+  failures and per-address throttling; sessions in HttpOnly,
+  SameSite=Strict (and, over HTTPS, Secure) cookies with idle and absolute
+  expiry; CSRF tokens; `auth.mode: open` for labs only (refused in
+  production).
+- **HTTPS**: `UNISHIELD_TLS_CERTFILE`/`_KEYFILE`, or a reverse proxy
+  (`deploy/nginx`, `deploy/caddy`); HSTS on HTTPS responses.
+- **Audit log**: logins, denials, replays, deletions, account and token
+  changes, service start/stop; append-only from the API and, by triggers,
+  in SQLite and PostgreSQL.
+- **Database**: Alembic migrations (`unishield-admin db upgrade`), alert
+  retention (`UNISHIELD_ALERT_RETENTION_DAYS`), backup/restore procedures.
+- **Service**: systemd unit, NSSM instructions for Windows, container;
+  graceful shutdown stops and records a running replay.
+- **Supply chain**: exact pins, pip-audit and CycloneDX SBOMs in CI,
+  SHA-256-checked model artifacts (`unishield-admin models verify`).
+
+Details: [docs/deployment.md](docs/deployment.md),
+[docs/threat_model.md](docs/threat_model.md),
+[docs/releasing.md](docs/releasing.md).
 
 ## Configuration
 
-`configs/config.yaml` (general, including the `intel`, `export` and
-`outbound` sections), `configs/thresholds.yaml` (detection thresholds) and
-environment variables listed in `.env.example` (`UNISHIELD_DB_URL`,
-`UNISHIELD_ADMIN_API_KEY`, `UNISHIELD_DETECTION_MODE`, `UNISHIELD_EXPORT_DIR`,
-`UNISHIELD_SMTP_PASSWORD`, ...). The four security flags cannot be disabled;
-outbound secrets are read only from the environment.
+`configs/config.yaml` (general, including the `auth`, `tls`, `retention`,
+`intel`, `export` and `outbound` sections), `configs/thresholds.yaml`
+(detection thresholds) and environment variables listed in `.env.example`
+(`UNISHIELD_DB_URL`, `UNISHIELD_AUTH_MODE`, `UNISHIELD_TLS_CERTFILE`,
+`UNISHIELD_DETECTION_MODE`, `UNISHIELD_EXPORT_DIR`, `UNISHIELD_SMTP_PASSWORD`,
+...). The four security flags cannot be disabled; secrets are read only
+from the environment.
 
-Alerts are stored in SQLite (`data/unishield.db`) by default; PostgreSQL
-works with `UNISHIELD_DB_URL=postgresql+psycopg://...` and its driver.
+Alerts, accounts and the audit log are stored in SQLite
+(`data/unishield.db`) by default; PostgreSQL works with
+`UNISHIELD_DB_URL=postgresql+psycopg://...` after
+`pip install -e ".[postgres]"`. The schema is migrated with
+`unishield-admin db upgrade` (automatically at start by default).
 
 ## Models
 
@@ -236,35 +272,42 @@ python scripts/evaluate_models.py                            # reports/model_eva
 ```bash
 pytest                    # unit, integration and security tests
 pytest -m performance     # throughput / latency / memory targets on this machine
+UNISHIELD_TEST_POSTGRES_URL=postgresql+psycopg://user:pw@host/empty_db pytest tests/integration/test_postgres.py
 ```
 
-CI runs the default suite on Ubuntu and Windows with Python 3.12.
+CI runs the default suite, ruff (pyflakes and syntax errors), the
+passive-mode verification and model verification on Ubuntu and Windows
+with Python 3.12; the migration and store tests on PostgreSQL 16;
+`systemd-analyze verify` and `nginx -t` on the deployment files; and
+pip-audit plus CycloneDX SBOM generation (uploaded as an artifact).
 
 ## Docker
 
 ```bash
-echo "UNISHIELD_ADMIN_API_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" > .env
-docker compose up -d --build   # http://127.0.0.1:8000/dashboard
+docker compose up -d --build                                               # http://127.0.0.1:8000/dashboard
+docker compose run --rm api unishield-admin user create admin --role admin
 ```
 
-The container runs unprivileged with a read-only root filesystem and no
-capabilities; configs, data, reports and models are mounted read-only and
-alerts live in a named volume. Requests reach it from the Docker bridge, so
-admin actions need the key (enter it in the dashboard header). The Docker
-files have not been built on the development machine (Docker was not
-installed there).
+The container runs `python -m unishield.main` unprivileged with a read-only
+root filesystem and no capabilities; configs, data, reports and models are
+mounted read-only and the database lives in a named volume. The port is
+published on the host's loopback only; put a TLS proxy in front for remote
+access. The Docker files have not been built on the development machine
+(Docker was not installed there).
 
 ## Updating dependencies
 
 `pyproject.toml` holds the ranges; `requirements*.txt` pin exact versions.
 After changing `pyproject.toml`, regenerate the pins in a fresh Python 3.12
 venv (`pip install -e .` → `pip freeze --exclude-editable` for
-`requirements.txt`; add `.[dev,reports]` for `requirements-dev.txt`).
+`requirements.txt`; add `.[dev,reports]` for `requirements-dev.txt`), then
+check them with `make audit-deps` (pip-audit), as CI does.
 
 ## Documentation
 
 [architecture](docs/architecture.md) ·
-[deployment](docs/deployment.md) ·
+[deployment and operations](docs/deployment.md) ·
+[releasing](docs/releasing.md) ·
 [threat model](docs/threat_model.md) ·
 [datasets](docs/dataset.md) ·
 [model card](docs/model_card.md) ·
@@ -278,7 +321,8 @@ Not a live sensor (files and replayed streams only), not a SOC or IPS, no
 payload inspection; thresholds tuned on synthetic data; models trained on
 synthetic data and weak on unseen attack types; single process; threat-intel
 matching only as good as the imported lists; outputs tested against
-UniShield's own loopback receivers, not specific SIEM products. Full list:
+UniShield's own loopback receivers, not specific SIEM products; local
+accounts only (no SSO or MFA). Full list:
 [docs/limitations.md](docs/limitations.md).
 
 ## License

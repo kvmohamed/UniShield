@@ -4,7 +4,8 @@ UniShield — Write deterministic sample input files to data/samples/
 The files are synthetic (private and documentation address ranges) and are
 written directly to disk; nothing is sent on any network. Replay them with:
 
-    curl -X POST "http://127.0.0.1:8000/replay/start?file_path=data/samples/sample.pcap"
+    curl -X POST -H "X-API-Key: $TOKEN" "http://127.0.0.1:8000/replay/start?file_path=data/samples/sample.pcap"
+    (TOKEN from: unishield-admin token create --name samples --role admin --expires-days 1)
 
 Usage:
     python scripts/make_samples.py [--out data/samples]

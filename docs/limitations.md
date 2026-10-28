@@ -61,12 +61,18 @@
 ## Engineering limits
 
 15. **Single process.** One pipeline thread, SQLite by default. PostgreSQL
-    works by URL, but there is no horizontal scaling.
+    works by URL, but there is no horizontal scaling. Run one uvicorn worker:
+    the replay state and the login rate limiter live in the process (the
+    rate limiter also resets on restart; account lockouts are stored in the
+    database and survive it).
 16. **PCAP parsing is the slow path** (scapy in Python, a few thousand
     packets per second on the benchmark machine); convert large captures to
     Zeek logs first.
 17. **Docker** files are provided but were not built on the development
-    machine (Docker was not installed there).
+    machine (Docker was not installed there). The systemd unit and the nginx
+    example are checked only in CI (`systemd-analyze verify`, `nginx -t`); the
+    Caddy example and the NSSM instructions for Windows are documented but
+    were not run.
 18. **IP anonymisation** reduces correlation accuracy and must be noted in
     experiment reports when enabled.
 
@@ -89,6 +95,37 @@
     continuous bundles link only to indicators in the same bundle.
 22. **Export files are not encrypted or signed** at rest; protect the export
     directory on the host.
+
+## Access control and operations limits
+
+23. **Local accounts only.** No single sign-on (OIDC, SAML, LDAP/AD) and no
+    multi-factor authentication. Passwords are the only interactive factor;
+    use a password manager, the minimum length and the lockout.
+24. **The analyst role has no analyst-only actions yet.** It reads like a
+    viewer; it exists so alert feedback and annotations can be added without
+    changing who holds which role.
+25. **The audit log is append-only against the application, not against
+    the host.** Triggers refuse changes on SQLite and PostgreSQL, but anyone
+    who can write the database file, or own the tables on PostgreSQL, can
+    drop them. Forward entries to a SIEM for evidence that must survive a
+    host compromise. Entries are never purged by UniShield, so the table
+    grows without bound (a few hundred bytes per login or action).
+26. **Throttling is per client address.** Behind a proxy that is not listed
+    in `api.forwarded_allow_ips`, every client shares the proxy's address and
+    one attacker can throttle everyone's logins for the window. Lockout is
+    per account: an attacker who knows a username can keep that account
+    locked by guessing wrong (an administrator can unlock it; consider the
+    lockout length against this).
+27. **Sessions are server-side rows in the alert database.** If the database
+    is unavailable nobody can log in; restoring a backup also restores the
+    sessions, tokens and accounts it contained.
+28. **Service tokens have no IP binding or per-endpoint scopes** beyond their
+    role. The static `UNISHIELD_ADMIN_API_KEY` cannot expire; prefer named
+    tokens with `--expires-days`.
+29. **Retention deletes by storage time.** Replayed historical traffic is
+    kept for `alert_days` after it was analysed, whatever its traffic time.
+30. **The API docs (`/docs`) need no login** when enabled and load Swagger UI
+    from a CDN; turn them off in production (`UNISHIELD_API_DOCS=false`).
 
 ## Ethics
 

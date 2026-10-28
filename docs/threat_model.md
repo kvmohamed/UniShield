@@ -19,10 +19,14 @@ below; it never points at the monitored network.
   external attackers (floods, scans) and compromised internal hosts
   (beaconing to command-and-control, exfiltration, DGA, DNS tunnelling,
   unusual encrypted sessions, contact with known-bad infrastructure).
-- **UniShield itself**: its API, stored alerts, imported threat
-  intelligence, models and outbound credentials. Adversaries are anyone who
-  can reach the API, tamper with its files or input, or sit on the analyst
-  network between UniShield and its destinations.
+- **UniShield itself**: its API, stored alerts (which describe the internal
+  network), accounts, audit log, imported threat intelligence, models and
+  outbound credentials. Adversaries are anyone who can reach the API
+  (including authenticated users acting beyond their role and holders of
+  stolen sessions or tokens), observers of the network between analysts and
+  UniShield, anyone who sits on the analyst network between UniShield and
+  its destinations, and anyone who can tamper with its files, input or
+  dependencies.
 - **The one-way property**: an attacker who controls monitored traffic must
   not be able to make UniShield send anything back into the monitored
   network.
@@ -102,25 +106,40 @@ no payloads, no requests to the monitored network, no internet lookups.
 | Oversized file exhausts memory or disk | `intel.max_file_mb` and `intel.max_indicators` per import; request body limit on the API |
 | Stale indicators raise alerts forever | Per-indicator expiry (file column, STIX `valid_until`, `--expires`, `intel.default_ttl_days`); expired entries never match |
 | Stored XSS through labels | Labels stored as text and rendered with `textContent` (live-checked with an HTML-like label) |
-| Unauthorised import or removal | Admin key / loopback-only, like other state-changing endpoints |
+| Unauthorised import or removal | Administrator role (login session or admin service token), like other state-changing endpoints; imports, removals and purges audited (`intel.*`); status needs a viewer |
 | Fetching feeds opens a path to the internet | UniShield never fetches; files are carried across by the operator |
 
 ## Threats to UniShield and mitigations
 
+Operating details for each mitigation are in [deployment.md](deployment.md).
+
 | Threat | Mitigation |
 |---|---|
-| Unauthorised use of state-changing endpoints | `X-API-Key` (constant-time compare) when `UNISHIELD_ADMIN_API_KEY` is set; loopback-only otherwise; read endpoints are side-effect free (tested) |
-| Reading arbitrary files through replay | Allow-list of data directories checked before existence; NUL bytes and over-long paths rejected; size limit |
+| Anyone who can reach the API reads alerts (internal addresses, attack evidence) | `auth.mode: accounts` (default): every data endpoint needs a login session or a service token with at least the viewer role; only `/health`, the login endpoints and the dashboard page are public. The lab-only open mode is refused in production |
+| Unauthorised state changes (replays, deletion, account changes) | Roles viewer < analyst < admin; every route declares exactly one guard and the application refuses to build with an unguarded route; tests call every OpenAPI operation as anonymous, each role and service tokens. User management needs an interactive administrator session (tokens cannot mint or promote accounts); the last active administrator cannot be removed |
+| Trusting the network position ("loopback is admin") | Removed: behind a reverse proxy on the same host every client is loopback. Access depends only on credentials |
+| Password guessing and credential stuffing | Argon2id hashes (argon2-cffi, RFC 9106 parameters); minimum length 12; per-account lockout after 5 consecutive failures (15 min); per-address throttling of failed logins and API keys (HTTP 429); the same answer and hashing time for unknown, wrong, locked and disabled accounts |
+| Session theft or fixation | Random 256-bit session ids stored only as SHA-256; HttpOnly, SameSite=Strict, Secure (HTTPS) cookie; a new id at every login; idle (30 min) and absolute (8 h) expiry; role, password and disable changes end sessions; logout deletes the session server-side |
+| Cross-site request forgery | SameSite=Strict cookie; per-session CSRF token required in `X-CSRF-Token` for every state-changing request made with a cookie; requests with a foreign `Origin` refused; login only accepts a JSON body (a cross-site form cannot send one); rejections audited |
+| Leaked or over-privileged automation credentials | Named service tokens with a fixed role, optional expiry and revocation, stored as SHA-256 and shown once; a wrong `X-API-Key` is refused (never ignored in favour of a cookie); the static `UNISHIELD_ADMIN_API_KEY` comes only from the environment, has a configurable role and is never returned or logged |
+| Eavesdropping on logins and sessions | HTTPS from uvicorn (`tls.certfile`) or a TLS reverse proxy (nginx/Caddy examples); HSTS on HTTPS responses; Secure cookies; forwarded headers trusted only from `api.forwarded_allow_ips`; a warning when serving plain HTTP on a non-loopback address |
+| Repudiation, unnoticed misuse | Audit log of logins (with the real failure reason), lockouts, denials, CSRF rejections, replays, data deletion, retention purges, user and token changes, service start (security-relevant configuration and what changed) and stop. No API route changes entries; SQLite/PostgreSQL triggers refuse UPDATE/DELETE/TRUNCATE |
+| Reading arbitrary files through replay | Allow-list of data directories checked before existence; NUL bytes and over-long paths rejected; size limit; administrator only |
 | SQL injection | All queries are SQLAlchemy expressions with bound parameters; filters are validated (patterns, enums, ranges) |
-| Stored XSS via alert fields | Dashboard inserts all data with `textContent`; strict same-origin CSP; static test for HTML sinks |
-| Tampered model files (joblib is pickle) | Registry refuses artifacts whose SHA-256 differs from the training metadata; only load models this installation trained |
-| Resource exhaustion from input | Bounded windows, sessionizer active-flow cap, bounded per-pair and per-source state, file size limit |
-| Leaking the admin key | Key only from the environment, excluded from `repr`, never returned by any endpoint (tested) |
-| Accidental active behaviour in code | `scripts/verify_passive_mode.py`: AST scan for network/process/crypto capabilities (scoped allowance for the transport only) and a runtime tripwire around sockets and scapy send/capture |
+| Stored XSS via alert fields | Dashboard inserts all data with `textContent`; strict same-origin CSP; static test for HTML sinks; no credentials in browser storage |
+| Tampered model files (joblib is pickle) | Registry refuses artifacts whose SHA-256 differs from the training metadata; `unishield-admin models verify` in CI and before releases; `/health` reports a mismatch in hybrid/ml mode |
+| Vulnerable or substituted dependencies | Exact pins in `requirements*.txt`; pip-audit on every CI run; CycloneDX SBOM per commit; release procedure in [releasing.md](releasing.md) |
+| Schema drift and failed upgrades | Alembic migrations; the API refuses to start on an outdated schema when auto-migration is off; tests check the migrated schema against the code on SQLite and PostgreSQL |
+| Resource exhaustion | Bounded windows, sessionizer active-flow cap, bounded per-pair and per-source state, file size limit, request body limits in the proxy examples, password length cap (hashing cost), bounded rate-limiter memory, alert retention |
+| Process compromise spreading on the host | systemd unit and container run unprivileged with no capabilities, a read-only system and only state/log directories writable |
+| Accidental active behaviour in code | `scripts/verify_passive_mode.py` (run in CI): AST scan for network/process/crypto capabilities (scoped allowance for the outbound transport only) and a runtime tripwire around sockets and scapy send/capture, including the login flow |
 
 ## Out of scope
 
-Live capture from interfaces, payload inspection, response or blocking,
-multi-tenant access control, fetching threat intelligence, encryption of
-export files at rest, and protection against an attacker with write access
-to the host or its configuration.
+Live capture from interfaces, payload inspection, response or blocking;
+multi-tenant isolation; single sign-on (OIDC/SAML/LDAP) and multi-factor
+authentication; fetching threat intelligence; encryption of export files
+at rest; and protection against an attacker with write access to
+the host or administrative access to the database (they can alter files,
+drop the audit triggers or replace the code). See
+[limitations.md](limitations.md).

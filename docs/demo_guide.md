@@ -28,7 +28,8 @@ It runs seven steps and writes every result to `reports/`:
 ## 2. Dashboard
 
 ```bash
-python -m unishield.main              # http://127.0.0.1:8000/dashboard
+unishield-admin user create admin --role admin   # once: there are no default accounts
+python -m unishield.main              # http://127.0.0.1:8000/dashboard, then sign in
 ```
 
 - **Overview**: pick a scenario (e.g. `ddos_syn`, `beacon_30s`,
@@ -44,8 +45,14 @@ python -m unishield.main              # http://127.0.0.1:8000/dashboard
 - **Architecture status**: pipeline stages, safety constraints, trained
   models and per-detector counters.
 
-From another machine or from Docker, set `UNISHIELD_ADMIN_API_KEY` and type
-the key into the *Admin key* field to run demos and replays.
+- **Admin** (administrators): users and roles, password resets, unlocking,
+  and the audit log of everything done in the session above.
+- **Account**: your session and a password change.
+
+Run controls appear for administrators only; a viewer account sees the
+same data without them. For a classroom machine where nobody should need to
+sign in to look, `UNISHIELD_AUTH_MODE=open` (lab only) lets anyone read;
+running demos still needs an administrator.
 
 ## 3. Hybrid detection
 

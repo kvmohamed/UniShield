@@ -28,19 +28,51 @@ security:
 api:
   host: "127.0.0.1"
   port: 8000
-  workers: 1
+  workers: 1                        # keep 1: replay state and the login rate limiter live in the process
   reload: false                     # auto-reload on code change: development only (UNISHIELD_API_RELOAD=true)
-  # Administrative endpoints (replay, demo, clear alerts) need the X-API-Key
-  # header when UNISHIELD_ADMIN_API_KEY is set; without it they accept
-  # loopback clients only. Never put the key in this file.
+  # Static service token for automation (X-API-Key header): set it only through
+  # UNISHIELD_ADMIN_API_KEY, never in this file. Prefer named, revocable
+  # tokens: unishield-admin token create --name <name> --role viewer
+  api_key_role: "admin"             # role of UNISHIELD_ADMIN_API_KEY: viewer | analyst | admin
   cors_origins: []                  # dashboard is served by the API itself (same origin)
+  forwarded_allow_ips: "127.0.0.1"  # reverse proxies trusted for X-Forwarded-For / -Proto
+  shutdown_timeout_sec: 15          # graceful shutdown: open requests, then the running replay
+  docs_enabled: true                # /docs, /redoc, /openapi.json (no login, CDN scripts): false in production
+
+auth:
+  # accounts: every data endpoint needs a login session or a service token.
+  # open: LAB ONLY - reads need no login (admin actions still do); refused
+  #       when app.environment is "production".
+  # There are no default accounts: unishield-admin user create <name> --role admin
+  mode: "accounts"
+  session_ttl_minutes: 480          # absolute lifetime of a login
+  session_idle_minutes: 30          # sign out after this much inactivity
+  max_failed_logins: 5              # consecutive wrong passwords before the account locks...
+  lockout_minutes: 15               # ...for this long
+  login_rate_limit: 10              # failed logins / API keys per client address...
+  login_rate_window_sec: 300        # ...within this window, then HTTP 429
+  min_password_length: 12
+  cookie_secure: "auto"             # Secure cookie flag: auto (when HTTPS) | always | never
+
+tls:
+  # HTTPS served by uvicorn (python -m unishield.main). Or terminate TLS at a
+  # reverse proxy: deploy/nginx, deploy/caddy, docs/deployment.md.
+  certfile: null                    # PEM chain (UNISHIELD_TLS_CERTFILE)
+  keyfile: null                     # PEM key (UNISHIELD_TLS_KEYFILE; password only via UNISHIELD_TLS_KEYFILE_PASSWORD)
+  hsts_max_age: 31536000            # Strict-Transport-Security on HTTPS responses; 0 disables
+  hsts_include_subdomains: false
 
 database:
   # SQLite by default; PostgreSQL via e.g. postgresql+psycopg://user:pass@host/unishield
-  # (install the driver separately). Override with UNISHIELD_DB_URL.
+  # (pip install -e ".[postgres]"). Override with UNISHIELD_DB_URL.
   url: "sqlite:///./data/unishield.db"
   echo: false
   pool_size: 5                      # (planned) pool size for server databases
+  auto_migrate: true                # apply schema migrations at start; false: run unishield-admin db upgrade
+
+retention:
+  alert_days: null                  # delete alerts stored more than N days ago (null: keep; audit log is never purged)
+  interval_minutes: 60              # housekeeping interval (retention, expired sessions)
 
 processing:
   # Windows are aligned to a grid in traffic time: every slide_interval_sec a

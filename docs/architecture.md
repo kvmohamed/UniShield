@@ -49,9 +49,11 @@ syslog, email and webhooks, all through one allow-listed transport
 | Detectors | `detectors/` | Rule detectors first; then detectors with `runs_after_rules` see which classes the rules raised or suppressed, so statistical, anomaly and ML alerts only describe windows nothing else explained. |
 | Correlation | `correlation/` | Deduplication in traffic time (class, source, destination, detector); incident grouping per entity with multi-stage / multi-vector escalation; one table for severities and MITRE ATT&CK mappings. |
 | Threat intel | `intel/` | Offline indicator files (text, CSV, STIX 2.1 indicators) parsed and validated, stored per source with expiry in the alert database; an in-memory matcher (exact addresses, networks, parent domains, JA3) is built for each run. Matches become INTEL_MATCH alerts, evidence on other alerts (with one level more severity) and JA3 blocklist entries. Nothing is fetched. |
-| Storage | `storage/` | SQLAlchemy tables for alerts, runs and intel indicators (SQLite default, PostgreSQL by URL); bound-parameter queries only. |
+| Storage | `storage/` | SQLAlchemy tables for alerts, runs, intel indicators, accounts and the append-only audit log (SQLite default, PostgreSQL by URL); schema owned by Alembic revisions (`storage/migrations`); retention and housekeeping; bound-parameter queries only. |
 | Outputs | `export/` | Record formats (JSON lines, CEF, STIX 2.1), rotating and on-demand export files, an incident tracker for continuous outputs, RFC 5424 syslog forwarding, email/webhook notifications with rate limits and digests, the destination policy and the output service (bounded queue, one worker). `export/transport.py` is the only module that opens connections, only to allow-listed analyst-side destinations outside `network.home_networks`. |
-| API | `api/` | Routers for system, alerts, replay, exports and intel; admin key for state-changing endpoints; hardening headers; dashboard with a same-origin CSP. |
+| Accounts | `accounts/` | Roles (viewer < analyst < admin), Argon2id password hashing and policy, users with lockout, server-side login sessions, service tokens, login rate limiter. |
+| API | `api/` | Routers for auth, users, audit, system, alerts, replay, exports and intel; one role guard per route (enforced when the app is built); session cookie + CSRF token or `X-API-Key` service token; Origin check, hardening headers, HSTS over HTTPS; dashboard with a same-origin CSP. |
+| Administration | `cli.py` | `unishield-admin`: schema migrations, users, service tokens, retention, model verification. |
 
 ## Detection families
 
@@ -95,9 +97,18 @@ and until the API returns the alert ([evaluation.md](evaluation.md)).
 
 ## Deployment
 
-`python -m unishield.main` (or uvicorn) serves the API and dashboard on
-`127.0.0.1:8000`. The Docker image runs as an unprivileged user with a
-read-only root filesystem, no capabilities, read-only mounts for configs,
-data, reports and models, and volumes for the alert database and export
-files. Placement on the analyst side of a diode, firewalling and output
-configuration: [deployment.md](deployment.md).
+`python -m unishield.main` serves the API and dashboard on
+`127.0.0.1:8000`, over HTTPS when `tls.certfile` is set, trusting
+forwarded headers only from `api.forwarded_allow_ips`. On start the
+application checks the schema revision, records `system.start` and starts
+housekeeping (retention, expired sessions); on SIGTERM/Ctrl+C it stops a
+running replay, records its state and `system.stop`, and closes the
+database. `/health` reports degraded components and answers 503 when
+storage is unavailable.
+
+The systemd unit (`deploy/systemd`) and the Docker image run as an
+unprivileged user with no capabilities and a read-only system; nginx and
+Caddy examples (`deploy/`) terminate TLS in front. Placement on the analyst
+side of a diode, firewalling, outputs and operations — accounts, HTTPS,
+migrations, backups, monitoring — are described in
+[deployment.md](deployment.md).
