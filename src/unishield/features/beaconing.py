@@ -14,6 +14,10 @@ rolling history across windows:
 Each window adds only records not seen before (windows overlap) and then
 profiles every pair it touched: interval mean/std/CV, periodicity (share of
 intervals within 20% of the median), size regularity and destination rarity.
+The profile covers the pair's newest run of connections: the history is cut
+at the last gap more than 5x the median of the newest intervals, so a beacon
+that pauses and resumes is profiled on the resumed run. A run shorter than
+``min_connections`` is not profiled alone; the whole history is used instead.
 
 Pairs and destinations with no connection within ``history_sec`` of the
 newest traffic are dropped (checked every few minutes of traffic time), so
@@ -44,6 +48,7 @@ from unishield.schemas.timeutil import from_epoch_us, to_epoch_us
 _MAX_CANDIDATES = 10
 _SEEN_LIMIT = 200_000
 _PRUNE_EVERY = timedelta(minutes=5)
+_RUN_GAP_FACTOR = 5.0          # a gap this many times the typical recent interval ends a run
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _MICROSECOND = timedelta(microseconds=1)
 
@@ -258,7 +263,8 @@ class BeaconingFeatureExtractor(BaseFeatureExtractor):
                 history.popleft()
         if len(history) < self.min_connections:
             return None
-        times = sorted(h[0] for h in history)
+        run = self._recent_run(sorted(history, key=lambda h: h[0]))
+        times = [h[0] for h in run]
         intervals = [(b - a).total_seconds() for a, b in zip(times, times[1:])]
         intervals = [i for i in intervals if i > 0]
         if len(intervals) < self.min_connections - 1:
@@ -282,8 +288,28 @@ class BeaconingFeatureExtractor(BaseFeatureExtractor):
             interval_std_sec=std,
             interval_cv=std / mean if mean > 0 else 0.0,
             periodicity=periodicity,
-            size_regularity=max(0.0, 1.0 - _cv([float(h[1]) for h in history])),
+            size_regularity=max(0.0, 1.0 - _cv([float(h[1]) for h in run])),
             span_sec=(times[-1] - times[0]).total_seconds(),
             destination_sources=len(sources),
-            uses_tls=any(h[2] for h in history),
+            uses_tls=any(h[2] for h in run),
         )
+
+    def _recent_run(self, history: list[tuple]) -> list[tuple]:
+        """
+        The newest run of a time-sorted pair history: the connections after the
+        last gap longer than ``_RUN_GAP_FACTOR`` times the median of the newest
+        ``min_connections - 1`` intervals. A beacon that paused and resumed is
+        then profiled on its resumed run. If that run is shorter than
+        ``min_connections`` the whole history is profiled, so a gap never joins
+        or shortens runs into a beacon that the history as a whole does not show.
+        """
+        gaps = [(i, (history[i][0] - history[i - 1][0]).total_seconds()) for i in range(1, len(history))]
+        gaps = [(i, g) for i, g in gaps if g > 0]
+        recent = sorted(g for _, g in gaps[-(self.min_connections - 1):])
+        if not recent:
+            return history
+        limit = _RUN_GAP_FACTOR * recent[len(recent) // 2]
+        split = next((n for n in range(len(gaps) - 1, -1, -1) if gaps[n][1] > limit), None)
+        if split is None or len(gaps) - split - 1 < self.min_connections - 1:
+            return history
+        return history[gaps[split][0]:]
