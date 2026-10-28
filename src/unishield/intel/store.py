@@ -14,7 +14,6 @@ SECURITY CONSTRAINTS:
 from __future__ import annotations
 
 import hashlib
-import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -31,7 +30,7 @@ from unishield.intel.indicators import (
 )
 from unishield.intel.matcher import IntelEntry, IntelMatcher
 from unishield.schemas.timeutil import utc_now
-from unishield.storage.database import intel_imports_table, intel_table, make_engine
+from unishield.storage.database import intel_imports_table, intel_table, make_engine, write_lock
 
 _BATCH = 5_000
 IMPORT_MODES = ("replace", "append")
@@ -62,7 +61,7 @@ class IntelStore:
 
     def __init__(self, engine: Engine):
         self.engine = engine
-        self._lock = threading.Lock()
+        self._lock = write_lock(engine)
 
     @classmethod
     def from_url(cls, url: str, echo: bool = False) -> "IntelStore":

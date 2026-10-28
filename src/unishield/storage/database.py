@@ -17,6 +17,8 @@ as timezone-aware UTC.
 
 from __future__ import annotations
 
+import threading
+import weakref
 from pathlib import Path
 
 from sqlalchemy import (
@@ -113,6 +115,37 @@ intel_imports_table = Table(
     Column("rejected", Integer),
     Column("imported_at", DateTime, nullable=False),
 )
+
+audit_log_table = Table(
+    "audit_log",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("timestamp", DateTime, nullable=False),
+    Column("actor", String(128), nullable=False),
+    Column("actor_type", String(16), nullable=False),
+    Column("role", String(16)),
+    Column("action", String(64), nullable=False),
+    Column("outcome", String(16), nullable=False),
+    Column("target", String(256)),
+    Column("client_ip", String(64)),
+    Column("details", JSON),
+    Index("ix_audit_log_timestamp", "timestamp"),
+    Index("ix_audit_log_action", "action"),
+    Index("ix_audit_log_actor", "actor"),
+)
+
+_WRITE_LOCKS: "weakref.WeakKeyDictionary[Engine, threading.Lock]" = weakref.WeakKeyDictionary()
+_WRITE_LOCKS_GUARD = threading.Lock()
+
+
+def write_lock(engine: Engine) -> threading.Lock:
+    """One lock per engine, shared by every store writing through it (the pipeline thread and API
+    requests share one SQLite database, and in-memory SQLite shares a single connection)."""
+    with _WRITE_LOCKS_GUARD:
+        lock = _WRITE_LOCKS.get(engine)
+        if lock is None:
+            lock = _WRITE_LOCKS[engine] = threading.Lock()
+        return lock
 
 
 def make_engine(url: str, echo: bool = False, migrate: bool = True) -> Engine:

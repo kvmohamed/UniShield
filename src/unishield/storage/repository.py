@@ -9,7 +9,6 @@ pipeline thread and API requests can share one SQLite database.
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
@@ -19,7 +18,7 @@ from sqlalchemy.engine import Engine
 
 from unishield.schemas.alert import Alert, AlertSummary
 from unishield.schemas.timeutil import utc_now
-from unishield.storage.database import alerts_table, make_engine, runs_table
+from unishield.storage.database import alerts_table, make_engine, runs_table, write_lock
 
 _ALERT_COLUMNS = [c.name for c in alerts_table.columns]
 _TIME_COLUMNS = {"timestamp", "window_start", "window_end", "window_closed_at", "emitted_at", "stored_at"}
@@ -62,7 +61,7 @@ class AlertRepository:
 
     def __init__(self, engine: Engine):
         self.engine = engine
-        self._lock = threading.Lock()
+        self._lock = write_lock(engine)
 
     @classmethod
     def from_url(cls, url: str, echo: bool = False, migrate: bool = True) -> "AlertRepository":
