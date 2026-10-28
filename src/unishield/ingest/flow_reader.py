@@ -12,6 +12,13 @@ Dataset profiles (auto-detected from the header, or chosen explicitly):
                  Duration in microseconds, dd/mm/yyyy timestamps that may
                  lack seconds. Timestamps in that dataset are local lab
                  time and are interpreted as UTC here.
+    ctu13      — Argus bidirectional flows (".binetflow") from CTU-13:
+                 StartTime/Dur/SrcAddr/Sport/DstAddr/Dport/State/TotPkts/
+                 TotBytes/SrcBytes/Label. Reply bytes are TotBytes - SrcBytes;
+                 Argus states ("S_RA", "FSPA_FSPA", "INT", "CON", ...) are
+                 translated to the Zeek-style states the detectors use, and
+                 the originator's TCP flags come from the state's source
+                 half. Per-direction packet counts are not in the export.
 
 Fields absent from a file stay None; rows without a timestamp or both IP
 addresses are skipped and counted in ``errors`` (never fabricated).
@@ -29,7 +36,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 from unishield.ingest.base import BaseReader, chain_first
 from unishield.schemas.flow import (
@@ -159,6 +166,58 @@ class DatasetProfile:
     signature: frozenset[str]                      # cleaned columns that identify it
     duration_scale: float = 1.0                    # multiply to get seconds
     timestamp_formats: tuple[str, ...] = field(default=_DEFAULT_TIMESTAMP_FORMATS)
+    row_hook: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None   # fix up mapped fields
+
+
+_ARGUS_FLAGS = {"S": "SYN", "A": "ACK", "F": "FIN", "R": "RST", "P": "PSH", "U": "URG", "E": "ECE", "C": "CWR"}
+
+
+def argus_conn_state(state: Optional[str], protocol: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """
+    (Zeek-style conn_state, originator TCP flags) from an Argus state.
+
+    TCP states are "<originator flags>_<responder flags>": "S_" is an
+    unanswered SYN (S0), "S_RA" a SYN answered by a reset (REJ), FIN from both
+    sides a completed connection (SF), a reset after the handshake RST, an
+    answered handshake without FIN S1. Other protocols: INT (no reply) → S0,
+    CON (both directions) → SF, anything else OTH.
+    """
+    text = (state or "").strip().upper()
+    proto = (protocol or "").strip().upper()
+    if not text:
+        return None, None
+    if proto == "TCP" and "_" in text:
+        orig, resp = text.split("_", 1)
+        flags = ",".join(sorted({_ARGUS_FLAGS[c] for c in orig if c in _ARGUS_FLAGS})) or None
+        if not resp:
+            conn = "S0" if "S" in orig else "OTH"
+        elif "R" in resp and "S" not in resp:
+            conn = "REJ" if "S" in orig and "A" not in orig else "RST"
+        elif "F" in orig and "F" in resp:
+            conn = "SF"
+        elif "R" in orig or "R" in resp:
+            conn = "RST"
+        elif "S" in orig and "S" in resp:
+            conn = "S1"
+        else:
+            conn = "OTH"
+        return conn, flags
+    if text == "INT":
+        return "S0", None
+    if text == "CON":
+        return "SF", None
+    return "OTH", None
+
+
+def _ctu13_row(data: dict[str, Any]) -> dict[str, Any]:
+    total, orig = _safe_int(data.get("byte_count")), _safe_int(data.get("orig_bytes"))
+    if total is not None and orig is not None and 0 <= orig <= total:
+        data["resp_bytes"] = total - orig
+    data["conn_state"], flags = argus_conn_state(data.get("conn_state"), data.get("protocol"))
+    if flags:
+        data["tcp_flags"] = flags
+    data.pop("direction", None)                    # Argus "->"/"<->" is not a network direction
+    return data
 
 
 PROFILES: dict[str, DatasetProfile] = {
@@ -180,6 +239,22 @@ PROFILES: dict[str, DatasetProfile] = {
             "%d/%m/%Y %I:%M:%S %p",
             "%d/%m/%Y %I:%M %p",
         ),
+    ),
+    "ctu13": DatasetProfile(
+        name="ctu13",
+        field_map={
+            "starttime": "timestamp",
+            "dur": "duration",
+            "srcaddr": "source_ip",
+            "dstaddr": "destination_ip",
+            "state": "conn_state",
+            "totpkts": "packet_count",
+            "totbytes": "byte_count",
+            "srcbytes": "orig_bytes",
+        },
+        signature=frozenset({"starttime", "srcaddr", "dstaddr", "totbytes", "srcbytes"}),
+        timestamp_formats=("%Y/%m/%d %H:%M:%S.%f", "%Y/%m/%d %H:%M:%S"),
+        row_hook=_ctu13_row,
     ),
 }
 
@@ -412,6 +487,8 @@ class FlowReader(BaseReader):
     def _dict_to_flow(self, data: dict[str, Any], source: InputSource) -> NormalisedFlow:
         """Convert a mapped dictionary to a NormalisedFlow."""
         formats = self.profile.timestamp_formats if self.profile else _DEFAULT_TIMESTAMP_FORMATS
+        if self.profile and self.profile.row_hook:
+            data = self.profile.row_hook(data)
         if data.get("timestamp") in (None, ""):
             raise ValueError("missing timestamp")
         timestamp = _parse_flow_timestamp(data["timestamp"], formats)
