@@ -51,6 +51,10 @@ dev = [
 reports = [
     "matplotlib>=3.8",
 ]
+# PostgreSQL driver for database.url = postgresql+psycopg://...
+postgres = [
+    "psycopg[binary]>=3.1",
+]
 # Optional XGBoost window model (scripts/train_models.py trains it when installed)
 ml = [
     "xgboost>=2.0",

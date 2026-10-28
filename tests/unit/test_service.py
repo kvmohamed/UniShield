@@ -240,3 +240,17 @@ def test_registry_verify_reports_ok_missing_and_mismatch(tmp_path):
     (tmp_path / "saved" / "window_rf-v2.joblib").unlink()
     assert [r["status"] for r in registry.verify()] == ["mismatch", "missing"]
     assert registry.verify("other_model") == []
+
+
+def test_cli_models_verify(tmp_path, capsys):
+    from unishield.models.registry import ModelRegistry
+
+    saved, meta = tmp_path / "saved", tmp_path / "meta"
+    args = ["models", "verify", "--saved-dir", str(saved), "--metadata-dir", str(meta)]
+    assert cli.main(args) == 0 and "No saved models" in capsys.readouterr().out
+    ModelRegistry(saved, meta).save("window_rf", {"w": 1}, {"algorithm": "test"})
+    assert cli.main(args) == 0 and "ok        window_rf v1" in capsys.readouterr().out
+    (saved / "window_rf-v1.joblib").write_bytes(b"tampered")
+    assert cli.main(args) == 1
+    captured = capsys.readouterr()
+    assert "mismatch  window_rf v1" in captured.out and "1 of 1" in captured.err

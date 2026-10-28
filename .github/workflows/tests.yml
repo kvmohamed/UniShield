@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: pytest (${{ matrix.os }}, Python 3.12)
@@ -26,5 +29,85 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m pip install --no-deps -e .
 
+      - name: Lint (real errors only - pyflakes F, syntax E9)
+        run: python -m ruff check --select F,E9 src tests scripts
+
       - name: Run tests
         run: python -m pytest tests/ -q -W error::DeprecationWarning
+
+      - name: Verify passive operation (static scan + runtime tripwire)
+        run: python scripts/verify_passive_mode.py --out "${{ runner.temp }}/passive"
+
+      - name: Verify model artifacts against their recorded SHA-256
+        run: unishield-admin models verify
+
+  postgres:
+    name: migrations and stores on PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: unishield
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: unishield_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U unishield -d unishield_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      UNISHIELD_TEST_POSTGRES_URL: postgresql+psycopg://unishield:ci-only-password@127.0.0.1:5432/unishield_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install pinned dependencies and the PostgreSQL driver
+        run: |
+          python -m pip install -r requirements-dev.txt "psycopg[binary]==3.3.6"
+          python -m pip install --no-deps -e .
+
+      - name: PostgreSQL tests
+        run: python -m pytest tests/integration/test_postgres.py -q -W error::DeprecationWarning -rs
+
+      - name: Upgrade and inspect the schema with the admin CLI
+        run: |
+          unishield-admin --db-url "$UNISHIELD_TEST_POSTGRES_URL" db upgrade
+          unishield-admin --db-url "$UNISHIELD_TEST_POSTGRES_URL" db current
+
+  supply-chain:
+    name: dependency audit and SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install audit tools (pinned)
+        run: python -m pip install pip-audit==2.10.1 cyclonedx-bom==7.5.0
+
+      - name: Audit the pinned requirements for known vulnerabilities
+        run: >-
+          pip-audit --no-deps --disable-pip --progress-spinner off
+          -r requirements.txt -r requirements-dev.txt -r requirements-ml.txt
+
+      - name: CycloneDX SBOMs (runtime, and runtime + development)
+        run: |
+          mkdir -p sbom
+          cyclonedx-py requirements requirements.txt --pyproject pyproject.toml --mc-type application \
+            --of JSON --output-reproducible -o sbom/unishield-runtime.cdx.json
+          cyclonedx-py requirements requirements-dev.txt --pyproject pyproject.toml --mc-type application \
+            --of JSON --output-reproducible -o sbom/unishield-dev.cdx.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom/
+          if-no-files-found: error

@@ -12,6 +12,7 @@ run it with access to that database is trusted.
     unishield-admin token create --name NAME --role viewer [--expires-days N]
     unishield-admin token list | revoke NAME
     unishield-admin retention run [--days N]          delete old alerts/runs and expired sessions
+    unishield-admin models verify                     check model artifacts against their SHA-256
 
 There are no default accounts: create the first administrator with
 ``user create``. Passwords are read from the terminal without echo, or with
@@ -198,6 +199,22 @@ def cmd_retention_run(args: argparse.Namespace) -> None:
           f"and {result['sessions']} expired sessions")
 
 
+# --- models ----------------------------------------------------------------------
+
+def cmd_models_verify(args: argparse.Namespace) -> None:
+    from unishield.models.registry import ModelRegistry
+
+    results = ModelRegistry(args.saved_dir, args.metadata_dir).verify()
+    if not results:
+        print("No saved models")
+        return
+    for r in results:
+        print(f"{r['status']:<9} {r['name']} v{r['version']} ({r['artifact']})")
+    bad = [r for r in results if r["status"] != "ok"]
+    if bad:
+        raise CLIError(f"{len(bad)} of {len(results)} model artifacts are missing or do not match their SHA-256")
+
+
 # --- parser --------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -251,6 +268,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = retention.add_parser("run", help="delete alerts and runs older than the retention period")
     p.add_argument("--days", type=int, default=None, help="override retention.alert_days")
     p.set_defaults(func=cmd_retention_run)
+
+    models = groups.add_parser("models", help="trained models").add_subparsers(dest="command", required=True)
+    p = models.add_parser("verify", help="check every artifact against the SHA-256 recorded at training")
+    p.add_argument("--saved-dir", default=None, help="default: models.saved_dir")
+    p.add_argument("--metadata-dir", default=None, help="default: models.metadata_dir")
+    p.set_defaults(func=cmd_models_verify)
     return parser
 
 

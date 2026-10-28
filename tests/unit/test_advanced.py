@@ -143,7 +143,7 @@ class TestAnomalyDetector:
         for w in range(6):
             flows = generate_normal_traffic(50, t0 + timedelta(seconds=w * 10))
             features = ext.extract(flows)
-            alerts = detector.detect(flows, features, t0, t0 + timedelta(seconds=10))
+            detector.detect(flows, features, t0, t0 + timedelta(seconds=10))
 
         assert detector.is_fitted
 
@@ -164,7 +164,7 @@ class TestAnomalyDetector:
         # Now feed anomalous traffic
         anomalous_flows = generate_ddos_traffic(500, t0 + timedelta(seconds=100))
         anom_features = ext.extract(anomalous_flows)
-        alerts = detector.detect(
+        detector.detect(
             anomalous_flows, anom_features,
             t0 + timedelta(seconds=100),
             t0 + timedelta(seconds=110),
