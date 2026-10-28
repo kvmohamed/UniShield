@@ -87,6 +87,14 @@ svg text { fill: var(--muted); font: 10px var(--sans); }
 .stage .d { color: var(--muted); font-size: 12.5px; }
 .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
 a { color: var(--accent); }
+[hidden] { display: none !important; }
+.login { display: flex; justify-content: center; padding: 48px 16px; }
+.login form { width: 100%; max-width: 360px; display: grid; gap: 10px; }
+.login label, .stack label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.stack { display: grid; gap: 10px; max-width: 420px; }
+td .controls { flex-wrap: nowrap; }
+td select, td button.btn { padding: 3px 8px; font-size: 12.5px; }
+.outcome-failure, .outcome-denied { color: var(--critical); }
 @media (max-width: 640px) {
   main { padding: 12px; } .two { grid-template-columns: 1fr; }
   .bars .row { grid-template-columns: 110px 1fr 40px; } dl.kv { grid-template-columns: 1fr; }
@@ -103,22 +111,34 @@ a { color: var(--accent); }
   <span class="pill"><span class="dot" id="hdr-run-dot"></span><span id="hdr-run">idle</span></span>
   <span class="pill" id="hdr-mode">mode: –</span>
   <span class="spacer"></span>
-  <label class="pill" for="api-key">Admin key
-    <input id="api-key" type="password" autocomplete="off" placeholder="optional" size="14" aria-label="Admin API key">
-  </label>
+  <span class="pill" id="hdr-user" hidden><span class="dot ok"></span><span id="hdr-user-name"></span></span>
+  <button class="btn" id="btn-signin" hidden>Sign in</button>
+  <button class="btn" id="btn-signout" hidden>Sign out</button>
 </header>
 <p class="notice"><strong>Notice:</strong> This system is a passive defensive research prototype. It does not probe, block, decrypt, or send commands to monitored systems.</p>
-<nav role="tablist" aria-label="Dashboard sections">
+<div class="login" id="login-view" hidden>
+  <form class="card" id="login-form">
+    <h2>Sign in to UniShield</h2>
+    <label>Username <input id="login-user" name="username" autocomplete="username" maxlength="64" required></label>
+    <label>Password <input id="login-pass" name="password" type="password" autocomplete="current-password" maxlength="1024" required></label>
+    <button class="btn primary" type="submit">Sign in</button>
+    <div class="msg" id="login-msg" role="status"></div>
+    <div class="msg">Accounts are created by an administrator (unishield-admin user create, or the Admin tab).</div>
+  </form>
+</div>
+<nav role="tablist" aria-label="Dashboard sections" id="tabs" hidden>
   <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
   <button role="tab" data-tab="alerts" aria-selected="false">Alerts &amp; timeline</button>
   <button role="tab" data-tab="traffic" aria-selected="false">Traffic analytics</button>
   <button role="tab" data-tab="benchmark" aria-selected="false">Benchmark &amp; evaluation</button>
   <button role="tab" data-tab="architecture" aria-selected="false">Architecture status</button>
+  <button role="tab" data-tab="admin" aria-selected="false" hidden>Admin</button>
+  <button role="tab" data-tab="account" aria-selected="false" hidden>Account</button>
 </nav>
-<main>
+<main id="main" hidden>
 
 <section id="tab-overview" role="tabpanel">
-  <div class="card" style="margin-bottom:14px">
+  <div class="card" style="margin-bottom:14px" id="run-card" hidden>
     <h2>Run analysis</h2>
     <div class="controls">
       <select id="demo-scenario" aria-label="Demo scenario"></select>
@@ -217,6 +237,65 @@ a { color: var(--accent); }
   </div>
 </section>
 
+<section id="tab-admin" role="tabpanel" hidden>
+  <div class="card" style="margin-bottom:14px">
+    <h2>Users</h2>
+    <div class="table-wrap"><table><thead><tr><th>User</th><th>Role</th><th>State</th><th>Last login</th>
+      <th>Created by</th><th>Actions</th></tr></thead><tbody id="users"></tbody></table></div>
+    <div class="grid two" style="margin-top:14px">
+      <form class="stack" id="user-form">
+        <h2>Add user</h2>
+        <label>Username <input id="nu-name" autocomplete="off" maxlength="64" required></label>
+        <label>Role <select id="nu-role"><option value="viewer">viewer</option><option value="analyst">analyst</option>
+          <option value="admin">admin</option></select></label>
+        <label>Initial password <input id="nu-pass" type="password" autocomplete="new-password" maxlength="1024" required></label>
+        <button class="btn primary" type="submit">Create user</button>
+      </form>
+      <form class="stack" id="reset-form">
+        <h2>Reset a password</h2>
+        <label>User <select id="rp-user"></select></label>
+        <label>New password <input id="rp-pass" type="password" autocomplete="new-password" maxlength="1024" required></label>
+        <button class="btn" type="submit">Set password</button>
+        <div class="msg">Resetting a password ends that user's sessions and clears a lockout.</div>
+      </form>
+    </div>
+    <div class="msg" id="users-msg" role="status"></div>
+  </div>
+  <div class="card">
+    <h2>Audit log</h2>
+    <div class="controls" style="margin-bottom:8px">
+      <select id="au-action" aria-label="Action">
+        <option value="">All actions</option><option value="auth.">auth.*</option><option value="access.">access.*</option>
+        <option value="user.">user.*</option><option value="token.">token.*</option><option value="replay.">replay.*</option>
+        <option value="alerts.">alerts.*</option><option value="retention.">retention.*</option><option value="system.">system.*</option>
+      </select>
+      <select id="au-outcome" aria-label="Outcome"><option value="">All outcomes</option><option value="success">success</option>
+        <option value="failure">failure</option><option value="denied">denied</option></select>
+      <button class="btn" id="btn-audit">Apply</button>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Actor</th><th>Action</th><th>Outcome</th>
+      <th>Target</th><th>Address</th><th>Details</th></tr></thead><tbody id="audit"></tbody></table></div>
+    <div class="pager"><span id="au-info"></span>
+      <button class="btn" id="au-prev">Previous</button><button class="btn" id="au-next">Next</button></div>
+  </div>
+</section>
+
+<section id="tab-account" role="tabpanel" hidden>
+  <div class="card" style="max-width:560px">
+    <h2>Your account</h2>
+    <dl class="kv" id="account-info"></dl>
+    <form class="stack" id="pw-form" style="margin-top:16px">
+      <h2>Change password</h2>
+      <input type="text" id="pw-username" autocomplete="username" hidden>
+      <label>Current password <input id="pw-current" type="password" autocomplete="current-password" maxlength="1024" required></label>
+      <label>New password <input id="pw-new" type="password" autocomplete="new-password" maxlength="1024" required></label>
+      <label>Repeat new password <input id="pw-repeat" type="password" autocomplete="new-password" maxlength="1024" required></label>
+      <button class="btn primary" type="submit">Change password</button>
+      <div class="msg" id="pw-msg" role="status"></div>
+    </form>
+  </div>
+</section>
+
 </main>
 <script>
 "use strict";
@@ -251,30 +330,97 @@ const fmtTime = (iso) => iso ? new Date(iso).toISOString().replace("T", " ").sli
 const fmtBytes = (b) => { if (!b) return "0 B"; const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0;
   while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; } return b.toFixed(i ? 1 : 0) + " " + u[i]; };
 
-function apiKey() { try { return sessionStorage.getItem("unishield-key") || ""; } catch (e) { return ""; } }
-$("api-key").value = apiKey();
-$("api-key").addEventListener("change", (e) => { try { sessionStorage.setItem("unishield-key", e.target.value); } catch (err) { /* storage unavailable */ } });
+// ---------------------------------------------------------------- session
+// The session lives in an HttpOnly cookie the page cannot read; /auth/me returns the
+// role and the CSRF token, which every state-changing request echoes in X-CSRF-Token.
+// Nothing is kept in browser storage.
+state.me = null;
+state.showLogin = false;
+const canRead = () => !!state.me && (state.me.authenticated || state.me.effective_role === "viewer");
+const isAdmin = () => !!state.me && state.me.role === "admin";
+const hasSession = () => !!state.me && state.me.via === "session";
 
 async function api(path, opts = {}) {
+  const method = opts.method || "GET";
   const headers = { "Accept": "application/json" };
-  if (opts.method && opts.method !== "GET" && apiKey()) headers["X-API-Key"] = apiKey();
-  const res = await fetch(path, { method: opts.method || "GET", headers, cache: "no-store" });
+  if (method !== "GET" && state.me && state.me.csrf_token) headers["X-CSRF-Token"] = state.me.csrf_token;
+  let payload;
+  if (opts.json !== undefined) { headers["Content-Type"] = "application/json"; payload = JSON.stringify(opts.json); }
+  const res = await fetch(path, { method, headers, body: payload, cache: "no-store", credentials: "same-origin" });
   let body = null;
-  try { body = await res.json(); } catch (e) { body = null; }
+  if (res.status !== 204) { try { body = await res.json(); } catch (e) { body = null; } }
   if (!res.ok) {
     const detail = body && body.detail ? (typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)) : res.statusText;
+    if (res.status === 401 && !path.startsWith("/auth/")) await sessionEnded();
     throw new Error(res.status + ": " + detail);
   }
   return { body, headers: res.headers };
 }
+
+async function loadMe() {
+  try { state.me = (await api("/auth/me")).body; } catch (e) { state.me = null; }
+  applyAuth();
+}
+
+async function sessionEnded() {
+  const wasSignedIn = state.me && state.me.authenticated;
+  await loadMe();
+  if (wasSignedIn && !(state.me && state.me.authenticated)) {
+    state.showLogin = true; applyAuth();
+    $("login-msg").textContent = "Your session ended. Sign in again.";
+  }
+}
+
+function applyAuth() {
+  const me = state.me || {};
+  const reader = canRead();
+  $("login-view").hidden = reader && !state.showLogin;
+  $("tabs").hidden = !reader;
+  $("main").hidden = !reader;
+  $("run-card").hidden = !isAdmin();
+  document.querySelector('nav button[data-tab="admin"]').hidden = !(isAdmin() && hasSession());
+  document.querySelector('nav button[data-tab="account"]').hidden = !hasSession();
+  $("hdr-user").hidden = !me.authenticated;
+  $("hdr-user-name").textContent = me.authenticated ? `${me.name} · ${me.role}` : "";
+  $("btn-signin").hidden = !!me.authenticated || !reader || state.showLogin;
+  $("btn-signout").hidden = !hasSession();
+  const current = document.querySelector(`nav button[data-tab="${state.tab}"]`);
+  if (current && current.hidden) selectTab("overview");
+}
+
+$("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = $("login-msg");
+  msg.className = "msg"; msg.textContent = "Signing in…";
+  try {
+    const { body } = await api("/auth/login", { method: "POST",
+      json: { username: $("login-user").value.trim(), password: $("login-pass").value } });
+    state.me = body; state.showLogin = false; msg.textContent = "";
+    $("login-pass").value = "";
+    applyAuth(); state.lastAlertCount = -1; poll();
+  } catch (err) {
+    msg.className = "msg err";
+    msg.textContent = err.message.startsWith("429") ? "Too many failed attempts from this address; wait and try again."
+      : "Sign-in failed: wrong username or password, or the account is temporarily locked.";
+    $("login-pass").value = "";
+  }
+});
+$("btn-signin").addEventListener("click", () => { state.showLogin = true; applyAuth(); $("login-user").focus(); });
+$("btn-signout").addEventListener("click", async () => {
+  try { await api("/auth/logout", { method: "POST" }); } catch (e) { /* the session may already be gone */ }
+  await loadMe();
+});
 const qs = (params) => new URLSearchParams(Object.entries(params).filter(([, v]) => v !== "" && v !== null && v !== undefined)).toString();
 function message(text, isError) { const m = $("run-msg"); m.textContent = text; m.className = "msg" + (isError ? " err" : ""); }
 
 // ---------------------------------------------------------------- tabs
+function selectTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-selected", String(x.dataset.tab === tab)));
+  document.querySelectorAll("main section").forEach((s) => { s.hidden = s.id !== "tab-" + tab; });
+}
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
-  state.tab = b.dataset.tab;
-  document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
-  document.querySelectorAll("main section").forEach((s) => { s.hidden = s.id !== "tab-" + state.tab; });
+  selectTab(b.dataset.tab);
   refreshTab();
 }));
 
@@ -555,35 +701,147 @@ function renderIntel(i) {
     imp.map((x) => [fmtTime(x.imported_at), x.source, x.filename || "–", x.format, x.mode, fmtNum(x.accepted), fmtNum(x.rejected)])));
 }
 
+// ---------------------------------------------------------------- admin: users and audit log
+const AUDIT_PAGE = 50;
+state.auditOffset = 0;
+function usersMessage(text, isError) { const m = $("users-msg"); m.textContent = text; m.className = "msg" + (isError ? " err" : ""); }
+
+async function userAction(label, path, opts) {
+  try { await api(path, opts); usersMessage(label + ": done"); }
+  catch (e) { usersMessage(label + " failed — " + e.message, true); }
+  await loadAdmin();
+}
+
+async function loadUsers() {
+  const { body: users } = await api("/users");
+  const tb = clear($("users"));
+  const me = state.me && state.me.name;
+  for (const u of users) {
+    const role = el("select", { "aria-label": "Role of " + u.username });
+    ["viewer", "analyst", "admin"].forEach((r) => role.append(el("option", { value: r, text: r })));
+    role.value = u.role;
+    role.addEventListener("change", () => {
+      if (!confirm(`Change the role of ${u.username} to ${role.value}? Their sessions end.`)) { role.value = u.role; return; }
+      userAction("Role change", "/users/" + encodeURIComponent(u.username), { method: "PATCH", json: { role: role.value } });
+    });
+    const actions = el("div", { class: "controls" },
+      el("button", { class: "btn", text: u.disabled ? "Enable" : "Disable", onclick: () => {
+        if (u.disabled || confirm(`Disable ${u.username}? Their sessions end.`))
+          userAction(u.disabled ? "Enable" : "Disable", "/users/" + encodeURIComponent(u.username),
+            { method: "PATCH", json: { disabled: !u.disabled } });
+      } }));
+    if (u.locked) actions.append(el("button", { class: "btn", text: "Unlock", onclick: () =>
+      userAction("Unlock", "/users/" + encodeURIComponent(u.username), { method: "PATCH", json: { unlock: true } }) }));
+    if (u.username !== me) actions.append(el("button", { class: "btn danger", text: "Delete", onclick: () => {
+      if (confirm(`Delete ${u.username}? Audit entries that name them are kept.`))
+        userAction("Delete", "/users/" + encodeURIComponent(u.username), { method: "DELETE" });
+    } }));
+    const stateText = u.disabled ? "disabled" : u.locked ? "locked until " + fmtTime(u.locked_until) : "active";
+    tb.append(el("tr", {}, el("td", { class: "mono", text: u.username }), el("td", {}, role), el("td", { text: stateText }),
+      el("td", { class: "mono", text: fmtTime(u.last_login_at) }), el("td", { class: "mono", text: u.created_by || "–" }),
+      el("td", {}, actions)));
+  }
+  const sel = clear($("rp-user"));
+  users.forEach((u) => sel.append(el("option", { value: u.username, text: u.username })));
+}
+
+async function loadAudit() {
+  const params = { limit: AUDIT_PAGE, offset: state.auditOffset, action: $("au-action").value, outcome: $("au-outcome").value };
+  const { body, headers } = await api("/audit?" + qs(params));
+  const total = Number(headers.get("X-Total-Count") || body.length);
+  const tb = clear($("audit"));
+  if (!body.length) tb.append(el("tr", {}, el("td", { colspan: 7, class: "empty", text: "No matching entries" })));
+  body.forEach((a) => tb.append(el("tr", {}, el("td", { class: "mono", text: fmtTime(a.timestamp) }),
+    el("td", { class: "mono", text: a.actor }), el("td", { class: "mono", text: a.action }),
+    el("td", { class: "outcome-" + (["success", "failure", "denied"].includes(a.outcome) ? a.outcome : "x"), text: a.outcome }),
+    el("td", { class: "mono", text: a.target || "–" }), el("td", { class: "mono", text: a.client_ip || "–" }),
+    el("td", { class: "mono", text: Object.keys(a.details || {}).length ? JSON.stringify(a.details) : "–" }))));
+  $("au-info").textContent = total ? `${state.auditOffset + 1}–${Math.min(state.auditOffset + AUDIT_PAGE, total)} of ${fmtNum(total)}` : "";
+  $("au-prev").disabled = state.auditOffset === 0; $("au-next").disabled = state.auditOffset + AUDIT_PAGE >= total;
+  state.auditTotal = total;
+}
+
+async function loadAdmin() { await Promise.all([loadUsers(), loadAudit()]); }
+
+$("user-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const json = { username: $("nu-name").value.trim(), role: $("nu-role").value, password: $("nu-pass").value };
+  $("nu-pass").value = "";
+  await userAction("Create " + json.username, "/users", { method: "POST", json });
+  $("nu-name").value = "";
+});
+$("reset-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const user = $("rp-user").value, password = $("rp-pass").value;
+  $("rp-pass").value = "";
+  if (user && confirm(`Replace the password of ${user}? Their sessions end.`))
+    await userAction("Password reset for " + user, "/users/" + encodeURIComponent(user), { method: "PATCH", json: { password } });
+});
+$("btn-audit").addEventListener("click", () => { state.auditOffset = 0; loadAudit().catch((e) => usersMessage(e.message, true)); });
+$("au-prev").addEventListener("click", () => { state.auditOffset = Math.max(0, state.auditOffset - AUDIT_PAGE); loadAudit(); });
+$("au-next").addEventListener("click", () => { if (state.auditOffset + AUDIT_PAGE < state.auditTotal) { state.auditOffset += AUDIT_PAGE; loadAudit(); } });
+
+// ---------------------------------------------------------------- account
+function loadAccount() {
+  const me = state.me || {}, u = me.user || {};
+  $("pw-username").value = u.username || "";
+  const kv = clear($("account-info"));
+  [["User", u.username], ["Role", me.role], ["Last sign-in", fmtTime(u.last_login_at)],
+   ["Password changed", fmtTime(u.password_changed_at)], ["Session expires", fmtTime(me.expires_at)],
+   ["Idle timeout", me.idle_timeout_minutes ? me.idle_timeout_minutes + " min" : "–"]]
+    .forEach(([k, v]) => kv.append(el("dt", { text: k }), el("dd", { class: "mono", text: v || "–" })));
+}
+$("pw-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = $("pw-msg");
+  const current = $("pw-current").value, next = $("pw-new").value, repeat = $("pw-repeat").value;
+  ["pw-current", "pw-new", "pw-repeat"].forEach((id) => { $(id).value = ""; });
+  if (next !== repeat) { msg.className = "msg err"; msg.textContent = "The new passwords do not match."; return; }
+  try {
+    await api("/auth/password", { method: "POST", json: { current_password: current, new_password: next } });
+    msg.className = "msg"; msg.textContent = "Password changed. Your other sessions were signed out.";
+    await loadMe();
+  } catch (err) { msg.className = "msg err"; msg.textContent = "Not changed — " + err.message; }
+});
+
 async function refreshTab() {
+  if (!canRead()) return;
   try {
     if (state.tab === "overview") await loadOverview();
     else if (state.tab === "alerts") await loadFeed();
     else if (state.tab === "traffic") await loadTraffic();
     else if (state.tab === "benchmark") await loadBenchmark();
     else if (state.tab === "architecture") await loadArchitecture();
+    else if (state.tab === "admin") await loadAdmin();
+    else if (state.tab === "account") loadAccount();
   } catch (e) { message("Could not load data — " + e.message, true); }
 }
 
 async function poll() {
   try {
-    const [{ body: health }, { body: status }] = await Promise.all([api("/health"), api("/replay/status")]);
+    const { body: health } = await api("/health");
     $("hdr-api-dot").className = "dot " + (health.status === "healthy" ? "ok" : "bad");
     $("hdr-api").textContent = "API " + health.status;
+  } catch (e) {
+    $("hdr-api-dot").className = "dot bad"; $("hdr-api").textContent = "API unreachable";
+    return;
+  }
+  if (!canRead()) return;
+  try {
+    const { body: status } = await api("/replay/status");
     state.running = status.status === "running";
     $("hdr-run-dot").className = "dot " + (state.running ? "run" : status.status === "failed" ? "bad" : "ok");
     $("hdr-run").textContent = status.status + (status.source ? " · " + status.source : "") +
       (status.records_processed ? " · " + fmtNum(status.records_processed) + " records" : "");
     $("hdr-mode").textContent = "mode: " + (status.detection_mode || "rules");
-    if (state.running || status.alerts_generated !== state.lastAlertCount) {
+    const dataTab = state.tab !== "admin" && state.tab !== "account";
+    if (dataTab && (state.running || status.alerts_generated !== state.lastAlertCount)) {
       state.lastAlertCount = status.alerts_generated;
       await refreshTab();
     }
-  } catch (e) {
-    $("hdr-api-dot").className = "dot bad"; $("hdr-api").textContent = "API unreachable";
-  }
+  } catch (e) { /* a 401 already switched to the sign-in view */ }
 }
-poll();
+loadMe().then(() => { refreshTab(); poll(); });
 setInterval(poll, 3000);
 </script>
 </body>
