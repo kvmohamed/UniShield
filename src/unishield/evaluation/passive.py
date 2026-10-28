@@ -24,11 +24,11 @@ walking the call stack) may only reach addresses the destination policy
 permits — allow-listed and outside ``network.home_networks``; every other
 caller may only use loopback (event-loop internals). Under the tripwire the
 pipeline runs over every supported input format with threat intelligence
-loaded, the API handles a replay and a demo, and the export/notification
-outputs deliver to loopback receivers. Three probes must be refused: a
-monitored-network destination at config load, at send time, and at socket
-level with the policy check bypassed. Any other recorded attempt fails the
-check.
+loaded, the API handles a login, a replay and a demo and the read
+endpoints, and the export/notification outputs deliver to loopback
+receivers. Three probes must be refused: a monitored-network destination at
+config load, at send time, and at socket level with the policy check
+bypassed. Any other recorded attempt fails the check.
 
 Neither check can prove the absence of every possible network effect (for
 example from third-party libraries' internals), but together they show
@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import ast
 import os
+import secrets
 import socket
 import sys
 import tempfile
@@ -443,10 +444,17 @@ def runtime_check_detailed() -> tuple[list[str], list[str], list[str], list[str]
         exercised.append(f"readers, pipeline and detectors: {strict.loopback_calls} socket operations of any kind "
                          "(loopback refused too)")
         with _Tripwire() as wire:
-            client = TestClient(create_app(AlertRepository.from_url("sqlite://")), client=("127.0.0.1", 50000))
+            app = create_app(AlertRepository.from_url("sqlite://"))
+            password = secrets.token_urlsafe(18)
+            app.state.ctx.accounts.create_user("passive-check", password, "admin")
+            client = TestClient(app, client=("127.0.0.1", 50000))
+            login = client.post("/auth/login", json={"username": "passive-check", "password": password})
+            client.headers["X-CSRF-Token"] = login.json().get("csrf_token") or ""
+            exercised.append(f"api:/auth/login:{login.status_code}")
             body = client.post("/replay/demo", params={"scenario": "port_scan", "wait": True}).json()
             exercised.append(f"api:/replay/demo:{body.get('status')}")
-            for path in ("/health", "/alerts", "/incidents", "/metrics", "/metrics/traffic", "/system/architecture"):
+            for path in ("/health", "/alerts", "/incidents", "/metrics", "/metrics/traffic", "/system/architecture",
+                         "/intel/status", "/outputs/status", "/auth/me", "/audit"):
                 client.get(path)
                 exercised.append(f"api:{path}")
             attempts += wire.attempts

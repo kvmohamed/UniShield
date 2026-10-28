@@ -2,9 +2,10 @@
 UniShield — API Application State
 
 One AppContext per FastAPI app: the alert repository (created lazily from
-``database.url`` on first use), the threat-intel store in the same
-database, the output service (exports, syslog, notifications; started on
-first use, inactive unless configured), the replay worker thread and its
+``database.url`` on first use), the threat-intel store, the account store
+and the audit log in the same database, the login rate limiter, the output
+service (exports, syslog, notifications; started on first use, inactive
+unless configured), the replay worker thread and its
 status, and the live pipeline whose metrics the API reports.
 
 Replays run the pipeline in a background thread with the imported
@@ -21,13 +22,15 @@ import time
 import uuid
 from typing import Any, Optional
 
+from unishield.accounts import AccountStore
+from unishield.accounts.ratelimit import LoginRateLimiter
 from unishield.config import get_config
 from unishield.export.service import OutputService
 from unishield.intel.matcher import IntelMatcher
 from unishield.intel.store import IntelStore
 from unishield.processing.pipeline import Pipeline
 from unishield.schemas.alert import Alert
-from unishield.storage import AlertRepository
+from unishield.storage import AlertRepository, AuditLog
 
 logger = logging.getLogger("unishield.api.state")
 
@@ -53,6 +56,9 @@ class AppContext:
         self._repository = repository
         self._intel: Optional[IntelStore] = None
         self._outputs: Optional[OutputService] = None
+        self._accounts: Optional[AccountStore] = None
+        self._audit: Optional[AuditLog] = None
+        self._limiter: Optional[LoginRateLimiter] = None
         self._lock = threading.Lock()
         self.started = time.time()
         self.replay: dict[str, Any] = dict(_IDLE)
@@ -73,6 +79,7 @@ class AppContext:
     def use_repository(self, repository: AlertRepository) -> None:
         self._repository = repository
         self._intel = None
+        self._accounts = self._audit = None
 
     @property
     def intel(self) -> IntelStore:
@@ -87,6 +94,25 @@ class AppContext:
             return IntelMatcher()
         salt = config.security.ip_hash_salt if config.security.anonymize_ips else None
         return self.intel.matcher(anonymize_salt=salt)
+
+    @property
+    def accounts(self) -> AccountStore:
+        if self._accounts is None:
+            self._accounts = AccountStore(self.repository.engine)
+        return self._accounts
+
+    @property
+    def audit(self) -> AuditLog:
+        if self._audit is None:
+            self._audit = AuditLog(self.repository.engine)
+        return self._audit
+
+    @property
+    def limiter(self) -> LoginRateLimiter:
+        if self._limiter is None:
+            cfg = get_config().auth
+            self._limiter = LoginRateLimiter(cfg.login_rate_limit, cfg.login_rate_window_sec)
+        return self._limiter
 
     # --- outputs --------------------------------------------------------------
 
@@ -124,14 +150,13 @@ class AppContext:
             self.pipeline = pipeline
             self.replay = dict(_IDLE, status="running", run_id=run_id, source=source, format=fmt,
                                detection_mode=pipeline.detection_mode, started_at=time.time())
-        if clear:
-            self.repository.delete_all()
+        deleted = self.repository.delete_all() if clear else 0
         self.repository.start_run(run_id, source, pipeline.detection_mode)
         self.thread = threading.Thread(target=self._run, args=(pipeline, reader, run_id),
                                        name=f"replay-{run_id}", daemon=True)
         self.thread.start()
         return {"status": "started", "run_id": run_id, "source": source, "format": fmt,
-                "detection_mode": pipeline.detection_mode}
+                "detection_mode": pipeline.detection_mode, "alerts_deleted": deleted}
 
     def _store_alert(self, alert: Alert) -> None:
         alert.run_id = self.replay.get("run_id")

@@ -2,8 +2,9 @@
 UniShield — Paced Real-Time Replay with End-to-End Timestamps
 
 Replays flows at a fixed multiple of their original pace (``speed``) through
-the real pipeline while the real API (in-process ASGI client, no sockets)
-polls ``GET /alerts`` for new alerts. For every alert it records:
+the real pipeline while the real API (in-process ASGI client, no sockets,
+authenticated with a viewer service token) polls ``GET /alerts`` for new
+alerts. For every alert it records:
 
     window end (replayed)   wall time at which the replay clock passed the
                             alert window's end
@@ -104,7 +105,9 @@ def paced_run(flows: list[NormalisedFlow], speed: float, poll_interval: float = 
     from unishield.api.app import create_app
 
     repo = AlertRepository.from_url("sqlite://")
-    client = TestClient(create_app(repo), client=("127.0.0.1", 50000))
+    app = create_app(repo)
+    token, _ = app.state.ctx.accounts.create_token("realtime-poller", "viewer")
+    client = TestClient(app, client=("127.0.0.1", 50000), headers={"X-API-Key": token})
     reader = PacedReader(flows, speed)
     poller = _ApiPoller(client, poll_interval)
     poller.start()

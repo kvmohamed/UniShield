@@ -3,7 +3,7 @@ Replay endpoints: analyse a local file or a synthetic scenario.
 
 Replay reads files under the configured data directories and runs the
 pipeline locally. Nothing is sent on any network. Starting and stopping
-replays requires administrative access (see api.security).
+replays requires an administrator (see api.security) and is audited.
 """
 
 from __future__ import annotations
@@ -11,10 +11,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from unishield.api.deps import get_context
-from unishield.api.security import require_admin
+from unishield.api.security import audit, require_admin, require_viewer
 from unishield.api.state import AppContext
 from unishield.config import get_config
 from unishield.data.sample_generator import SCENARIO_NAMES, SimulatedReader, build_scenario, generate_mixed_scenario
@@ -60,15 +60,22 @@ def resolve_replay_path(file_path: str) -> Path:
     return resolved
 
 
-def _start(ctx: AppContext, reader, source: str, fmt: str, clear: bool, mode: Optional[str]) -> dict[str, Any]:
+def _start(request: Request, ctx: AppContext, reader, source: str, fmt: str, clear: bool,
+           mode: Optional[str], action: str) -> dict[str, Any]:
     try:
-        return ctx.start_replay(reader, source, fmt, clear=clear, detection_mode=mode)
+        started = ctx.start_replay(reader, source, fmt, clear=clear, detection_mode=mode)
     except RuntimeError as exc:
+        audit(request, action, "failure", target=source, details={"error": str(exc)})
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    audit(request, action, target=source, details={
+        "run_id": started["run_id"], "format": fmt, "detection_mode": started["detection_mode"],
+        "alerts_deleted": started["alerts_deleted"]})
+    return started
 
 
 @router.post("/replay/start", summary="Analyse a local traffic file", dependencies=[Depends(require_admin)])
 def replay_start(
+    request: Request,
     file_path: str = Query(..., max_length=4096, description="Path under the data directory"),
     clear: bool = Query(default=True, description="Delete stored alerts before the run"),
     mode: Optional[DetectionMode] = Query(default=None, description="Detection mode (default: config)"),
@@ -82,11 +89,12 @@ def replay_start(
         reader, fmt = open_reader(path)
     except UnsupportedFormatError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _start(ctx, reader, str(path), fmt, clear, mode)
+    return _start(request, ctx, reader, str(path), fmt, clear, mode, "replay.start")
 
 
 @router.post("/replay/demo", summary="Analyse synthetic attack traffic", dependencies=[Depends(require_admin)])
 def replay_demo(
+    request: Request,
     scenario: str = Query(default="mixed", description=f"'mixed' or one of: {', '.join(SCENARIO_NAMES)}"),
     seed: int = Query(default=7, ge=0, le=2**31 - 1),
     wait: bool = Query(default=False, description="Block until the run finishes (max 120 s)"),
@@ -109,7 +117,8 @@ def replay_demo(
         flows, expected = built.flows, sorted(built.expected_classes)
     else:
         raise HTTPException(status_code=422, detail=f"Unknown scenario; choose 'mixed' or one of {SCENARIO_NAMES}")
-    started = _start(ctx, SimulatedReader(flows), f"synthetic:{scenario}:{seed}", "simulated", clear, mode)
+    started = _start(request, ctx, SimulatedReader(flows), f"synthetic:{scenario}:{seed}", "simulated", clear, mode,
+                     "replay.demo")
     started.update(total_flows=len(flows), expected_classes=expected)
     if wait:
         ctx.wait(120)
@@ -120,17 +129,19 @@ def replay_demo(
 
 
 @router.post("/replay/stop", summary="Stop the running replay", dependencies=[Depends(require_admin)])
-def replay_stop(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
+def replay_stop(request: Request, ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
+    run_id = ctx.replay.get("run_id")
     if ctx.stop_replay():
+        audit(request, "replay.stop", target=run_id)
         return {"status": "stopping"}
     return {"status": "idle", "message": "No active replay"}
 
 
-@router.get("/replay/status", summary="Replay status")
+@router.get("/replay/status", summary="Replay status", dependencies=[Depends(require_viewer)])
 def replay_status(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     return ctx.status()
 
 
-@router.get("/replay/runs", summary="Recent analysis runs")
+@router.get("/replay/runs", summary="Recent analysis runs", dependencies=[Depends(require_viewer)])
 def replay_runs(limit: int = Query(default=20, ge=1, le=200), ctx: AppContext = Depends(get_context)) -> list[dict]:
     return ctx.repository.runs(limit)

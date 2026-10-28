@@ -1,4 +1,8 @@
-"""Security tests: admin authentication, input validation, injection safety, path traversal."""
+"""Security tests: admin authorisation, API keys, open mode, input validation, injection, path traversal.
+
+Login, session, CSRF and lockout behaviour is in test_auth.py; the role of
+every route is checked from the OpenAPI schema in test_route_guards.py.
+"""
 
 from __future__ import annotations
 
@@ -19,49 +23,102 @@ ADMIN_CALLS = [
     ("delete", "/intel/sources/feed", {}),
     ("post", "/intel/purge-expired", {}),
 ]
+READ_PATHS = ("/alerts", "/alerts/summary", "/metrics", "/replay/status", "/incidents", "/system/architecture",
+              "/intel/status", "/outputs/status")
 
 
 def _call(client, method, path, params, headers=None):
     return getattr(client, method)(path, params=params, headers=headers or {})
 
 
+def _past_auth(response) -> bool:
+    """True if the request was authorised (it may still fail validation, e.g. a path outside data/)."""
+    if response.status_code == 401:
+        return False
+    detail = str(response.json().get("detail", "")) if response.status_code >= 400 else ""
+    return not any(word in detail for word in ("X-API-Key", "Login", "role", "CSRF", "interactive login"))
+
+
 @pytest.mark.parametrize("method,path,params", ADMIN_CALLS)
-def test_admin_endpoints_reject_remote_clients_without_key(api_client, method, path, params):
+def test_admin_endpoints_need_a_login_even_from_loopback(api_client, method, path, params):
+    """Loopback is not trusted: behind a reverse proxy on the same host every client is loopback."""
     client, _ = api_client
-    remote = TestClient(client.app, client=("203.0.113.9", 40000))
-    response = _call(remote, method, path, params)
-    assert response.status_code == 403
-    assert "UNISHIELD_ADMIN_API_KEY" in response.json()["detail"]
+    for address in (("127.0.0.1", 40000), ("::1", 40000), ("203.0.113.9", 40000)):
+        response = _call(TestClient(client.app, client=address), method, path, params)
+        assert response.status_code == 401, (address, response.text)
 
 
 @pytest.mark.parametrize("method,path,params", ADMIN_CALLS)
-def test_admin_endpoints_require_the_configured_key(api_client, monkeypatch, method, path, params):
+@pytest.mark.parametrize("role", ["viewer", "analyst"])
+def test_admin_endpoints_refuse_lower_roles(client_as, method, path, params, role):
+    response = _call(client_as(role), method, path, params)
+    assert response.status_code == 403 and "admin" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("method,path,params", ADMIN_CALLS)
+def test_static_api_key_grants_its_configured_role(api_client, monkeypatch, method, path, params):
     client, _ = api_client
     monkeypatch.setenv("UNISHIELD_ADMIN_API_KEY", "s3cret-key-for-tests")
     reset_config()
-    assert _call(client, method, path, params).status_code == 401                       # loopback, no key
-    assert _call(client, method, path, params, {"X-API-Key": "wrong"}).status_code == 401
     remote = TestClient(client.app, client=("203.0.113.9", 40000))
-    ok = _call(remote, method, path, params, {"X-API-Key": "s3cret-key-for-tests"})
-    assert ok.status_code != 401
-    detail = str(ok.json().get("detail", "")) if ok.status_code >= 400 else ""
-    assert "X-API-Key" not in detail and "loopback" not in detail     # past authentication
+    assert _call(remote, method, path, params).status_code == 401                         # no key
+    assert _call(remote, method, path, params, {"X-API-Key": "wrong"}).status_code == 401
+    assert _past_auth(_call(remote, method, path, params, {"X-API-Key": "s3cret-key-for-tests"}))
+    monkeypatch.setenv("UNISHIELD_API_KEY_ROLE", "viewer")
+    reset_config()
+    assert _call(remote, method, path, params, {"X-API-Key": "s3cret-key-for-tests"}).status_code == 403
+    assert remote.get("/alerts", headers={"X-API-Key": "s3cret-key-for-tests"}).status_code == 200
 
 
-def test_read_endpoints_stay_open_to_remote_clients(api_client):
+def test_read_endpoints_need_a_login(api_client, client_as):
     client, _ = api_client
-    remote = TestClient(client.app, client=("203.0.113.9", 40000))
-    for path in ("/health", "/alerts", "/alerts/summary", "/metrics", "/replay/status", "/incidents",
-                 "/intel/status", "/outputs/status"):
-        assert remote.get(path).status_code == 200, path
+    anonymous = client_as(None, address=("203.0.113.9", 40000))
+    viewer = client_as("viewer", address=("203.0.113.9", 40000))
+    assert anonymous.get("/health").status_code == 200
+    for path in READ_PATHS:
+        assert anonymous.get(path).status_code == 401, path
+        assert viewer.get(path).status_code == 200, path
+
+
+def test_open_mode_serves_reads_without_login_but_not_admin_actions(api_client, client_as, monkeypatch):
+    monkeypatch.setenv("UNISHIELD_AUTH_MODE", "open")
+    reset_config()
+    anonymous = client_as(None, address=("203.0.113.9", 40000))
+    for path in READ_PATHS:
+        assert anonymous.get(path).status_code == 200, path
+    me = anonymous.get("/auth/me").json()
+    assert me["mode"] == "open" and me["authenticated"] is False and me["effective_role"] == "viewer"
+    for method, path, params in ADMIN_CALLS:
+        assert _call(anonymous, method, path, params).status_code == 401
+    assert anonymous.get("/audit").status_code == 401 and anonymous.get("/users").status_code == 401
+
+
+def test_open_mode_is_refused_in_production(monkeypatch):
+    from unishield.config import UnishieldConfig
+
+    with pytest.raises(ValueError, match="labs only"):
+        UnishieldConfig(environment="production", auth={"mode": "open"})
+    assert UnishieldConfig(environment="production").auth.mode == "accounts"
+
+
+def test_cross_origin_state_changes_are_refused(api_client):
+    client, _ = api_client
+    hostile = {"Origin": "https://attacker.example"}
+    assert client.post("/replay/stop", headers=hostile).status_code == 403
+    assert client.post("/auth/login", json={"username": "admin", "password": "x"}, headers=hostile).status_code == 403
+    assert client.get("/alerts", headers=hostile).status_code == 200            # reads carry no side effects
+    assert client.post("/replay/stop", headers={"Origin": "http://testserver"}).status_code == 200
 
 
 def test_api_key_is_not_leaked(api_client, monkeypatch):
     client, _ = api_client
     monkeypatch.setenv("UNISHIELD_ADMIN_API_KEY", "s3cret-key-for-tests")
     reset_config()
-    for path in ("/health", "/system/architecture", "/openapi.json"):
+    for path in ("/health", "/system/architecture", "/openapi.json", "/auth/me", "/audit"):
         assert "s3cret-key-for-tests" not in client.get(path).text
+    client.get("/alerts", headers={"X-API-Key": "s3cret-key-for-tests"})
+    client.get("/alerts", headers={"X-API-Key": "s3cret-key-wrong"})
+    assert "s3cret" not in client.get("/audit").text
     from unishield.config import get_config
     assert "s3cret" not in repr(get_config().api)
 
@@ -116,12 +173,30 @@ def test_hardening_headers_on_api_responses(api_client):
 
 
 def test_no_mutating_get_endpoints(api_client):
-    """Every route that changes state is POST/DELETE and guarded; GET routes never mutate."""
+    """Every route that changes state is POST/PATCH/DELETE: auth routes or administrator-only; GET never mutates."""
     client, _ = api_client
-    guarded = {("POST", "/replay/start"), ("POST", "/replay/demo"), ("POST", "/replay/stop"),
-               ("DELETE", "/alerts"), ("POST", "/export"), ("POST", "/intel/import"),
-               ("DELETE", "/intel/sources/{source}"), ("POST", "/intel/purge-expired")}
-    found = {(m.upper(), path) for path, ops in client.app.openapi()["paths"].items() for m in ops
-             if m.upper() in ("POST", "PUT", "PATCH", "DELETE")}
-    assert found == guarded
+    expected = {
+        ("POST", "/auth/login"): "public", ("POST", "/auth/logout"): "public", ("POST", "/auth/password"): "viewer",
+        ("POST", "/replay/start"): "admin", ("POST", "/replay/demo"): "admin", ("POST", "/replay/stop"): "admin",
+        ("DELETE", "/alerts"): "admin", ("POST", "/users"): "admin", ("PATCH", "/users/{username}"): "admin",
+        ("DELETE", "/users/{username}"): "admin", ("POST", "/export"): "admin", ("POST", "/intel/import"): "admin",
+        ("DELETE", "/intel/sources/{source}"): "admin", ("POST", "/intel/purge-expired"): "admin",
+    }
+    found = {(m.upper(), path): op["x-unishield-role"] for path, ops in client.app.openapi()["paths"].items()
+             for m, op in ops.items() if m.upper() in ("POST", "PUT", "PATCH", "DELETE")}
+    assert found == expected
 
+
+def test_api_docs_can_be_turned_off(monkeypatch):
+    from unishield.api.app import create_app
+    from unishield.storage import AlertRepository
+
+    monkeypatch.setenv("UNISHIELD_API_DOCS", "false")
+    reset_config()
+    try:
+        client = TestClient(create_app(AlertRepository.from_url("sqlite://")))
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            assert client.get(path).status_code == 404, path
+        assert client.app.openapi()["paths"]["/alerts"]["get"]["x-unishield-role"] == "viewer"
+    finally:
+        reset_config()

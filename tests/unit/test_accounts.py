@@ -277,3 +277,20 @@ def test_cli_tokens(tmp_path, monkeypatch, capsys):
     actions = [e["action"] for e in AuditLog(store.engine).list()[0]]
     assert actions == ["token.revoke", "token.create"]
     assert raw not in str(AuditLog(store.engine).list()[0])
+
+
+def test_rate_limiter_window_and_bounds():
+    from unishield.accounts.ratelimit import LoginRateLimiter
+
+    now = [1000.0]
+    limiter = LoginRateLimiter(limit=3, window_sec=60, max_keys=2, clock=lambda: now[0])
+    assert [limiter.failure("a") for _ in range(3)] == [False, False, True]
+    assert limiter.retry_after("a") == 60 and limiter.retry_after("b") == 0
+    now[0] += 30
+    assert limiter.retry_after("a") == 30
+    now[0] += 30.5
+    assert limiter.retry_after("a") == 0                                  # the oldest failures left the window
+    limiter.failure("b")
+    limiter.failure("c")
+    limiter.failure("d")                                                  # evicts the least recently used key
+    assert set(limiter._failures) == {"c", "d"}

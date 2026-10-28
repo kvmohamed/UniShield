@@ -1,14 +1,14 @@
-"""Alert, incident and timeline endpoints (read-only except DELETE /alerts)."""
+"""Alert, incident and timeline endpoints (viewer; DELETE /alerts needs an administrator and is audited)."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from unishield.api.deps import get_context
-from unishield.api.security import require_admin
+from unishield.api.security import audit, require_admin, require_viewer
 from unishield.api.state import AppContext
 from unishield.correlation.correlator import AlertCorrelator
 from unishield.schemas.alert import Alert, AlertSummary, Severity, ThreatClass
@@ -19,7 +19,8 @@ router = APIRouter(tags=["alerts"])
 _IP_PATTERN = r"^[0-9A-Fa-f:.]{2,64}$|^[0-9a-f]{8,64}$"      # IPv4 / IPv6 / anonymised hash
 
 
-@router.get("/alerts", response_model=list[Alert], summary="List alerts")
+@router.get("/alerts", response_model=list[Alert], summary="List alerts",
+            dependencies=[Depends(require_viewer)])
 def list_alerts(
     response: Response,
     threat_class: Optional[ThreatClass] = Query(default=None),
@@ -47,18 +48,21 @@ def list_alerts(
     return items
 
 
-@router.get("/alerts/summary", response_model=AlertSummary, summary="Alert summary statistics")
+@router.get("/alerts/summary", response_model=AlertSummary, summary="Alert summary statistics",
+            dependencies=[Depends(require_viewer)])
 def alerts_summary(ctx: AppContext = Depends(get_context)) -> AlertSummary:
     return ctx.repository.summary()
 
 
-@router.get("/alerts/timeline", summary="Alert counts per severity over traffic time")
+@router.get("/alerts/timeline", summary="Alert counts per severity over traffic time",
+            dependencies=[Depends(require_viewer)])
 def alerts_timeline(bucket_sec: int = Query(default=60, ge=1, le=86_400),
                     ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     return {"bucket_sec": bucket_sec, "buckets": ctx.repository.timeline(bucket_sec)}
 
 
-@router.get("/alerts/{alert_id}", response_model=Alert, summary="Get alert by ID")
+@router.get("/alerts/{alert_id}", response_model=Alert, summary="Get alert by ID",
+            dependencies=[Depends(require_viewer)])
 def get_alert(alert_id: str, ctx: AppContext = Depends(get_context)) -> Alert:
     if len(alert_id) > 32:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -69,20 +73,24 @@ def get_alert(alert_id: str, ctx: AppContext = Depends(get_context)) -> Alert:
 
 
 @router.delete("/alerts", summary="Delete all stored alerts", dependencies=[Depends(require_admin)])
-def delete_alerts(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
+def delete_alerts(request: Request, ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     if ctx.running:
         raise HTTPException(status_code=409, detail="Stop the running replay first")
-    return {"deleted": ctx.repository.delete_all()}
+    deleted = ctx.repository.delete_all()
+    audit(request, "alerts.delete", target="alerts", details={"deleted": deleted})
+    return {"deleted": deleted}
 
 
-@router.get("/threats/{threat_class}", response_model=list[Alert], summary="Alerts of one threat class")
+@router.get("/threats/{threat_class}", response_model=list[Alert], summary="Alerts of one threat class",
+            dependencies=[Depends(require_viewer)])
 def get_threats(threat_class: ThreatClass, limit: int = Query(default=100, ge=1, le=1000),
                 ctx: AppContext = Depends(get_context)) -> list[Alert]:
     items, _ = ctx.repository.list(AlertQuery(threat_class=threat_class, limit=limit))
     return items
 
 
-@router.get("/incidents", summary="Alerts grouped into incidents by entity and time")
+@router.get("/incidents", summary="Alerts grouped into incidents by entity and time",
+            dependencies=[Depends(require_viewer)])
 def incidents(gap_sec: int = Query(default=300, ge=10, le=86_400),
               min_alerts: int = Query(default=2, ge=1, le=100),
               ctx: AppContext = Depends(get_context)) -> dict[str, Any]:

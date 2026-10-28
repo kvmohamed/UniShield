@@ -112,6 +112,9 @@ class APIConfig(BaseModel):
     admin_api_key: Optional[str] = Field(default=None, repr=False)
     api_key_role: Literal["viewer", "analyst", "admin"] = "admin"
     cors_origins: list[str] = Field(default_factory=list)   # the dashboard is same-origin
+    # Interactive API docs (/docs, /redoc, /openapi.json). They need no login and
+    # Swagger UI loads its scripts from a CDN: turn them off in production.
+    docs_enabled: bool = True
 
 
 class AuthConfig(BaseModel):
@@ -391,6 +394,7 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_LOG_LEVEL": ("log_level",),
     "UNISHIELD_API_HOST": ("api", "host"),
     "UNISHIELD_API_PORT": ("api", "port"),
+    "UNISHIELD_API_DOCS": ("api", "docs_enabled"),
     "UNISHIELD_WINDOW_SIZE_SEC": ("processing", "window_size_sec"),
     "UNISHIELD_SLIDE_INTERVAL_SEC": ("processing", "slide_interval_sec"),
     "UNISHIELD_ANONYMIZE_IPS": ("security", "anonymize_ips"),

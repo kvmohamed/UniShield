@@ -156,6 +156,7 @@ def test_runtime_check_records_no_unexpected_network_attempts():
     attempts, exercised, outbound, refusals = runtime_check_detailed()
     assert attempts == []
     assert any(e.startswith("pipeline:pcap") for e in exercised)
+    assert "api:/auth/login:200" in exercised
     assert any(e.startswith("api:/replay/demo:completed") for e in exercised)
     assert any(e.startswith("outbound:syslog/udp") for e in exercised)
     assert any(e.startswith("outbound:email") for e in exercised)

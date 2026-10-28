@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Query
 
 from unishield import __version__
 from unishield.api.deps import get_context
-from unishield.api.security import auth_mode
+from unishield.api.security import auth_mode, public, require_viewer
 from unishield.api.state import AppContext
 from unishield.config import get_config
 from unishield.processing.pipeline import DETECTION_MODES, default_detectors
@@ -36,7 +36,8 @@ def _read_json(path: Path) -> dict[str, Any] | None:
         return None
 
 
-@router.get("/health", response_model=HealthStatus, summary="System health check")
+@router.get("/health", response_model=HealthStatus, summary="System health check",
+            dependencies=[Depends(public)])
 def health_check(ctx: AppContext = Depends(get_context)) -> HealthStatus:
     config = get_config()
     db_ok = ctx.repository.ping()
@@ -65,7 +66,8 @@ def health_check(ctx: AppContext = Depends(get_context)) -> HealthStatus:
     )
 
 
-@router.get("/metrics", response_model=PipelineMetrics, summary="Pipeline and process metrics")
+@router.get("/metrics", response_model=PipelineMetrics, summary="Pipeline and process metrics",
+            dependencies=[Depends(require_viewer)])
 def get_metrics(ctx: AppContext = Depends(get_context)) -> PipelineMetrics:
     pipeline = ctx.pipeline
     metrics = pipeline.get_metrics() if pipeline else PipelineMetrics()
@@ -85,7 +87,8 @@ def get_metrics(ctx: AppContext = Depends(get_context)) -> PipelineMetrics:
     return metrics.model_copy(update=updates)
 
 
-@router.get("/metrics/traffic", summary="Per-window traffic and alert counts of the current/last run")
+@router.get("/metrics/traffic", summary="Per-window traffic and alert counts of the current/last run",
+            dependencies=[Depends(require_viewer)])
 def traffic(limit: int = Query(default=500, ge=1, le=10_000), ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     result = ctx.pipeline.result if ctx.pipeline else None
     series = list(result.window_series)[-limit:] if result else []
@@ -105,7 +108,8 @@ def traffic(limit: int = Query(default=500, ge=1, le=10_000), ctx: AppContext = 
     }
 
 
-@router.get("/system/architecture", summary="Component status for the architecture view")
+@router.get("/system/architecture", summary="Component status for the architecture view",
+            dependencies=[Depends(require_viewer)])
 def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     from unishield.models.registry import ModelRegistry
 
@@ -143,7 +147,7 @@ def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
              "detail": f"mode {pipeline.detection_mode if pipeline else config.models.detection_mode}"},
             {"name": "storage", "status": "connected" if db_ok else "unavailable",
              "detail": f"{ctx.repository.backend}, {ctx.repository.count()} alerts"},
-            {"name": "api", "status": "running", "detail": f"admin auth: {auth_mode()}"},
+            {"name": "api", "status": "running", "detail": f"auth mode: {auth_mode()}"},
             {"name": "threat intel", "status": "ready" if config.intel.enabled else "disabled",
              "detail": f"{intel['active_total']} active indicators from {len(intel['sources'])} sources "
                        f"(offline imports only)"},
@@ -163,7 +167,8 @@ def architecture(ctx: AppContext = Depends(get_context)) -> dict[str, Any]:
     }
 
 
-@router.get("/benchmark/latest", summary="Latest measured benchmark (reports/benchmark.json)")
+@router.get("/benchmark/latest", summary="Latest measured benchmark (reports/benchmark.json)",
+            dependencies=[Depends(require_viewer)])
 def benchmark_latest() -> dict[str, Any]:
     data = _read_json(_reports_dir() / "benchmark.json")
     if data is None:
@@ -172,7 +177,8 @@ def benchmark_latest() -> dict[str, Any]:
     return dict(data, status="ok")
 
 
-@router.get("/evaluation/latest", summary="Latest model evaluation (reports/model_evaluation.json)")
+@router.get("/evaluation/latest", summary="Latest model evaluation (reports/model_evaluation.json)",
+            dependencies=[Depends(require_viewer)])
 def evaluation_latest() -> dict[str, Any]:
     data = _read_json(_reports_dir() / "model_evaluation.json")
     if data is None:
