@@ -18,11 +18,32 @@
 
 4. **Thresholds need tuning.** `configs/thresholds.yaml` holds starting
    values tuned on synthetic scenarios, not on any production network.
+   Learning mode suggests site values, but it assumes the learning period
+   was free of attacks: an attack inside it raises the thresholds that would
+   have caught it. It has only been exercised on UniShield's synthetic site
+   traffic, not on a real network's logs. Ratios, time constants and
+   severity bands are not learned.
+4a. **Asset roles are trust decisions.** A listed vulnerability scanner's
+   scans become INFO, uploads to a listed backup server are suppressed
+   (counted, not shown as alerts). A compromised listed host hides behind
+   its role. Window-level STATISTICAL_ANOMALY alerts are not attributed to
+   hosts, so roles cannot exempt them; for example, a large *internal*
+   backup can still raise one.
+4b. **Statistical stages are starved by regular pollers.** The statistical
+   and Isolation Forest detectors only score windows no rule explained.
+   A regular pair (a beacon, or a monitoring poller even when its alerts
+   are INFO) keeps the beaconing class "explained" in almost every window
+   while it lasts, so at sites with many pollers these stages score few
+   windows. The learning report shows how many they scored.
 5. **Evidence takes time.** Beaconing needs at least 10 connections and
    exfiltration baselines need 10 windows of history. Window-level recall
    for these classes is therefore lower than episode-level recall.
 6. **Evasion.** Jittered or slow beacons, uploads below baseline noise,
-   dictionary DGAs and low-rate tunnels can stay below the rules.
+   dictionary DGAs and low-rate tunnels can stay below the rules. A beacon
+   that pauses and resumes on the same (source, destination, port) within
+   `beaconing.history_sec` (2 h) is not re-detected until the earlier
+   episode leaves the history, because the pause makes the intervals
+   irregular (found by the soak test; reproduced with a 93-minute pause).
 7. **Statistical and anomaly alerts are leads.** STATISTICAL_ANOMALY says a
    window is unusual, not why. The robust-z baseline drifts with the traffic
    it accepts as normal.
@@ -65,6 +86,18 @@
     the replay state and the login rate limiter live in the process (the
     rate limiter also resets on restart; account lockouts are stored in the
     database and survive it).
+15a. **Restart safety covers detector history, not in-flight data.** The
+    state snapshot holds beacon histories, baselines, the Isolation Forest
+    warm-up and re-alert memory. The window still open at shutdown is not
+    saved (up to one window of traffic is not analysed across a restart), a
+    crash loses what happened since the last snapshot, and restoring a
+    snapshot before replaying *older* traffic counts it twice. The pipeline
+    pauses while a snapshot is written; the cost grows with the number of
+    active beacon pairs (measured in `reports/soak_test.md`).
+15b. **Soak testing is synthetic and short.** The soak test streams
+    UniShield's own generated site traffic; the measured run lasted 30
+    minutes of wall time. No 24-hour run and no run on real traffic has
+    been done.
 16. **PCAP parsing is the slow path** (scapy in Python, a few thousand
     packets per second on the benchmark machine); convert large captures to
     Zeek logs first.

@@ -130,6 +130,30 @@ ranges before enabling outputs. Placement, firewalling, TLS and secrets:
 [docs/deployment.md](docs/deployment.md); threats and mitigations:
 [docs/threat_model.md](docs/threat_model.md).
 
+## Running at a site
+
+Three things make the lab defaults fit a real network
+([docs/deployment.md](docs/deployment.md)):
+
+- **Asset inventory** (`configs/assets.yaml`): roles for scanners, backup
+  targets, resolvers, update servers, proxies and monitoring hosts. Their
+  expected behaviour is reported as INFO or suppressed, never silently:
+  every change is in the alert's evidence or counted in `/system/assets`
+  and `/metrics`.
+- **Learning mode** (`python scripts/learn_baseline.py <days of logs>`):
+  runs the pipeline over the site's traffic without alerting and writes a
+  suggested `configs/thresholds.site.yaml` (percentile, observed value and
+  default for every value) plus a report naming the hosts behind each
+  raised value. `thresholds.yaml` is never written; select the overlay with
+  `site.thresholds_file` or `UNISHIELD_THRESHOLDS_FILE`.
+- **Restart-safe state** (`UNISHIELD_STATE_ENABLED=true`): beacon
+  histories, upload baselines, the statistical baseline and the Isolation
+  Forest survive restarts in a SHA-256-checked JSON snapshot, so a beacon
+  that started before a restart is still detected after it.
+
+`python scripts/soak_test.py` checks a long run on your hardware (memory,
+latency, lag, alert rate).
+
 ---
 
 ## Measured results
@@ -177,6 +201,15 @@ scores are optimistic: trained without a class, the random forest misses
 most unseen attack types (leave-one-attack-out table in the report). See
 [docs/model_card.md](docs/model_card.md) and [docs/evaluation.md](docs/evaluation.md).
 
+**Soak test** (`reports/soak_test.md`, 30 minutes of wall time at 1,000
+records/s covering 4 h of synthetic site traffic, state snapshots every
+60 s): 1,818,250 records with 0 errors; lag behind schedule stayed below
+1.04 s (it follows the 0.7-0.86 s snapshot writes); detector state levelled
+off after 2 h of traffic (about 42,000 beacon pairs, 19.6 MB snapshot);
+window processing p95 127 ms. RSS went from 89 to 243 MB and was still
+rising slowly at the end, so the run does not show that memory levels
+off; no 24-hour run has been done.
+
 **Passive operation** (`reports/passive_mode_verification.md`): the static
 scan finds no network, capture, process or crypto capability outside the
 analyst-side transport (whose allowed lines the report lists); under the
@@ -202,8 +235,10 @@ destination is refused at config load, at send time and at socket level.
 | GET | `/incidents`, `/threats/{class}` | viewer | alerts grouped by entity and time; alerts of one class |
 | GET | `/replay/status`, `/replay/runs` | viewer | current run, recent runs |
 | GET | `/system/architecture`, `/benchmark/latest`, `/evaluation/latest` | viewer | stage, detector, model, output, intel and safety status; measured reports |
+| GET | `/system/assets` | viewer | asset inventory, effective role policies, what they downgraded or suppressed |
+| GET | `/learning/latest` | viewer | suggested site thresholds and report from the last learning run |
 | GET | `/outputs/status`, `/intel/status` | viewer | export, syslog and notification status (no secrets); imported indicators per kind and source |
-| POST | `/replay/start`, `/replay/demo`, `/replay/stop` | admin | analyse a file under the data directory / a synthetic scenario; stop |
+| POST | `/replay/start`, `/replay/demo`, `/replay/stop` | admin | analyse a file under the data directory (`state=` to continue from the state snapshot, `learning=true` for learning mode) / a synthetic scenario; stop |
 | DELETE | `/alerts` | admin | delete stored alerts |
 | POST | `/export` | admin | write JSON lines / CEF / STIX files of stored alerts and incidents |
 | POST | `/intel/import` | admin | import an indicator file (request body) |
@@ -246,11 +281,13 @@ Details: [docs/deployment.md](docs/deployment.md),
 ## Configuration
 
 `configs/config.yaml` (general, including the `auth`, `tls`, `retention`,
-`intel`, `export` and `outbound` sections), `configs/thresholds.yaml`
-(detection thresholds) and environment variables listed in `.env.example`
+`intel`, `export`, `outbound`, `site` and `state` sections), `configs/thresholds.yaml`
+(default detection thresholds), `configs/assets.yaml` (asset inventory), an
+optional site thresholds overlay and environment variables listed in `.env.example`
 (`UNISHIELD_DB_URL`, `UNISHIELD_AUTH_MODE`, `UNISHIELD_TLS_CERTFILE`,
 `UNISHIELD_DETECTION_MODE`, `UNISHIELD_EXPORT_DIR`, `UNISHIELD_SMTP_PASSWORD`,
-...). The four security flags cannot be disabled; secrets are read only
+`UNISHIELD_ASSETS_FILE`, `UNISHIELD_THRESHOLDS_FILE`, `UNISHIELD_STATE_ENABLED`,
+...). Site files are validated at start-up. The four security flags cannot be disabled; secrets are read only
 from the environment.
 
 Alerts, accounts and the audit log are stored in SQLite
@@ -305,6 +342,7 @@ check them with `make audit-deps` (pip-audit), as CI does.
 
 ## Documentation
 
+[deployment and tuning](docs/deployment.md) ·
 [architecture](docs/architecture.md) ·
 [deployment and operations](docs/deployment.md) ·
 [releasing](docs/releasing.md) ·
@@ -318,7 +356,9 @@ check them with `make audit-deps` (pip-audit), as CI does.
 ## Limitations
 
 Not a live sensor (files and replayed streams only), not a SOC or IPS, no
-payload inspection; thresholds tuned on synthetic data; models trained on
+payload inspection; default thresholds tuned on synthetic data (learning
+mode assumes an attack-free learning period and has only been exercised on
+synthetic site traffic); asset roles are trust decisions; models trained on
 synthetic data and weak on unseen attack types; single process; threat-intel
 matching only as good as the imported lists; outputs tested against
 UniShield's own loopback receivers, not specific SIEM products; local

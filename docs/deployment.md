@@ -494,7 +494,256 @@ calls, that the transport reaches only allow-listed destinations, and that
 a monitored-network destination is refused at load time, at send time and
 at socket level.
 
-## 16. Checklist
+## Site tuning
+
+This guide takes UniShield from the lab defaults to a site: describe the
+hosts whose normal behaviour looks like an attack, learn the site's own
+thresholds, and keep detector state across restarts. UniShield stays
+passive throughout: it reads files, never sends packets into the monitored
+network and never writes its own configuration.
+
+Order of work for a new site:
+
+1. Install and check passive operation (`python scripts/verify_passive_mode.py`).
+2. Write `configs/assets.yaml` for the site.
+3. Collect a few days of the site's traffic and run learning mode.
+4. Review the suggested `thresholds.site.yaml` and the learning report; select it.
+5. Enable restart-safe state and run the service.
+6. Review INFO and suppressed alerts regularly (`/system/assets`).
+
+## 16. Site files and settings
+
+| What | Where | Override |
+|---|---|---|
+| General settings | `configs/config.yaml` | environment variables in `.env.example` |
+| Default thresholds | `configs/thresholds.yaml` | never edited by UniShield |
+| Asset inventory | `configs/assets.yaml` (`site.assets_file`) | `UNISHIELD_ASSETS_FILE` |
+| Site thresholds overlay | none by default (`site.thresholds_file`) | `UNISHIELD_THRESHOLDS_FILE` |
+| Detector state snapshot | `./data/state/pipeline_state.json` (`state.path`), off by default | `UNISHIELD_STATE_ENABLED`, `UNISHIELD_STATE_FILE` |
+
+Relative site file names are resolved against the configs directory
+(`UNISHIELD_CONFIG_DIR`). Every site file is validated at start-up and an
+invalid or missing *named* file is an error, so a typo never silently
+falls back to defaults. `GET /system/architecture` lists the files the
+running thresholds and inventory came from.
+
+## 17. Asset inventory (`configs/assets.yaml`)
+
+Some hosts are supposed to scan, upload a lot, query odd names or poll on a
+timer. Listing them with a role keeps their expected behaviour from being
+reported as an attack. Detection still runs on their traffic; after
+detection and deduplication the role's policy decides what happens to
+each alert:
+
+| Action | Effect |
+|---|---|
+| `alert` | reported unchanged |
+| `info` | reported with severity INFO; `evidence.asset_policy` keeps the original severity and the matching asset |
+| `suppress` | not reported; counted per action, class and role, and the latest 200 suppressed alerts are kept for review |
+
+Built-in policies:
+
+| Role | Side | Effect |
+|---|---|---|
+| `vulnerability_scanner` | source | PORT_SCAN, HOST_SCAN, RECONNAISSANCE → info |
+| `backup_server` | destination | DATA_EXFILTRATION → suppress; C2_BEACONING → info. Uploads to it are also kept out of the uploader's baseline |
+| `dns_resolver` | source | DGA_DETECTED, DNS_TUNNELLING → info (clients' own queries are still analysed) |
+| `update_server` | destination | C2_BEACONING → info |
+| `cdn_or_proxy` | destination | C2_BEACONING → info |
+| `monitoring` | source | scans and C2_BEACONING → info |
+| `monitoring` | destination | C2_BEACONING → info |
+| `server` | – | no policy; the role appears in alert evidence |
+
+Example:
+
+```yaml
+version: 1
+assets:
+  - name: vuln-scanner
+    addresses: ["10.20.0.15"]
+    roles: [vulnerability_scanner]
+    description: weekly authenticated scan, Sunday 02:00
+  - name: offsite-backup
+    addresses: ["198.51.100.0/28"]
+    roles: [backup_server]
+  - name: resolvers
+    addresses: ["10.20.0.53", "10.20.0.54"]
+    roles: [dns_resolver]
+policies:                         # optional overrides, per role, side and class
+  vulnerability_scanner:
+    source: {PORT_SCAN: suppress}
+```
+
+Matching rules:
+
+- A source-side policy applies when every source of the alert holds the
+  role. A DNS tunnelling alert without a single source uses its client
+  list, and only when that list is complete.
+- When several roles match, the most lenient action wins (suppress > info > alert).
+- With `security.anonymize_ips` on, alerts carry salted hashes. Single
+  addresses still match through their hash; networks (CIDR) cannot.
+- Classes a policy handled still count as explained for that window, so
+  the statistical and Isolation Forest stages do not re-report an expected
+  scan as a STATISTICAL_ANOMALY.
+
+Each entry is a trust decision. If a listed scanner is compromised, its
+scans are reported as INFO. Prefer `info` to `suppress`, keep the list
+short, and check `GET /system/assets` (the inventory, the effective
+policies, counts of what they changed and the latest suppressed alerts)
+and the `alerts_downgraded_by_policy` / `alerts_suppressed_by_policy`
+counters in `/metrics`.
+
+## 18. Learning mode
+
+`thresholds.yaml` holds starting values tuned on synthetic traffic.
+Learning mode measures how close the site's benign traffic comes to each
+threshold and suggests site values.
+
+```bash
+python scripts/learn_baseline.py data/zeek/2026-10-01 data/zeek/2026-10-02 data/zeek/2026-10-03
+```
+
+Inputs are any format UniShield reads, oldest first. They run through one
+pipeline, so cross-window history carries over between files. Nothing is
+stored or sent. The script writes:
+
+- `configs/thresholds.site.yaml`, the suggested overlay. Changed values are
+  active; unchanged ones are comments; every value records its percentile,
+  observed value, margin, default, sample count and how many samples would
+  still reach it (`_learned` block, ignored at load). It refuses to write
+  `thresholds.yaml` and refuses to overwrite an existing overlay without
+  `--force`.
+- `reports/learning_report.md`: a table of all learned thresholds, the hosts
+  behind every raised value, beacon-like pairs, alerts the current
+  thresholds would have raised over the period, and the thresholds not
+  learned.
+
+Options: `--percentile` (default 99.9), `--margin` (default 1.5 for
+volume thresholds), `--allow-tighten` (also suggest stricter values where
+the site stayed far below a threshold; off by default), `--state-out`
+(save the learned detector state for a warm start, see section 5) and
+`--synthetic-hours N` (learn from generated site traffic, for trying the
+tool).
+
+What is learned:
+
+| Threshold | Recorded per window |
+|---|---|
+| `ddos.packets_per_second`, `ddos.bytes_per_second` | peak 1 s rate to the busiest destination |
+| `ddos.syn_rate_threshold`, `ddos.udp_flood_pps` | peak half-open / UDP rate to the busiest target, while its half-open / UDP share meets the rule |
+| `scanning.unique_dest_ports`, `horizontal_scan_hosts`, `horizontal_scan_hosts_any`, `burst_connections` | the largest per-source value meeting the rule's failure condition |
+| `exfiltration.min_upload_mb`, `baseline_deviation_sigma` | the largest upload-dominated upload, the largest robust z of an eligible upload |
+| `dns.dga_min_domains`, `dns.tunnel_min_queries` | the most generated-looking domains of one client, the most queries to one encoded-looking base domain |
+| `beaconing.regularity_cv_threshold` | per pair: the lowest interval CV of pairs meeting every other beacon condition |
+| `statistical.mad_threshold`, `anomaly.min_score` | the score of every window those stages computed |
+
+Ratios, time constants and severity bands are not learned (the report
+lists them); they describe the shape of an attack rather than the volume
+of a site.
+
+Reading the report:
+
+- Hosts listed under "Who drove the raised values" that are scanners,
+  backup targets, resolvers, update servers or monitoring hosts belong in
+  `assets.yaml`. Add them and run learning again, rather than raising a
+  threshold for the whole network. On UniShield's synthetic site, learning
+  without an inventory raises `scanning.unique_dest_ports` from 25 to 225
+  because of one scanner; with the inventory it changes nothing.
+- A host listed there that should not behave like that is a finding:
+  investigate it before using the suggestions.
+- `beaconing.regularity_cv_threshold` never goes below 0.05. Pairs more
+  regular than that are listed, and they too belong in the inventory.
+
+**Learning assumes the period contained no attack.** An attack inside it
+raises exactly the thresholds that would have caught it. Use a period that
+was reviewed, and repeat learning after major changes (new services,
+monitoring, backup schedules).
+
+The same run is available through the API: `POST
+/replay/start?file_path=...&learning=true` (admin) stores no alerts, and
+`GET /learning/latest` returns the suggested overlay text and the report.
+The API never writes configuration; save the YAML yourself after review.
+
+## 19. Site thresholds
+
+Select the reviewed overlay:
+
+```yaml
+# configs/config.yaml
+site:
+  thresholds_file: "thresholds.site.yaml"
+```
+
+or `UNISHIELD_THRESHOLDS_FILE=thresholds.site.yaml`. Its values replace
+those of `thresholds.yaml` key by key. A key that does not exist in
+`thresholds.yaml`, or a value of the wrong type, is an error at start-up.
+Hand edits are fine, and learning carries values of an active overlay over
+into its next suggestion.
+
+## 20. Restart-safe state
+
+Beacons are slower than a window: a beacon detection needs 10 check-ins,
+and exfiltration baselines need 10 windows of history. Without persistence a
+restart forgets that history. With `state.enabled` (or
+`UNISHIELD_STATE_ENABLED=true`) the following are snapshotted to
+`state.path`: beacon pair histories, per-source upload baselines and
+destination rarity, the statistical baseline, the Isolation Forest's
+warm-up windows, the detectors' re-alert memory and the correlator's
+dedup cache.
+
+- Format: one JSON file with a format name, a version and the SHA-256 of
+  its canonical payload. Nothing is pickled. The online Isolation Forest
+  is rebuilt by refitting on its stored warm-up windows with the same seed.
+- Written atomically every `state.snapshot_interval_sec` (default 300 s)
+  of wall time, and whenever a run ends or is stopped. API shutdown waits
+  for that final write.
+- Restored when a file replay starts. A snapshot that is corrupt, edited,
+  of another format or version is refused and the run starts cold.
+  Components restore independently. The outcome (restored components,
+  skipped ones and why) is in the run summary, `/replay/status` and
+  `/system/architecture`.
+- File replays use it when enabled; `state=true|false` on `POST
+  /replay/start` overrides per run. Synthetic demos never do.
+- Consecutive files of one site's feed (for example hourly Zeek log
+  rotations) continue from each other's snapshot, with or without a
+  restart in between.
+- `scripts/learn_baseline.py --state-out <state.path>` gives the service a
+  warm start with the learning period's baselines.
+
+Restore a snapshot only to continue the same site's traffic. Replaying
+older traffic on top of restored state counts it twice; delete the file
+to start cold. Records of the window still open at shutdown are not saved
+(up to one window, 10 s by default, is not analysed across a restart).
+
+In Docker, `docker-compose.yml` points `UNISHIELD_STATE_FILE` at the
+`unishield-state` volume; set `UNISHIELD_STATE_ENABLED=true` in `.env`.
+
+Snapshot cost grows with the number of active beacon pairs. On the
+development machine a 5.7 MB snapshot (about 36,000 pairs) took about
+0.4 s to write, during which the pipeline pauses. See `reports/soak_test.md` for
+the measured cost over a long run and choose the interval accordingly.
+
+## 21. Long runs
+
+`scripts/soak_test.py` streams generated site traffic through one pipeline
+for a chosen wall-clock duration and rate, sampling memory, CPU, lag,
+window latency, alert rate and state size; it writes
+`reports/soak_test.md`. Run it on the target hardware at the site's
+record rate before relying on the service:
+
+```bash
+python scripts/soak_test.py --duration 24h --rate 1000          # traffic time = wall time
+python scripts/soak_test.py --duration 30m --rate 1000 --speedup 8
+python scripts/soak_test.py --quick                             # 2 minutes
+```
+
+Memory bounds that matter on long runs: each run result keeps the newest
+`processing.max_alerts_in_memory` alerts (counts cover all of them, and
+stored alerts are in the database); beacon pairs and destinations idle for
+longer than `beaconing.history_sec` are dropped; re-alert memories prune
+expired entries.
+
+## 22. Checklist
 
 - [ ] `UNISHIELD_ENV=production`, `auth.mode: accounts`, API docs off
 - [ ] first administrator created; no shared accounts; automation on named, expiring tokens
@@ -504,3 +753,8 @@ at socket level.
 - [ ] `/health` monitored (503 and `degraded`); audit log reviewed or forwarded
 - [ ] `network.home_networks` lists the monitored ranges; outbound destinations allow-listed and firewalled
 - [ ] `scripts/verify_passive_mode.py` passes on the installed version
+- [ ] `configs/assets.yaml` reviewed with the owners of the listed hosts.
+- [ ] Learning run over a reviewed period; report read; overlay selected.
+- [ ] State persistence enabled, on a writable volume.
+- [ ] Soak test run on the target hardware at the site's rate.
+- [ ] INFO and suppressed alerts (`/system/assets`) reviewed on a schedule.

@@ -48,6 +48,8 @@ syslog, email and webhooks, all through one allow-listed transport
 | Features | `features/` | One extractor per threat family (table below). Beaconing and exfiltration keep bounded state across windows (per-pair inter-arrival history; per-source upload baselines and destination rarity). |
 | Detectors | `detectors/` | Rule detectors first; then detectors with `runs_after_rules` see which classes the rules raised or suppressed, so statistical, anomaly and ML alerts only describe windows nothing else explained. |
 | Correlation | `correlation/` | Deduplication in traffic time (class, source, destination, detector); incident grouping per entity with multi-stage / multi-vector escalation; one table for severities and MITRE ATT&CK mappings. |
+| Asset policy | `assets.py` | Role policies from `configs/assets.yaml` applied after deduplication: an alert is kept, reported as INFO (original severity and matching asset in evidence) or suppressed (counted, latest kept for review). |
+| State | `processing/state_store.py` | Versioned JSON snapshot (SHA-256 checked, atomic) of every stateful extractor, detector and the correlator; restored before a run, written periodically and at the end. |
 | Threat intel | `intel/` | Offline indicator files (text, CSV, STIX 2.1 indicators) parsed and validated, stored per source with expiry in the alert database; an in-memory matcher (exact addresses, networks, parent domains, JA3) is built for each run. Matches become INTEL_MATCH alerts, evidence on other alerts (with one level more severity) and JA3 blocklist entries. Nothing is fetched. |
 | Storage | `storage/` | SQLAlchemy tables for alerts, runs, intel indicators, accounts and the append-only audit log (SQLite default, PostgreSQL by URL); schema owned by Alembic revisions (`storage/migrations`); retention and housekeeping; bound-parameter queries only. |
 | Outputs | `export/` | Record formats (JSON lines, CEF, STIX 2.1), rotating and on-demand export files, an incident tracker for continuous outputs, RFC 5424 syslog forwarding, email/webhook notifications with rate limits and digests, the destination policy and the output service (bounded queue, one worker). `export/transport.py` is the only module that opens connections, only to allow-listed analyst-side destinations outside `network.home_networks`. |
@@ -69,6 +71,28 @@ syslog, email and webhooks, all through one allow-listed transport
 | Statistical | (window metrics) | `statistical_detector.py` | STATISTICAL_ANOMALY | Median/MAD robust z-scores against a baseline of unexplained windows |
 | Anomaly | (window metrics) | `anomaly_detector.py` | STATISTICAL_ANOMALY | Isolation Forest on log-scaled window features, online warm-up or saved model |
 | ML window model | `models/features.py` | `ml_detector.py` | any class above | Random forest (or XGBoost/IF) with isotonic calibration; hybrid mode only |
+
+## Site configuration
+
+Three site files sit beside the defaults (see [deployment.md](deployment.md)):
+
+- `configs/assets.yaml`: roles of known hosts (scanner, backup server,
+  resolver, update server, proxy, monitoring, server), validated at load.
+  Uploads to expected destinations stay out of the exfiltration baselines.
+  All other role effects are applied to alerts after detection, so every
+  detector keeps seeing all traffic, and classes a policy handled still
+  count as explained for the post-rule stages.
+- `thresholds.site.yaml`: an overlay merged over `thresholds.yaml` key by
+  key. Unknown keys and wrong types are errors.
+- the state snapshot (`state.path`).
+
+`scripts/learn_baseline.py` (and `POST /replay/start?learning=true`) runs
+the pipeline with a window observer (`evaluation/learning.py`) that records
+the metric behind each threshold and writes a suggested overlay plus a
+report; it never writes `thresholds.yaml`. `scripts/soak_test.py`
+(`evaluation/soak.py`) streams generated site traffic
+(`data/site_traffic.py`) for a long run and samples memory, latency, lag
+and state size.
 
 ## Detection modes
 
@@ -104,7 +128,9 @@ application checks the schema revision, records `system.start` and starts
 housekeeping (retention, expired sessions); on SIGTERM/Ctrl+C it stops a
 running replay, records its state and `system.stop`, and closes the
 database. `/health` reports degraded components and answers 503 when
-storage is unavailable.
+storage is unavailable. With `state.enabled`, file replays continue from the
+last state snapshot, and a replay stopped by shutdown writes its final snapshot
+before the application exits.
 
 The systemd unit (`deploy/systemd`) and the Docker image run as an
 unprivileged user with no capabilities and a read-only system; nginx and
