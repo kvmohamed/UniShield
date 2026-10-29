@@ -84,3 +84,25 @@ def test_minute_resolution_flows_are_spread_over_their_minute(tmp_path):
     assert reader.spread and reader.records_read == 8
     assert [t.second for t in times] == [0, 15, 30, 45, 0, 15, 30, 45]
     assert times == sorted(times)
+
+
+def test_out_of_order_file_is_analysed_without_late_drops(tmp_path):
+    from unishield.evaluation.public import run_file, time_sorted_copy
+
+    header = (" Source IP, Source Port, Destination IP, Destination Port, Protocol, Timestamp, Flow Duration,"
+              " Total Fwd Packets, Total Backward Packets, Label\n")
+    # afternoon rows written first (as 1:xx without PM), morning rows after: not in time order
+    rows = [f"192.168.10.5,{50000 + i},192.168.10.3,80,6,5/7/2017 1:{10 + i},1000,1,1,BENIGN\n" for i in range(5)]
+    rows += [f"192.168.10.5,{51000 + i},192.168.10.3,80,6,5/7/2017 9:{10 + i},1000,1,1,BENIGN\n" for i in range(5)]
+    path = tmp_path / "unordered.csv"
+    path.write_text(header + "".join(rows), encoding="utf-8")
+
+    unsorted = run_file(path, ["192.168.10.0/24"])
+    assert unsorted.late_dropped == 5                      # the morning rows arrive after the afternoon ones
+
+    (tmp_path / "sorted").mkdir()
+    copy = time_sorted_copy(path, tmp_path / "sorted")
+    lines = copy.read_text(encoding="utf-8").splitlines()
+    assert "9:10" in lines[1] and "1:14" in lines[-1]      # 09:10 first, 13:14 last
+    fixed = run_file(path, ["192.168.10.0/24"], sort_by_time=True)
+    assert fixed.late_dropped == 0 and fixed.records == 10 and fixed.path == str(path)

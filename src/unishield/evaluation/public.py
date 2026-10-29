@@ -94,6 +94,52 @@ class _TallyingReader(BaseReader):
         return self.inner.errors
 
 
+def time_sorted_copy(path: Path, directory: Path) -> Path:
+    """
+    Copy of a flow CSV with its rows in timestamp order (stable, so rows of one
+    minute keep their file order). Some CIC-IDS2017 files are not written in
+    time order; event-time windows would drop the out-of-order rows as late.
+    Timestamps are parsed the way the flow reader parses them (dataset profile
+    and its fix-ups); unparseable rows go last, where the reader counts them.
+    """
+    import csv
+
+    from unishield.ingest.detect import open_reader
+    from unishield.ingest.flow_reader import _clean_key, _parse_flow_timestamp
+
+    reader, _ = open_reader(path)
+    with open(path, encoding="utf-8", errors="replace", newline="") as f:
+        rows = csv.reader(f)
+        header = next(rows)
+        cleaned = [_clean_key(h) for h in header]
+        reader._select_profile(set(cleaned))
+        mapping = reader.field_map
+        ts_col = next((i for i, k in enumerate(cleaned) if mapping.get(k) == "timestamp"), None)
+        profile = reader.profile
+        keyed = []
+        for idx, row in enumerate(rows):
+            key = None
+            if ts_col is not None and ts_col < len(row):
+                data = {"timestamp": row[ts_col]}
+                try:
+                    if profile and profile.row_hook:
+                        data = profile.row_hook(data)
+                    if profile:
+                        key = _parse_flow_timestamp(data["timestamp"], profile.timestamp_formats)
+                    else:
+                        key = _parse_flow_timestamp(data["timestamp"])
+                except (ValueError, KeyError, TypeError):
+                    key = None
+            keyed.append((key is None, key.timestamp() if key else 0.0, idx, row))
+    keyed.sort(key=lambda k: (k[0], k[1], k[2]))
+    out = directory / path.name
+    with open(out, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        writer.writerows(k[3] for k in keyed)
+    return out
+
+
 class _MinuteSpreader(BaseReader):
     """
     For files whose timestamps have minute resolution (seven of the eight
@@ -158,14 +204,23 @@ class FileRun:
     attack_hosts: list[str] = field(default_factory=list)
     attack_targets: list[str] = field(default_factory=list)
     first_attack: dict[str, datetime] = field(default_factory=dict)
+    late_dropped: int = 0
 
 
-def run_file(path: Path | str, home_networks: Sequence[str] | None = None, spread_minutes: bool = False) -> FileRun:
+def run_file(path: Path | str, home_networks: Sequence[str] | None = None, spread_minutes: bool = False,
+             sort_by_time: bool = False) -> FileRun:
     """
     Run the default rules pipeline over one labelled file, keeping windows and
-    alerts. ``spread_minutes`` spreads minute-resolution timestamps (see
-    ``_MinuteSpreader``).
+    alerts. ``sort_by_time`` analyses a time-sorted copy (``time_sorted_copy``);
+    ``spread_minutes`` spreads minute-resolution timestamps (``_MinuteSpreader``).
     """
+    import tempfile
+
+    if sort_by_time:
+        with tempfile.TemporaryDirectory() as tmp:
+            run = run_file(time_sorted_copy(Path(path), Path(tmp)), home_networks, spread_minutes)
+        run.path = str(path)
+        return run
     from unishield.ingest.detect import open_reader
     from unishield.processing.normalization import Normalizer
     from unishield.processing.pipeline import Pipeline
@@ -188,13 +243,14 @@ def run_file(path: Path | str, home_networks: Sequence[str] | None = None, sprea
     kwargs: dict[str, Any] = {"detection_mode": "rules", "window_observer": recorder, "alert_callback": keep}
     if home_networks:
         kwargs["normalizer"] = Normalizer(home_networks=list(home_networks))
-    Pipeline(**kwargs).run(reader)
+    result = Pipeline(**kwargs).run(reader)
+    late = (result.ingest.get("windowing") or {}).get("late_dropped", 0)
     hours = ((reader.last_ts - reader.first_ts).total_seconds() / 3600) if reader.first_ts else 0.0
     return FileRun(
         name=path.name, path=str(path), fmt=fmt, records=reader.records_read, reader_errors=reader.errors,
         labels=dict(reader.labels.most_common()), traffic_hours=round(hours, 2), windows=recorder.records,
         alerts=alerts, attack_hosts=sorted(reader.attack_hosts), attack_targets=sorted(reader.attack_targets),
-        first_attack=reader.first_attack,
+        first_attack=reader.first_attack, late_dropped=late,
     )
 
 
@@ -229,7 +285,10 @@ def host_metrics(run: FileRun) -> dict[str, Any]:
         for ip in (a["source_ip"], a["destination_ip"]):
             if ip:
                 named.add(ip)
-                if ip in attack and (ip not in first_alert or a["window_end"] < first_alert[ip]):
+                started = run.first_attack.get(ip)
+                # an alert counts for an attack host only once its attack traffic has begun
+                if ip in attack and started is not None and a["window_end"] >= started \
+                        and (ip not in first_alert or a["window_end"] < first_alert[ip]):
                     first_alert[ip] = a["window_end"]
     delays = [(first_alert[h] - run.first_attack[h]).total_seconds() for h in first_alert if h in run.first_attack]
     by_class: dict[str, dict[str, int]] = defaultdict(lambda: {"alerts": 0, "involving_attack_hosts": 0})
@@ -239,7 +298,7 @@ def host_metrics(run: FileRun) -> dict[str, Any]:
         row["involving_attack_hosts"] += int(related(a))
     return {
         "attack_hosts": len(attack),
-        "attack_hosts_detected": len(attack & named),
+        "attack_hosts_detected": len(first_alert),
         "alerts": len(run.alerts),
         "alerts_involving_attack_hosts": len(involves),
         "alert_precision_host_level": round(len(involves) / len(run.alerts), 4) if run.alerts else None,
@@ -318,7 +377,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     for ds in report["datasets"]:
         lines += [f"## {ds['dataset']}", "", ds.get("description", ""), "",
                   f"Home networks used for direction: {', '.join(ds['home_networks']) or 'config default'}.", "",
-                  "| File | Records | Hours | Attack flows | Windows (attack) | Attack hosts detected | "
+                  "| File | Records (late-dropped) | Hours | Attack flows | Windows (attack) | Attack hosts detected | "
                   "Alerts (involving attack hosts) | Other hosts named | First-alert delay (s) |",
                   "|---|---|---|---|---|---|---|---|---|"]
         for f in ds["files"]:
@@ -326,7 +385,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             attack_flows = sum(v for k, v in f["labels"].items() if k != BENIGN)
             delays = h["first_alert_delay_sec"]
             lines.append(
-                f"| {f['name']} | {f['records']:,} | {f['traffic_hours']} | {attack_flows:,} | "
+                f"| {f['name']} | {f['records']:,} ({f.get('late_dropped', 0):,}) | {f['traffic_hours']} | {attack_flows:,} | "
                 f"{w['windows']:,} ({w['attack_windows']:,}) | {h['attack_hosts_detected']}/{h['attack_hosts']} | "
                 f"{h['alerts']} ({h['alerts_involving_attack_hosts']}) | {h['other_hosts_named']} | "
                 f"{', '.join(str(d) for d in delays[:5]) or '–'} |")
@@ -407,7 +466,7 @@ class _CleanReader(BaseReader):
 
 def site_tuned(paths: Sequence[Path], home_networks: Sequence[str] | None, percentile: float = 99.9,
                scratch: Optional[Path] = None, spread_minutes: bool = False,
-               learn_from: Optional[Sequence[Path]] = None) -> dict[str, Any]:
+               learn_from: Optional[Sequence[Path]] = None, sort_by_time: bool = False) -> dict[str, Any]:
     """
     Learn site thresholds (learning mode, no asset inventory) and rerun files
     with the learned overlay, scored like the default run.
@@ -443,6 +502,8 @@ def site_tuned(paths: Sequence[Path], home_networks: Sequence[str] | None, perce
 
             def inputs():
                 for p in others:
+                    if sort_by_time:
+                        p = time_sorted_copy(p, Path(tmp))
                     reader = _CleanReader(_MinuteSpreader(p) if spread_minutes else open_reader(p)[0])
                     cleaners.append(reader)
                     yield p.name, reader
@@ -461,7 +522,7 @@ def site_tuned(paths: Sequence[Path], home_networks: Sequence[str] | None, perce
             try:
                 reset_thresholds()
                 load_thresholds(site_path=overlay)
-                tuned = run_file(held, home_networks, spread_minutes)
+                tuned = run_file(held, home_networks, spread_minutes, sort_by_time)
             finally:
                 reset_thresholds()
             out["files"][held.name] = {

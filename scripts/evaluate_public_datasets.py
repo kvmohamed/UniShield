@@ -61,6 +61,7 @@ DATASETS = {
                        "(TrafficLabelling CSVs).",
         "home_networks": ["192.168.10.0/24"],
         "spread_minutes": True,
+        "sort_by_time": True,                         # several files are not written in time order
         "learn_from": "Monday-WorkingHours",            # the attack-free day
         "caveats": [
             "Published analyses report labelling and flow-construction errors in CIC-IDS2017.",
@@ -71,7 +72,10 @@ DATASETS = {
             "inside a minute are therefore approximate.",
             "CICFlowMeter flows carry no DNS names or TLS fields, so the DNS and encrypted-session detectors "
             "cannot fire.",
-            "Attack hosts are both ends of every attack-labelled flow (attackers and victims).",
+            "Attack hosts are both ends of every attack-labelled flow (attackers and victims); an alert counts "
+            "for an attack host only from that host's first attack flow on.",
+            "Several files are not written in time order; each is analysed as a time-sorted copy (stable within "
+            "a minute), so event-time windows do not drop out-of-order rows.",
         ],
     },
 }
@@ -90,7 +94,8 @@ def evaluate_dataset(key: str, files: list[Path], synthetic: Path, tuning: bool 
     runs = []
     for f in files:
         started = time.time()
-        run = run_file(f, spec["home_networks"] or None, spec.get("spread_minutes", False))
+        run = run_file(f, spec["home_networks"] or None, spec.get("spread_minutes", False),
+                       spec.get("sort_by_time", False))
         print(f"  {f.name}: {run.records:,} records, {len(run.windows):,} windows, {len(run.alerts)} alerts "
               f"({time.time() - started:.0f} s)")
         runs.append(run)
@@ -103,13 +108,14 @@ def evaluate_dataset(key: str, files: list[Path], synthetic: Path, tuning: bool 
         "caveats": spec["caveats"],
         "files": [{
             "name": r.name, "format": r.fmt, "records": r.records, "reader_errors": r.reader_errors,
-            "traffic_hours": r.traffic_hours, "labels": r.labels,
+            "traffic_hours": r.traffic_hours, "labels": r.labels, "late_dropped": r.late_dropped,
             "window": window_metrics(r.windows), "host": host_metrics(r),
         } for r in runs],
         "cross_domain": cross_domain(synthetic, all_windows),
         "leave_one_file_out": leave_one_file_out(runs),
         "site_tuned": site_tuned(
             files, spec["home_networks"] or None, spread_minutes=spec.get("spread_minutes", False),
+            sort_by_time=spec.get("sort_by_time", False),
             learn_from=[f for f in files if spec.get("learn_from") and spec["learn_from"] in f.name] or None,
         ) if tuning and len(files) > 1 else None,
     }
