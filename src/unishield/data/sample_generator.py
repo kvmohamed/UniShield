@@ -458,6 +458,62 @@ LEGACY_TLS_SERVER = "198.51.100.77"
 TUNNEL_TLS_SERVER = "203.0.113.150"
 
 
+LABEL_BRUTE_FORCE = "BRUTE_FORCE"
+LABEL_SPAM = "SPAM_ACTIVITY"
+
+
+def generate_ssh_bruteforce_traffic(
+    attempts: int = 200,
+    start_time: datetime | None = None,
+    attacker: str = "198.18.0.150",
+    target: str = "10.0.2.22",
+    *,
+    rng: random.Random | None = None,
+    seed: int | None = None,
+) -> list[NormalisedFlow]:
+    """Password guessing against SSH: short, small, completed connections about 2 per second."""
+    rng = _rng(rng, seed)
+    current_time = start_time or _now()
+    flows = []
+    for _ in range(attempts):
+        current_time += timedelta(seconds=rng.uniform(0.2, 0.8))
+        flows.append(_flow(
+            timestamp=current_time, src=attacker, dst=target, sport=rng.randint(30000, 65000), dport=22,
+            protocol=ProtocolType.TCP, orig_packets=rng.randint(10, 16), resp_packets=rng.randint(10, 16),
+            orig_bytes=rng.randint(1500, 2600), resp_bytes=rng.randint(2000, 3200),
+            duration=round(rng.uniform(1.0, 4.0), 3), conn_state="SF", direction=FlowDirection.INBOUND,
+            label=LABEL_BRUTE_FORCE, tcp_flags=_COMPLETED_TCP_FLAGS,
+        ))
+    return flows
+
+
+def generate_spam_traffic(
+    messages: int = 120,
+    start_time: datetime | None = None,
+    sender: str = "10.0.1.88",
+    *,
+    rng: random.Random | None = None,
+    seed: int | None = None,
+) -> list[NormalisedFlow]:
+    """A compromised host delivering mail directly to many external mail servers, many refused."""
+    rng = _rng(rng, seed)
+    current_time = start_time or _now()
+    flows = []
+    for i in range(messages):
+        current_time += timedelta(seconds=rng.uniform(0.5, 2.5))
+        refused = rng.random() < 0.6
+        flows.append(_flow(
+            timestamp=current_time, src=sender, dst=f"203.0.{113 + i % 3}.{rng.randint(1, 254)}",
+            sport=rng.randint(30000, 65000), dport=25, protocol=ProtocolType.TCP,
+            orig_packets=1 if refused else rng.randint(8, 14), resp_packets=0 if refused else rng.randint(6, 10),
+            orig_bytes=60 if refused else rng.randint(2000, 9000), resp_bytes=0 if refused else rng.randint(400, 900),
+            duration=0.0 if refused else round(rng.uniform(0.5, 3.0), 3), conn_state="S0" if refused else "SF",
+            direction=FlowDirection.OUTBOUND, label=LABEL_SPAM,
+            tcp_flags="SYN" if refused else _COMPLETED_TCP_FLAGS,
+        ))
+    return flows
+
+
 def generate_encrypted_anomaly_traffic(
     count: int = 12,
     start_time: datetime | None = None,
@@ -625,6 +681,16 @@ _SCENARIOS: dict[str, tuple[frozenset[str], str, Callable[[random.Random, dateti
         frozenset({"DNS_TUNNELLING"}), "Background traffic plus data encoded in DNS subdomains",
         lambda rng, t0: generate_normal_traffic(60, t0, rng=rng)
         + generate_dns_tunnel_traffic(150, t0 + timedelta(seconds=20), rng=rng),
+    ),
+    "ssh_bruteforce": (
+        frozenset({"BRUTE_FORCE"}), "Background traffic plus password guessing against an SSH server",
+        lambda rng, t0: generate_normal_traffic(60, t0, rng=rng)
+        + generate_ssh_bruteforce_traffic(200, t0 + timedelta(seconds=20), rng=rng),
+    ),
+    "spam_bot": (
+        frozenset({"SPAM_ACTIVITY"}), "Background traffic plus a host delivering mail to many external mail servers",
+        lambda rng, t0: generate_normal_traffic(60, t0, rng=rng)
+        + generate_spam_traffic(120, t0 + timedelta(seconds=20), rng=rng),
     ),
     "encrypted_anomaly": (
         frozenset({"ENCRYPTED_SESSION_ANOMALY"}),
