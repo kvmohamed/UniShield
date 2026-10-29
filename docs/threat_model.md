@@ -42,6 +42,8 @@ below; it never points at the monitored network.
 | DGA_DETECTED | T1568.002 | many generated-looking registrable domains from one client, NXDOMAIN share | dictionary-word DGAs |
 | DNS_TUNNELLING | T1071.004, T1572 | many unique long/high-entropy subdomains of one base domain, TXT/NULL share | low-rate tunnels with short labels |
 | ENCRYPTED_SESSION_ANOMALY | T1573 (+T1571) | outdated TLS versions, JA3 on an operator blocklist or imported list, long low-rate sessions on unusual ports | anything inside the encrypted payload (never decrypted) |
+| BRUTE_FORCE | T1110 | repeated short, small connections from one source to one login port on one host, mostly completing the handshake | slow guessing, attempts spread across hosts, HTTP logins; login success is not visible |
+| SPAM_ACTIVITY | — (no ATT&CK technique for spam) | direct SMTP delivery from an internal host to many external mail servers | spam sent through a legitimate relay; message content |
 | INTEL_MATCH | none by default; techniques listed with the indicator | an address, network, domain (or subdomain) on an imported list in a flow or DNS query | infrastructure not on the lists; stale or wrong list entries |
 | STATISTICAL_ANOMALY | — | window metrics far from a vetted baseline; Isolation Forest | the cause: these are leads, not attributions |
 

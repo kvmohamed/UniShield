@@ -568,3 +568,13 @@ Not done: CIC-IDS2017 (download needs the user's registration), site tuning (ass
 | Host metric | An alert counts for an attack host only from that host's first attack flow on. | `tests/unit/test_public_eval.py` |
 
 CIC-IDS2017 (8 files, 2,830,743 flows, 0 late drops; 288,602 empty rows in the web-attacks file counted as reader errors): default rules flag 18/23 attack hosts at host-level precision 0.07-0.35; with thresholds learned from Monday, precision 0.72-0.97 on five of seven attack days with almost all hosts kept, botnet day 7/10 -> 2/10, web attacks 1/2 -> 0/2. CTU-13 with thresholds learned from the other scenarios' background traffic: 8/15 -> 1/15 hosts. Synthetic-trained window model: ROC-AUC 0.56 on CIC-IDS2017 windows.
+
+### Brute-force and spam rules (2026-10-29)
+
+| Item | Change | Evidence |
+|---|---|---|
+| Rules | `features/service_abuse.py` + `detectors/service_abuse_detector.py`: BRUTE_FORCE (T1110) for >= 30 short, small connections from one source to one login port on one host within 60 s with at most half failing to connect; SPAM_ACTIVITY for direct SMTP delivery to >= 20 external mail servers within 5 minutes. Thresholds from tool and client behaviour, not fitted to the datasets. Re-alert memory and restart-safe state. | `tests/unit/test_service_abuse.py` (16 tests) |
+| Asset roles | `mail_server` (SPAM_ACTIVITY -> info); vulnerability scanners' BRUTE_FORCE -> info. | same |
+| Scenarios and labels | `ssh_bruteforce`, `spam_bot`; CIC-IDS2017 FTP-/SSH-Patator -> BRUTE_FORCE. | scenario check, 5 seeds each |
+
+Rerun of the public-dataset evaluation: 47 new alerts, 45 on attack hosts. CIC-IDS2017 Tuesday 1/2 -> 2/2 attack hosts (first alert 116 s); CTU-13 scenario 6 spam bot first alert 6,266 s -> 491 s; no new alerts on the attack-free Monday; 2 BRUTE_FORCE alerts on CTU-13 background hosts.

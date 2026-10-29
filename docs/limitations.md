@@ -53,6 +53,15 @@
 8. **Isolation Forest cannot extrapolate.** A point beyond the training range
    scores no higher than the training edge, so extreme values are left to the
    robust-z detector.
+8a. **Brute-force and spam rules see connections, not outcomes.** Whether a
+   login succeeded or what a message contained is never known. Brute force
+   needs 30 attempts within 60 s to one login port, so slower guessing and
+   attempts spread over many hosts or ports are missed, and busy legitimate
+   automation against a login service can trigger it (two such alerts on
+   CTU-13 background hosts). Spam needs direct delivery to 20 external mail
+   servers within 5 minutes; real mail servers need the `mail_server` role.
+   HTTP login brute force is not covered (port 80/443 traffic cannot be told
+   apart from browsing in flow metadata).
 9. **DNS heuristics** misfire on CDNs and services that use generated-looking
    names; they need response codes for the strongest DGA evidence.
 
@@ -76,13 +85,13 @@
 12. **Real-traffic precision is low without site tuning, and tuning needs a
     clean baseline.** On CIC-IDS2017 (8 days) and five CTU-13 scenarios
     (`reports/public_dataset_evaluation.md`) the default rules flagged most
-    attack hosts (18/23 and 8/15) but only 7–35 % (lab) and 1–5 %
+    attack hosts (19/23 and 8/15) but only 7–35 % (lab) and 1–5 %
     (university) of alerts named one. Thresholds learned from CIC-IDS2017's
-    attack-free Monday raised precision to 72–97 % on five of seven days
+    attack-free Monday raised precision to 76–97 % on five of seven days
     while keeping almost every host, but lost the botnet and web-attack days;
     thresholds learned from CTU-13 "background" traffic (unverified, with
-    scanning and P2P) lost 7 of 8 detected hosts. There is no spam or
-    brute-force rule, web attacks are not visible in flow metadata, bots with
+    scanning and P2P) lost 7 of 8 detected hosts. Web attacks are not visible
+    in flow metadata, bots with
     very few flows are missed, and the DDoS thresholds suit high-rate floods
     only. The synthetic-trained window model does not transfer (ROC-AUC 0.53
     and 0.56). For evaluation, CIC-IDS2017 files were time-sorted and their

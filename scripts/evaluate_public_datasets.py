@@ -43,7 +43,8 @@ DATASETS = {
             "here, so class-level accuracy is not measured.",
             "Argus exports have no DNS names or TLS fields, so the DNS and encrypted-session detectors cannot fire.",
             "Timestamps are local capture time read as UTC (consistent within a file).",
-            "Findings from inspecting the 2026-10 run: scenario 6's bot sends spam (4,398 failed SMTP "
+            "Findings from inspecting the first 2026-10 run (before the spam and brute-force rules were "
+            "added): scenario 6's bot sends spam (4,398 failed SMTP "
             "attempts to at most 15 mail servers per 10 s, under the 20-host HOST_SCAN threshold; UniShield has "
             "no spam rule) and was caught only by its C2 beacon after about 6,300 s; scenario 7's bot made 63 "
             "flows in 21 minutes, too few for any rule; scenario 11's ICMP flood reaches only about 60 packets/s "

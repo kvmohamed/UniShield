@@ -68,6 +68,7 @@ syslog, email and webhooks, all through one allow-listed transport
 | DNS | `dns.py` | `dns_detector.py` | DGA_DETECTED, DNS_TUNNELLING | Per-client generated-looking names + NXDOMAIN; per-base-domain unique long/high-entropy subdomains |
 | Encrypted sessions | `encrypted.py` | `encrypted_detector.py` | ENCRYPTED_SESSION_ANOMALY | Outdated TLS versions, operator JA3 blocklist (plus imported JA3 indicators), long low-rate sessions on unusual ports (metadata only) |
 | Threat intel | `intel.py` | `intel_detector.py` | INTEL_MATCH | Flow addresses and DNS query names looked up in imported indicators; severity by direction (outbound/DNS HIGH, inbound MEDIUM) unless the indicator sets one |
+| Brute force, spam | `service_abuse.py` | `service_abuse_detector.py` | BRUTE_FORCE, SPAM_ACTIVITY | Rolling per-(source, destination, login port) attempt counts over 60 s; per-source distinct external SMTP servers over 5 min |
 | Statistical | (window metrics) | `statistical_detector.py` | STATISTICAL_ANOMALY | Median/MAD robust z-scores against a baseline of unexplained windows |
 | Anomaly | (window metrics) | `anomaly_detector.py` | STATISTICAL_ANOMALY | Isolation Forest on log-scaled window features, online warm-up or saved model |
 | ML window model | `models/features.py` | `ml_detector.py` | any class above | Random forest (or XGBoost/IF) with isotonic calibration; hybrid mode only |

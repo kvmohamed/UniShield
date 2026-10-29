@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-29 06:41 UTC",
+  "generated_at": "2026-10-29 07:41 UTC",
   "datasets": [
     {
       "dataset": "CTU-13 (Stratosphere Lab, CTU Prague, 2011)",
@@ -13,7 +13,7 @@
         "Botnet flows mix C2, spam, scanning and DDoS and are labelled BOTNET; window labels are binary here, so class-level accuracy is not measured.",
         "Argus exports have no DNS names or TLS fields, so the DNS and encrypted-session detectors cannot fire.",
         "Timestamps are local capture time read as UTC (consistent within a file).",
-        "Findings from inspecting the 2026-10 run: scenario 6's bot sends spam (4,398 failed SMTP attempts to at most 15 mail servers per 10 s, under the 20-host HOST_SCAN threshold; UniShield has no spam rule) and was caught only by its C2 beacon after about 6,300 s; scenario 7's bot made 63 flows in 21 minutes, too few for any rule; scenario 11's ICMP flood reaches only about 60 packets/s at the capture point, far below the 10,000 packets/s volumetric threshold.",
+        "Findings from inspecting the first 2026-10 run (before the spam and brute-force rules were added): scenario 6's bot sends spam (4,398 failed SMTP attempts to at most 15 mail servers per 10 s, under the 20-host HOST_SCAN threshold; UniShield has no spam rule) and was caught only by its C2 beacon after about 6,300 s; scenario 7's bot made 63 flows in 21 minutes, too few for any rule; scenario 11's ICMP flood reaches only about 60 packets/s at the capture point, far below the 10,000 packets/s volumetric threshold.",
         "Most other alerts name hosts inside 147.32.0.0/16: regular polling and peer-to-peer traffic (HTTP, SSH attempts, BitTorrent, POP3 were seen behind beacon alerts) raises C2_BEACONING, large uploads raise DATA_EXFILTRATION, and failed connection bursts raise PORT_SCAN. Default thresholds were tuned on synthetic traffic. Learning mode is evaluated below (no asset inventory); CTU-13 background traffic is not a clean learning baseline."
       ],
       "files": [
@@ -275,17 +275,17 @@
             "windows": 1552,
             "attack_windows": 1142,
             "rules": {
-              "tp": 1124,
+              "tp": 1140,
               "fp": 394,
               "tn": 16,
-              "fn": 18,
-              "precision": 0.7404,
-              "recall": 0.9842,
-              "f1": 0.8451,
+              "fn": 2,
+              "precision": 0.7432,
+              "recall": 0.9982,
+              "f1": 0.852,
               "false_positive_rate": 0.961,
-              "accuracy": 0.7345,
+              "accuracy": 0.7448,
               "recall_by_class": {
-                "BOTNET": 0.9842
+                "BOTNET": 0.9982
               },
               "episodes": 2,
               "episodes_detected": 1,
@@ -293,17 +293,17 @@
               "delay_median_sec": 0.0
             },
             "rules_statistical": {
-              "tp": 1124,
+              "tp": 1140,
               "fp": 394,
               "tn": 16,
-              "fn": 18,
-              "precision": 0.7404,
-              "recall": 0.9842,
-              "f1": 0.8451,
+              "fn": 2,
+              "precision": 0.7432,
+              "recall": 0.9982,
+              "f1": 0.852,
               "false_positive_rate": 0.961,
-              "accuracy": 0.7345,
+              "accuracy": 0.7448,
               "recall_by_class": {
-                "BOTNET": 0.9842
+                "BOTNET": 0.9982
               },
               "episodes": 2,
               "episodes_detected": 1,
@@ -314,14 +314,18 @@
           "host": {
             "attack_hosts": 1,
             "attack_hosts_detected": 1,
-            "alerts": 557,
-            "alerts_involving_attack_hosts": 4,
-            "alert_precision_host_level": 0.0072,
+            "alerts": 567,
+            "alerts_involving_attack_hosts": 13,
+            "alert_precision_host_level": 0.0229,
             "other_hosts_named": 197,
             "first_alert_delay_sec": [
-              6266.3
+              491.3
             ],
             "alerts_by_class": {
+              "BRUTE_FORCE": {
+                "alerts": 1,
+                "involving_attack_hosts": 0
+              },
               "C2_BEACONING": {
                 "alerts": 396,
                 "involving_attack_hosts": 4
@@ -341,6 +345,10 @@
               "PORT_SCAN": {
                 "alerts": 69,
                 "involving_attack_hosts": 0
+              },
+              "SPAM_ACTIVITY": {
+                "alerts": 9,
+                "involving_attack_hosts": 9
               }
             }
           }
@@ -361,14 +369,14 @@
             "attack_windows": 17,
             "rules": {
               "tp": 16,
-              "fp": 233,
-              "tn": 8,
+              "fp": 239,
+              "tn": 2,
               "fn": 1,
-              "precision": 0.0643,
+              "precision": 0.0627,
               "recall": 0.9412,
-              "f1": 0.1204,
-              "false_positive_rate": 0.9668,
-              "accuracy": 0.093,
+              "f1": 0.1176,
+              "false_positive_rate": 0.9917,
+              "accuracy": 0.0698,
               "recall_by_class": {
                 "BOTNET": 0.9412
               },
@@ -379,14 +387,14 @@
             },
             "rules_statistical": {
               "tp": 16,
-              "fp": 233,
-              "tn": 8,
+              "fp": 239,
+              "tn": 2,
               "fn": 1,
-              "precision": 0.0643,
+              "precision": 0.0627,
               "recall": 0.9412,
-              "f1": 0.1204,
-              "false_positive_rate": 0.9668,
-              "accuracy": 0.093,
+              "f1": 0.1176,
+              "false_positive_rate": 0.9917,
+              "accuracy": 0.0698,
               "recall_by_class": {
                 "BOTNET": 0.9412
               },
@@ -399,12 +407,16 @@
           "host": {
             "attack_hosts": 1,
             "attack_hosts_detected": 0,
-            "alerts": 84,
+            "alerts": 85,
             "alerts_involving_attack_hosts": 0,
             "alert_precision_host_level": 0.0,
-            "other_hosts_named": 69,
+            "other_hosts_named": 71,
             "first_alert_delay_sec": [],
             "alerts_by_class": {
+              "BRUTE_FORCE": {
+                "alerts": 1,
+                "involving_attack_hosts": 0
+              },
               "C2_BEACONING": {
                 "alerts": 30,
                 "involving_attack_hosts": 0
@@ -685,10 +697,6 @@
               "statistical.mad_threshold": {
                 "default": 3.5,
                 "learned": 819.0
-              },
-              "anomaly.min_score": {
-                "default": 0.6,
-                "learned": 0.652
               }
             },
             "window": {
@@ -909,17 +917,17 @@
               "windows": 1552,
               "attack_windows": 1142,
               "rules": {
-                "tp": 822,
-                "fp": 264,
-                "tn": 146,
-                "fn": 320,
-                "precision": 0.7569,
-                "recall": 0.7198,
-                "f1": 0.7379,
-                "false_positive_rate": 0.6439,
-                "accuracy": 0.6237,
+                "tp": 1138,
+                "fp": 266,
+                "tn": 144,
+                "fn": 4,
+                "precision": 0.8105,
+                "recall": 0.9965,
+                "f1": 0.8939,
+                "false_positive_rate": 0.6488,
+                "accuracy": 0.826,
                 "recall_by_class": {
-                  "BOTNET": 0.7198
+                  "BOTNET": 0.9965
                 },
                 "episodes": 2,
                 "episodes_detected": 1,
@@ -927,17 +935,17 @@
                 "delay_median_sec": 0.0
               },
               "rules_statistical": {
-                "tp": 823,
-                "fp": 264,
-                "tn": 146,
-                "fn": 319,
-                "precision": 0.7571,
-                "recall": 0.7207,
-                "f1": 0.7385,
-                "false_positive_rate": 0.6439,
-                "accuracy": 0.6244,
+                "tp": 1138,
+                "fp": 266,
+                "tn": 144,
+                "fn": 4,
+                "precision": 0.8105,
+                "recall": 0.9965,
+                "f1": 0.8939,
+                "false_positive_rate": 0.6488,
+                "accuracy": 0.826,
                 "recall_by_class": {
-                  "BOTNET": 0.7207
+                  "BOTNET": 0.9965
                 },
                 "episodes": 2,
                 "episodes_detected": 1,
@@ -948,14 +956,18 @@
             "host": {
               "attack_hosts": 1,
               "attack_hosts_detected": 1,
-              "alerts": 190,
-              "alerts_involving_attack_hosts": 2,
-              "alert_precision_host_level": 0.0105,
-              "other_hosts_named": 101,
+              "alerts": 199,
+              "alerts_involving_attack_hosts": 11,
+              "alert_precision_host_level": 0.0553,
+              "other_hosts_named": 103,
               "first_alert_delay_sec": [
-                6266.3
+                491.3
               ],
               "alerts_by_class": {
+                "BRUTE_FORCE": {
+                  "alerts": 1,
+                  "involving_attack_hosts": 0
+                },
                 "C2_BEACONING": {
                   "alerts": 187,
                   "involving_attack_hosts": 2
@@ -964,9 +976,9 @@
                   "alerts": 2,
                   "involving_attack_hosts": 0
                 },
-                "STATISTICAL_ANOMALY": {
-                  "alerts": 1,
-                  "involving_attack_hosts": 0
+                "SPAM_ACTIVITY": {
+                  "alerts": 9,
+                  "involving_attack_hosts": 9
                 }
               }
             }
@@ -1015,24 +1027,24 @@
               },
               "statistical.mad_threshold": {
                 "default": 3.5,
-                "learned": 2460.0
+                "learned": 2260.0
               }
             },
             "window": {
               "windows": 258,
               "attack_windows": 17,
               "rules": {
-                "tp": 12,
-                "fp": 184,
-                "tn": 57,
-                "fn": 5,
-                "precision": 0.0612,
-                "recall": 0.7059,
-                "f1": 0.1126,
-                "false_positive_rate": 0.7635,
-                "accuracy": 0.2674,
+                "tp": 15,
+                "fp": 213,
+                "tn": 28,
+                "fn": 2,
+                "precision": 0.0658,
+                "recall": 0.8824,
+                "f1": 0.1225,
+                "false_positive_rate": 0.8838,
+                "accuracy": 0.1667,
                 "recall_by_class": {
-                  "BOTNET": 0.7059
+                  "BOTNET": 0.8824
                 },
                 "episodes": 1,
                 "episodes_detected": 1,
@@ -1040,17 +1052,17 @@
                 "delay_median_sec": 0.0
               },
               "rules_statistical": {
-                "tp": 12,
-                "fp": 184,
-                "tn": 57,
-                "fn": 5,
-                "precision": 0.0612,
-                "recall": 0.7059,
-                "f1": 0.1126,
-                "false_positive_rate": 0.7635,
-                "accuracy": 0.2674,
+                "tp": 15,
+                "fp": 213,
+                "tn": 28,
+                "fn": 2,
+                "precision": 0.0658,
+                "recall": 0.8824,
+                "f1": 0.1225,
+                "false_positive_rate": 0.8838,
+                "accuracy": 0.1667,
                 "recall_by_class": {
-                  "BOTNET": 0.7059
+                  "BOTNET": 0.8824
                 },
                 "episodes": 1,
                 "episodes_detected": 1,
@@ -1061,12 +1073,16 @@
             "host": {
               "attack_hosts": 1,
               "attack_hosts_detected": 0,
-              "alerts": 22,
+              "alerts": 23,
               "alerts_involving_attack_hosts": 0,
               "alert_precision_host_level": 0.0,
-              "other_hosts_named": 31,
+              "other_hosts_named": 33,
               "first_alert_delay_sec": [],
               "alerts_by_class": {
+                "BRUTE_FORCE": {
+                  "alerts": 1,
+                  "involving_attack_hosts": 0
+                },
                 "C2_BEACONING": {
                   "alerts": 22,
                   "involving_attack_hosts": 0
@@ -1195,17 +1211,17 @@
             "windows": 1801,
             "attack_windows": 214,
             "rules": {
-              "tp": 145,
+              "tp": 148,
               "fp": 182,
               "tn": 1405,
-              "fn": 69,
-              "precision": 0.4434,
-              "recall": 0.6776,
-              "f1": 0.536,
+              "fn": 66,
+              "precision": 0.4485,
+              "recall": 0.6916,
+              "f1": 0.5441,
               "false_positive_rate": 0.1147,
-              "accuracy": 0.8606,
+              "accuracy": 0.8623,
               "recall_by_class": {
-                "PORT_SCAN": 0.6776
+                "PORT_SCAN": 0.6916
               },
               "episodes": 6,
               "episodes_detected": 5,
@@ -1213,17 +1229,17 @@
               "delay_median_sec": 10.0
             },
             "rules_statistical": {
-              "tp": 174,
-              "fp": 599,
-              "tn": 988,
-              "fn": 40,
-              "precision": 0.2251,
-              "recall": 0.8131,
-              "f1": 0.3526,
-              "false_positive_rate": 0.3774,
-              "accuracy": 0.6452,
+              "tp": 175,
+              "fp": 598,
+              "tn": 989,
+              "fn": 39,
+              "precision": 0.2264,
+              "recall": 0.8178,
+              "f1": 0.3546,
+              "false_positive_rate": 0.3768,
+              "accuracy": 0.6463,
               "recall_by_class": {
-                "PORT_SCAN": 0.8131
+                "PORT_SCAN": 0.8178
               },
               "episodes": 6,
               "episodes_detected": 5,
@@ -1234,15 +1250,19 @@
           "host": {
             "attack_hosts": 2,
             "attack_hosts_detected": 2,
-            "alerts": 171,
-            "alerts_involving_attack_hosts": 46,
-            "alert_precision_host_level": 0.269,
+            "alerts": 173,
+            "alerts_involving_attack_hosts": 48,
+            "alert_precision_host_level": 0.2775,
             "other_hosts_named": 14,
             "first_alert_delay_sec": [
               2471.1,
-              6341.1
+              3311.1
             ],
             "alerts_by_class": {
+              "BRUTE_FORCE": {
+                "alerts": 2,
+                "involving_attack_hosts": 2
+              },
               "C2_BEACONING": {
                 "alerts": 55,
                 "involving_attack_hosts": 32
@@ -1459,14 +1479,14 @@
             "attack_windows": 70,
             "rules": {
               "tp": 49,
-              "fp": 551,
-              "tn": 2320,
+              "fp": 561,
+              "tn": 2310,
               "fn": 21,
-              "precision": 0.0817,
+              "precision": 0.0803,
               "recall": 0.7,
-              "f1": 0.1463,
-              "false_positive_rate": 0.1919,
-              "accuracy": 0.8055,
+              "f1": 0.1441,
+              "false_positive_rate": 0.1954,
+              "accuracy": 0.8021,
               "recall_by_class": {
                 "DATA_EXFILTRATION": 0.7
               },
@@ -1477,14 +1497,14 @@
             },
             "rules_statistical": {
               "tp": 60,
-              "fp": 1223,
-              "tn": 1648,
+              "fp": 1228,
+              "tn": 1643,
               "fn": 10,
-              "precision": 0.0468,
+              "precision": 0.0466,
               "recall": 0.8571,
-              "f1": 0.0888,
-              "false_positive_rate": 0.426,
-              "accuracy": 0.5808,
+              "f1": 0.0884,
+              "false_positive_rate": 0.4277,
+              "accuracy": 0.5791,
               "recall_by_class": {
                 "DATA_EXFILTRATION": 0.8571
               },
@@ -1497,15 +1517,19 @@
           "host": {
             "attack_hosts": 2,
             "attack_hosts_detected": 2,
-            "alerts": 319,
-            "alerts_involving_attack_hosts": 57,
-            "alert_precision_host_level": 0.1787,
+            "alerts": 325,
+            "alerts_involving_attack_hosts": 69,
+            "alert_precision_host_level": 0.2123,
             "other_hosts_named": 11,
             "first_alert_delay_sec": [
               589.9,
               589.9
             ],
             "alerts_by_class": {
+              "BRUTE_FORCE": {
+                "alerts": 12,
+                "involving_attack_hosts": 12
+              },
               "C2_BEACONING": {
                 "alerts": 64,
                 "involving_attack_hosts": 1
@@ -1527,7 +1551,7 @@
                 "involving_attack_hosts": 0
               },
               "STATISTICAL_ANOMALY": {
-                "alerts": 170,
+                "alerts": 164,
                 "involving_attack_hosts": 0
               }
             }
@@ -1622,60 +1646,65 @@
           "traffic_hours": 8.13,
           "labels": {
             "BENIGN": 432074,
-            "ATTACK": 13835
+            "BRUTE_FORCE": 13835
           },
           "late_dropped": 0,
           "window": {
             "windows": 5847,
             "attack_windows": 391,
             "rules": {
-              "tp": 15,
+              "tp": 386,
               "fp": 756,
               "tn": 4700,
-              "fn": 376,
-              "precision": 0.0195,
-              "recall": 0.0384,
-              "f1": 0.0259,
+              "fn": 5,
+              "precision": 0.338,
+              "recall": 0.9872,
+              "f1": 0.5036,
               "false_positive_rate": 0.1386,
-              "accuracy": 0.8064,
+              "accuracy": 0.8698,
               "recall_by_class": {
-                "ATTACK": 0.0384
+                "BRUTE_FORCE": 0.9872
               },
               "episodes": 3,
               "episodes_detected": 2,
               "episode_recall": 0.6667,
-              "delay_median_sec": 1870.0
+              "delay_median_sec": 60.0
             },
             "rules_statistical": {
-              "tp": 234,
-              "fp": 2652,
-              "tn": 2804,
-              "fn": 157,
-              "precision": 0.0811,
-              "recall": 0.5985,
-              "f1": 0.1428,
-              "false_positive_rate": 0.4861,
-              "accuracy": 0.5196,
+              "tp": 388,
+              "fp": 2701,
+              "tn": 2755,
+              "fn": 3,
+              "precision": 0.1256,
+              "recall": 0.9923,
+              "f1": 0.223,
+              "false_positive_rate": 0.4951,
+              "accuracy": 0.5375,
               "recall_by_class": {
-                "ATTACK": 0.5985
+                "BRUTE_FORCE": 0.9923
               },
               "episodes": 3,
               "episodes_detected": 2,
               "episode_recall": 0.6667,
-              "delay_median_sec": 7.5
+              "delay_median_sec": 2.5
             }
           },
           "host": {
             "attack_hosts": 2,
-            "attack_hosts_detected": 1,
-            "alerts": 1145,
-            "alerts_involving_attack_hosts": 146,
-            "alert_precision_host_level": 0.1275,
+            "attack_hosts_detected": 2,
+            "alerts": 1163,
+            "alerts_involving_attack_hosts": 159,
+            "alert_precision_host_level": 0.1367,
             "other_hosts_named": 66,
             "first_alert_delay_sec": [
-              1365.9
+              115.9,
+              115.9
             ],
             "alerts_by_class": {
+              "BRUTE_FORCE": {
+                "alerts": 13,
+                "involving_attack_hosts": 13
+              },
               "C2_BEACONING": {
                 "alerts": 373,
                 "involving_attack_hosts": 146
@@ -1701,7 +1730,7 @@
                 "involving_attack_hosts": 0
               },
               "STATISTICAL_ANOMALY": {
-                "alerts": 652,
+                "alerts": 657,
                 "involving_attack_hosts": 0
               }
             }
@@ -1822,99 +1851,99 @@
       },
       "leave_one_file_out": {
         "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv": {
-          "calibrated": true,
-          "pr_auc": 0.8359,
-          "roc_auc": 0.9692,
+          "calibrated": false,
+          "pr_auc": 0.9707,
+          "roc_auc": 0.9862,
           "at_0.5": {
-            "precision": 0.8252,
-            "recall": 0.9621,
-            "f1": 0.8884,
-            "false_positive_rate": 0.0475
+            "precision": 0.8507,
+            "recall": 0.891,
+            "f1": 0.8704,
+            "false_positive_rate": 0.0364
           },
           "at_0.9": {
-            "precision": 0.8472,
-            "recall": 0.8673,
-            "f1": 0.8571,
-            "false_positive_rate": 0.0364
+            "precision": 1.0,
+            "recall": 0.4455,
+            "f1": 0.6164,
+            "false_positive_rate": 0.0
           }
         },
         "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv": {
-          "calibrated": true,
-          "pr_auc": 0.4348,
-          "roc_auc": 0.7571,
+          "calibrated": false,
+          "pr_auc": 0.4865,
+          "roc_auc": 0.7817,
           "at_0.5": {
-            "precision": 0.7532,
-            "recall": 0.271,
-            "f1": 0.3986,
-            "false_positive_rate": 0.012
+            "precision": 0.8438,
+            "recall": 0.2523,
+            "f1": 0.3885,
+            "false_positive_rate": 0.0063
           },
           "at_0.9": {
-            "precision": 0.9107,
-            "recall": 0.2383,
-            "f1": 0.3778,
-            "false_positive_rate": 0.0032
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "false_positive_rate": 0.0
           }
         },
         "Friday-WorkingHours-Morning.pcap_ISCX.csv": {
-          "calibrated": true,
-          "pr_auc": 0.3263,
-          "roc_auc": 0.53,
+          "calibrated": false,
+          "pr_auc": 0.3269,
+          "roc_auc": 0.5239,
           "at_0.5": {
-            "precision": 0.2286,
-            "recall": 0.0179,
-            "f1": 0.0332,
-            "false_positive_rate": 0.0271
+            "precision": 0.0667,
+            "recall": 0.0022,
+            "f1": 0.0043,
+            "false_positive_rate": 0.014
           },
           "at_0.9": {
-            "precision": 0.1154,
-            "recall": 0.0034,
-            "f1": 0.0066,
-            "false_positive_rate": 0.0115
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "false_positive_rate": 0.0
           }
         },
         "Monday-WorkingHours.pcap_ISCX.csv": {
-          "calibrated": true,
+          "calibrated": false,
           "pr_auc": null,
           "roc_auc": null,
           "at_0.5": {
             "precision": 0.0,
             "recall": 0.0,
             "f1": 0.0,
-            "false_positive_rate": 0.0433
+            "false_positive_rate": 0.0146
           },
           "at_0.9": {
             "precision": 0.0,
             "recall": 0.0,
             "f1": 0.0,
-            "false_positive_rate": 0.0137
+            "false_positive_rate": 0.0
           }
         },
         "Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv": {
-          "calibrated": true,
-          "pr_auc": 0.0448,
-          "roc_auc": 0.7004,
+          "calibrated": false,
+          "pr_auc": 0.0453,
+          "roc_auc": 0.6927,
           "at_0.5": {
-            "precision": 0.0613,
-            "recall": 0.3286,
-            "f1": 0.1033,
-            "false_positive_rate": 0.1226
+            "precision": 0.0541,
+            "recall": 0.2286,
+            "f1": 0.0875,
+            "false_positive_rate": 0.0975
           },
           "at_0.9": {
-            "precision": 0.0423,
-            "recall": 0.1714,
-            "f1": 0.0679,
-            "false_positive_rate": 0.0947
+            "precision": 0.0357,
+            "recall": 0.0143,
+            "f1": 0.0204,
+            "false_positive_rate": 0.0094
           }
         },
         "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv": {
           "calibrated": false,
-          "pr_auc": 0.3242,
-          "roc_auc": 0.6653,
+          "pr_auc": 0.3318,
+          "roc_auc": 0.6656,
           "at_0.5": {
             "precision": 0.0,
             "recall": 0.0,
             "f1": 0.0,
-            "false_positive_rate": 0.0014
+            "false_positive_rate": 0.0018
           },
           "at_0.9": {
             "precision": 0.0,
@@ -1925,13 +1954,13 @@
         },
         "Tuesday-WorkingHours.pcap_ISCX.csv": {
           "calibrated": false,
-          "pr_auc": 0.561,
-          "roc_auc": 0.8406,
+          "pr_auc": 0.5623,
+          "roc_auc": 0.8413,
           "at_0.5": {
-            "precision": 0.9381,
-            "recall": 0.2327,
-            "f1": 0.3729,
-            "false_positive_rate": 0.0011
+            "precision": 0.9583,
+            "recall": 0.2353,
+            "f1": 0.3778,
+            "false_positive_rate": 0.0007
           },
           "at_0.9": {
             "precision": 0.0,
@@ -1941,19 +1970,19 @@
           }
         },
         "Wednesday-workingHours.pcap_ISCX.csv": {
-          "calibrated": true,
-          "pr_auc": 0.5295,
-          "roc_auc": 0.8228,
+          "calibrated": false,
+          "pr_auc": 0.8526,
+          "roc_auc": 0.9572,
           "at_0.5": {
-            "precision": 0.0,
-            "recall": 0.0,
-            "f1": 0.0,
-            "false_positive_rate": 0.0
+            "precision": 0.9801,
+            "recall": 0.5684,
+            "f1": 0.7195,
+            "false_positive_rate": 0.0011
           },
           "at_0.9": {
-            "precision": 0.0,
-            "recall": 0.0,
-            "f1": 0.0,
+            "precision": 1.0,
+            "recall": 0.0058,
+            "f1": 0.0115,
             "false_positive_rate": 0.0
           }
         }
@@ -2100,17 +2129,17 @@
               "windows": 1801,
               "attack_windows": 214,
               "rules": {
-                "tp": 130,
+                "tp": 133,
                 "fp": 39,
                 "tn": 1548,
-                "fn": 84,
-                "precision": 0.7692,
-                "recall": 0.6075,
-                "f1": 0.6789,
+                "fn": 81,
+                "precision": 0.7733,
+                "recall": 0.6215,
+                "f1": 0.6891,
                 "false_positive_rate": 0.0246,
-                "accuracy": 0.9317,
+                "accuracy": 0.9334,
                 "recall_by_class": {
-                  "PORT_SCAN": 0.6075
+                  "PORT_SCAN": 0.6215
                 },
                 "episodes": 6,
                 "episodes_detected": 5,
@@ -2118,17 +2147,17 @@
                 "delay_median_sec": 65.0
               },
               "rules_statistical": {
-                "tp": 130,
+                "tp": 133,
                 "fp": 39,
                 "tn": 1548,
-                "fn": 84,
-                "precision": 0.7692,
-                "recall": 0.6075,
-                "f1": 0.6789,
+                "fn": 81,
+                "precision": 0.7733,
+                "recall": 0.6215,
+                "f1": 0.6891,
                 "false_positive_rate": 0.0246,
-                "accuracy": 0.9317,
+                "accuracy": 0.9334,
                 "recall_by_class": {
-                  "PORT_SCAN": 0.6075
+                  "PORT_SCAN": 0.6215
                 },
                 "episodes": 6,
                 "episodes_detected": 5,
@@ -2139,15 +2168,19 @@
             "host": {
               "attack_hosts": 2,
               "attack_hosts_detected": 2,
-              "alerts": 33,
-              "alerts_involving_attack_hosts": 32,
-              "alert_precision_host_level": 0.9697,
+              "alerts": 35,
+              "alerts_involving_attack_hosts": 34,
+              "alert_precision_host_level": 0.9714,
               "other_hosts_named": 2,
               "first_alert_delay_sec": [
                 2471.1,
-                6341.1
+                3311.1
               ],
               "alerts_by_class": {
+                "BRUTE_FORCE": {
+                  "alerts": 2,
+                  "involving_attack_hosts": 2
+                },
                 "C2_BEACONING": {
                   "alerts": 18,
                   "involving_attack_hosts": 18
@@ -2298,17 +2331,17 @@
               "windows": 2941,
               "attack_windows": 70,
               "rules": {
-                "tp": 35,
-                "fp": 327,
-                "tn": 2544,
-                "fn": 35,
-                "precision": 0.0967,
-                "recall": 0.5,
-                "f1": 0.1621,
-                "false_positive_rate": 0.1139,
-                "accuracy": 0.8769,
+                "tp": 37,
+                "fp": 342,
+                "tn": 2529,
+                "fn": 33,
+                "precision": 0.0976,
+                "recall": 0.5286,
+                "f1": 0.1648,
+                "false_positive_rate": 0.1191,
+                "accuracy": 0.8725,
                 "recall_by_class": {
-                  "DATA_EXFILTRATION": 0.5
+                  "DATA_EXFILTRATION": 0.5286
                 },
                 "episodes": 3,
                 "episodes_detected": 2,
@@ -2316,17 +2349,17 @@
                 "delay_median_sec": 80.0
               },
               "rules_statistical": {
-                "tp": 35,
-                "fp": 327,
-                "tn": 2544,
-                "fn": 35,
-                "precision": 0.0967,
-                "recall": 0.5,
-                "f1": 0.1621,
-                "false_positive_rate": 0.1139,
-                "accuracy": 0.8769,
+                "tp": 37,
+                "fp": 342,
+                "tn": 2529,
+                "fn": 33,
+                "precision": 0.0976,
+                "recall": 0.5286,
+                "f1": 0.1648,
+                "false_positive_rate": 0.1191,
+                "accuracy": 0.8725,
                 "recall_by_class": {
-                  "DATA_EXFILTRATION": 0.5
+                  "DATA_EXFILTRATION": 0.5286
                 },
                 "episodes": 3,
                 "episodes_detected": 2,
@@ -2337,15 +2370,19 @@
             "host": {
               "attack_hosts": 2,
               "attack_hosts_detected": 2,
-              "alerts": 72,
-              "alerts_involving_attack_hosts": 52,
-              "alert_precision_host_level": 0.7222,
+              "alerts": 84,
+              "alerts_involving_attack_hosts": 64,
+              "alert_precision_host_level": 0.7619,
               "other_hosts_named": 2,
               "first_alert_delay_sec": [
                 589.9,
                 589.9
               ],
               "alerts_by_class": {
+                "BRUTE_FORCE": {
+                  "alerts": 12,
+                  "involving_attack_hosts": 12
+                },
                 "C2_BEACONING": {
                   "alerts": 18,
                   "involving_attack_hosts": 0
@@ -2493,53 +2530,58 @@
               "windows": 5847,
               "attack_windows": 391,
               "rules": {
-                "tp": 2,
+                "tp": 386,
                 "fp": 205,
                 "tn": 5251,
-                "fn": 389,
-                "precision": 0.0097,
-                "recall": 0.0051,
-                "f1": 0.0067,
+                "fn": 5,
+                "precision": 0.6531,
+                "recall": 0.9872,
+                "f1": 0.7861,
                 "false_positive_rate": 0.0376,
-                "accuracy": 0.8984,
+                "accuracy": 0.9641,
                 "recall_by_class": {
-                  "ATTACK": 0.0051
+                  "BRUTE_FORCE": 0.9872
                 },
                 "episodes": 3,
-                "episodes_detected": 1,
-                "episode_recall": 0.3333,
-                "delay_median_sec": 2130.0
+                "episodes_detected": 2,
+                "episode_recall": 0.6667,
+                "delay_median_sec": 60.0
               },
               "rules_statistical": {
-                "tp": 2,
+                "tp": 386,
                 "fp": 205,
                 "tn": 5251,
-                "fn": 389,
-                "precision": 0.0097,
-                "recall": 0.0051,
-                "f1": 0.0067,
+                "fn": 5,
+                "precision": 0.6531,
+                "recall": 0.9872,
+                "f1": 0.7861,
                 "false_positive_rate": 0.0376,
-                "accuracy": 0.8984,
+                "accuracy": 0.9641,
                 "recall_by_class": {
-                  "ATTACK": 0.0051
+                  "BRUTE_FORCE": 0.9872
                 },
                 "episodes": 3,
-                "episodes_detected": 1,
-                "episode_recall": 0.3333,
-                "delay_median_sec": 2130.0
+                "episodes_detected": 2,
+                "episode_recall": 0.6667,
+                "delay_median_sec": 60.0
               }
             },
             "host": {
               "attack_hosts": 2,
-              "attack_hosts_detected": 1,
-              "alerts": 102,
-              "alerts_involving_attack_hosts": 83,
-              "alert_precision_host_level": 0.8137,
+              "attack_hosts_detected": 2,
+              "alerts": 115,
+              "alerts_involving_attack_hosts": 96,
+              "alert_precision_host_level": 0.8348,
               "other_hosts_named": 20,
               "first_alert_delay_sec": [
-                2090.9
+                115.9,
+                115.9
               ],
               "alerts_by_class": {
+                "BRUTE_FORCE": {
+                  "alerts": 13,
+                  "involving_attack_hosts": 13
+                },
                 "C2_BEACONING": {
                   "alerts": 90,
                   "involving_attack_hosts": 83

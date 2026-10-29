@@ -82,6 +82,8 @@ is covered in [docs/deployment.md](docs/deployment.md).
 | DNS_TUNNELLING | many unique long / high-entropy subdomains of one base domain | T1071.004, T1572 |
 | ENCRYPTED_SESSION_ANOMALY | outdated TLS versions, operator JA3 blocklist, long low-rate sessions on unusual ports — never decrypted | T1573 (+T1571) |
 | STATISTICAL_ANOMALY | robust z-scores and Isolation Forest on windows no rule explained | — |
+| BRUTE_FORCE | many short, small connections from one source to the same login port on one host within 60 s, most of them completing the handshake | T1110 |
+| SPAM_ACTIVITY | direct SMTP delivery from an internal host to many external mail servers within 5 minutes | — |
 | INTEL_MATCH | an address, network or domain from an imported threat-intel list in a flow or DNS query (other alerts involving one get the match as evidence and one level more severity) | techniques listed with the indicator |
 
 Detection modes (`UNISHIELD_DETECTION_MODE` or `mode=` on a replay):
@@ -213,12 +215,12 @@ Monday, the attack-free day):
 
 | Day (attacks) | Attack hosts flagged, default → tuned | Alerts, default → tuned | Host-level precision, default → tuned |
 |---|---|---|---|
-| Tuesday (FTP/SSH brute force) | 1/2 → 1/2 | 1,145 → 102 | 0.13 → 0.81 |
+| Tuesday (FTP/SSH brute force) | 2/2 → 2/2 | 1,163 → 115 | 0.14 → 0.83 |
 | Wednesday (DoS, Heartbleed) | 3/3 → 3/3 | 939 → 111 | 0.18 → 0.78 |
 | Thursday morning (web attacks) | 1/2 → 0/2 | 513 → 13 | 0.07 → 0.00 |
-| Thursday afternoon (infiltration) | 2/2 → 2/2 | 319 → 72 | 0.18 → 0.72 |
+| Thursday afternoon (infiltration) | 2/2 → 2/2 | 325 → 84 | 0.21 → 0.76 |
 | Friday morning (botnet) | 7/10 → 2/10 | 469 → 30 | 0.35 → 0.50 |
-| Friday afternoon (port scan) | 2/2 → 2/2 | 171 → 33 | 0.27 → 0.97 |
+| Friday afternoon (port scan) | 2/2 → 2/2 | 173 → 35 | 0.28 → 0.97 |
 | Friday afternoon (DDoS) | 2/2 → 2/2 | 155 → 24 | 0.26 → 0.96 |
 
 *CTU-13* (5 botnet scenarios, 1.24 M Argus flows from a university network;
@@ -227,26 +229,31 @@ thresholds learned from the other four scenarios):
 | Scenario (botnet) | Infected hosts flagged, default → tuned | Alerts, default → tuned | Alerts naming an infected host (default) | First alert, default |
 |---|---|---|---|---|
 | 5 (Virut) | 1/1 → 0/1 | 46 → 28 | 1 | 719 s |
-| 6 (Menti, spam) | 1/1 → 1/1 | 557 → 190 | 4 | 6,266 s |
-| 7 (Sogou, 63 botnet flows) | 0/1 → 0/1 | 84 → 22 | 0 | – |
+| 6 (Menti, spam) | 1/1 → 1/1 | 567 → 199 | 13 | 491 s |
+| 7 (Sogou, 63 botnet flows) | 0/1 → 0/1 | 85 → 23 | 0 | – |
 | 11 (Rbot) | 3/3 → 0/3 | 61 → 18 | 3 | 38–81 s |
 | 12 (NSIS.ay, P2P) | 3/9 → 0/9 | 313 → 139 | 5 | 119–180 s |
 
 What this shows:
 
-- With default thresholds most attack hosts are flagged (18/23 on CIC-IDS2017,
+- With default thresholds most attack hosts are flagged (19/23 on CIC-IDS2017,
   8/15 on CTU-13), but most alerts are false: precision 0.07–0.35 on the lab
   network and 0.01–0.05 on the university network, where beaconing,
   exfiltration and scan rules fire on polling, peer-to-peer and upload traffic.
 - Site tuning works when the learning traffic is really benign: learning from
   CIC-IDS2017's attack-free Monday cut alerts 5–40 times and raised precision
-  to 0.72–0.97 on five of seven days while keeping almost every attack host,
+  to 0.76–0.97 on five of seven days while keeping almost every attack host,
   at the cost of missing the botnet and web-attack days. Learning from CTU-13
   "background" traffic, which is unverified and contains scanning and heavy
   P2P, loosened the thresholds so far that 7 of 8 detected hosts were lost.
-- Gaps: no spam or brute-force rule, web attacks are invisible in flow
-  metadata, bots with very few flows are missed, and the DDoS thresholds suit
-  high-rate floods only.
+- The brute-force and spam rules, added after the first run and with thresholds
+  chosen from how login tools and mail clients behave, raised 47 alerts across
+  both datasets, 45 of them on attack hosts: Tuesday's FTP/SSH brute-force host
+  is now found (1/2 → 2/2, first alert after 116 s), and CTU-13 scenario 6's spam
+  bot is reported after 491 s instead of 6,266 s. None fired on the attack-free
+  Monday.
+- Remaining gaps: web attacks are invisible in flow metadata, bots with very
+  few flows are missed, and the DDoS thresholds suit high-rate floods only.
 - The window model trained on synthetic data does not transfer (ROC-AUC 0.53
   on CTU-13 and 0.56 on CIC-IDS2017 windows).
 
