@@ -174,6 +174,7 @@ def test_pipeline_state_covers_every_stateful_component():
         "extractor:beaconing", "extractor:exfiltration", "detector:beaconing_detector",
         "detector:exfiltration_detector", "detector:encrypted_session_detector",
         "detector:statistical_detector", "detector:anomaly_detector", "correlator",
+        "extractor:service_abuse_features", "detector:service_abuse_detector",
     }
 
 

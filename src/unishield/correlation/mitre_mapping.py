@@ -36,6 +36,10 @@ MITRE_TECHNIQUES: dict[ThreatClass, tuple[str, ...]] = {
     # A list match says an indicator is known-bad, not which technique is in use;
     # techniques listed with the indicator are added per alert.
     ThreatClass.INTEL_MATCH: (),
+    # T1110 Brute Force (password guessing against a login service)
+    ThreatClass.BRUTE_FORCE: ("T1110",),
+    # ATT&CK has no technique for sending spam from a compromised host.
+    ThreatClass.SPAM_ACTIVITY: (),
 }
 
 # Extra techniques added when evidence supports them

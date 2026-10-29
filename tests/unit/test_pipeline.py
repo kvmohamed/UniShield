@@ -384,6 +384,7 @@ class TestPipeline:
             "dns_detector",
             "encrypted_session_detector",
             "intel_detector",
+            "service_abuse_detector",
             "statistical_detector",
             "anomaly_detector",
         }

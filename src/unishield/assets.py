@@ -56,13 +56,14 @@ _SCANS = {_C.PORT_SCAN: "info", _C.HOST_SCAN: "info", _C.RECONNAISSANCE: "info"}
 #: Built-in policies: role -> side -> threat class -> action. ``policies`` in
 #: assets.yaml override single entries.
 DEFAULT_ROLE_POLICIES: dict[str, dict[str, dict[ThreatClass, str]]] = {
-    "vulnerability_scanner": {"source": dict(_SCANS)},
+    "vulnerability_scanner": {"source": {**_SCANS, _C.BRUTE_FORCE: "info"}},
     "backup_server": {"destination": {_C.DATA_EXFILTRATION: "suppress", _C.C2_BEACONING: "info"}},
     "dns_resolver": {"source": {_C.DGA_DETECTED: "info", _C.DNS_TUNNELLING: "info"}},
     "update_server": {"destination": {_C.C2_BEACONING: "info"}},
     "cdn_or_proxy": {"destination": {_C.C2_BEACONING: "info"}},
     "monitoring": {"source": {**_SCANS, _C.C2_BEACONING: "info"},
                    "destination": {_C.C2_BEACONING: "info"}},
+    "mail_server": {"source": {_C.SPAM_ACTIVITY: "info"}},
     "server": {},
 }
 

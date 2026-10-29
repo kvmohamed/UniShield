@@ -41,6 +41,7 @@ from unishield.detectors.dns_detector import DNSDetector
 from unishield.detectors.encrypted_detector import EncryptedSessionDetector
 from unishield.detectors.exfiltration_detector import ExfiltrationDetector
 from unishield.detectors.intel_detector import IntelDetector
+from unishield.detectors.service_abuse_detector import ServiceAbuseDetector
 from unishield.detectors.scan_detector import ScanDetector
 from unishield.detectors.statistical_detector import StatisticalDetector
 from unishield.features.base import BaseFeatureExtractor, WindowContext
@@ -49,6 +50,7 @@ from unishield.features.dns import DNSFeatureExtractor
 from unishield.features.encrypted import EncryptedSessionFeatureExtractor
 from unishield.features.exfiltration import ExfiltrationFeatureExtractor
 from unishield.features.intel import IntelFeatureExtractor
+from unishield.features.service_abuse import ServiceAbuseFeatureExtractor
 from unishield.features.scan import ScanFeatureExtractor
 from unishield.features.volume import VolumeFeatureExtractor
 from unishield.ingest.base import BaseReader
@@ -216,6 +218,7 @@ def default_detectors(mode: str = "rules") -> list[BaseDetector]:
         DNSDetector(),
         EncryptedSessionDetector(),
         IntelDetector(),
+        ServiceAbuseDetector(),
         StatisticalDetector(),
         AnomalyDetector(),
     ]
@@ -308,6 +311,7 @@ class Pipeline:
             DNSFeatureExtractor(),
             EncryptedSessionFeatureExtractor(extra_ja3=self.intel.ja3_labels()),
             IntelFeatureExtractor(self.intel),
+            ServiceAbuseFeatureExtractor(),
         ]
 
         # Detectors: rule detectors first; detectors with runs_after_rules

@@ -42,6 +42,8 @@ CLASS_NAMES = {
     "ENCRYPTED_SESSION_ANOMALY": "Suspicious encrypted-session behaviour",
     "STATISTICAL_ANOMALY": "Statistical anomaly",
     "INTEL_MATCH": "Threat-intelligence match",
+    "BRUTE_FORCE": "Login brute force",
+    "SPAM_ACTIVITY": "Spam sending",
 }
 
 

@@ -22,7 +22,8 @@
 # entries match (by their salted hash); networks (CIDR) cannot.
 #
 # ---- Roles and their built-in policies --------------------------------------
-#   vulnerability_scanner  as source: PORT_SCAN, HOST_SCAN, RECONNAISSANCE -> info
+#   vulnerability_scanner  as source: PORT_SCAN, HOST_SCAN, RECONNAISSANCE,
+#                          BRUTE_FORCE (credential audits) -> info
 #   backup_server          as destination: DATA_EXFILTRATION -> suppress,
 #                          C2_BEACONING -> info (scheduled backups are periodic);
 #                          uploads to it are also kept out of the uploader's
@@ -34,6 +35,8 @@
 #   cdn_or_proxy           as destination: C2_BEACONING -> info
 #   monitoring             as source: scans and C2_BEACONING -> info;
 #                          as destination: C2_BEACONING -> info
+#   mail_server            as source: SPAM_ACTIVITY -> info (mail servers deliver
+#                          directly to many external mail servers)
 #   server                 no built-in policy; shown in alert evidence
 #
 # A DNS_TUNNELLING alert without a single source matches on the source side

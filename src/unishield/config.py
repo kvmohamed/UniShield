@@ -418,7 +418,7 @@ class StateConfig(BaseModel):
 
 AssetRole = Literal[
     "dns_resolver", "backup_server", "vulnerability_scanner", "update_server",
-    "cdn_or_proxy", "monitoring", "server",
+    "cdn_or_proxy", "monitoring", "mail_server", "server",
 ]
 PolicyAction = Literal["alert", "info", "suppress"]
 
