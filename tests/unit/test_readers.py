@@ -155,13 +155,13 @@ class TestFlowReader:
         assert reader.profile is not None and reader.profile.name == "cicids2017"
         assert len(records) == 2 and reader.errors == 1           # row with an invalid IP
         benign, ddos = records
-        assert benign.timestamp == datetime(2017, 7, 7, 3, 30, tzinfo=timezone.utc)
+        assert benign.timestamp == datetime(2017, 7, 7, 15, 30, tzinfo=timezone.utc)   # 3:30 without AM/PM = 3:30 PM
         assert benign.duration == pytest.approx(5.0)               # 5,000,000 µs
         assert (benign.orig_packets, benign.resp_packets, benign.packet_count) == (10, 8, 18)
         assert (benign.orig_bytes, benign.resp_bytes, benign.byte_count) == (1200, 6400, 7600)
         assert benign.flow_id.startswith("192.168.10.5-")
         assert (benign.label, ddos.label) == ("BENIGN", "DDoS")
-        assert ddos.timestamp == datetime(2017, 7, 7, 3, 31, 15, tzinfo=timezone.utc)
+        assert ddos.timestamp == datetime(2017, 7, 7, 15, 31, 15, tzinfo=timezone.utc)
 
     def test_explicit_profile_none_disables_detection(self, sample_cicids_csv):
         reader = FlowReader(sample_cicids_csv, profile="none")
@@ -189,3 +189,21 @@ class TestFlowReader:
         path = tmp_path / "flows.data"
         path.write_text(sample_flow_jsonl.read_text(encoding="utf-8"), encoding="utf-8")
         assert len(list(FlowReader(path).read())) == 3
+
+
+def test_cicids2017_morning_times_and_explicit_am_pm_are_kept(tmp_path):
+    from datetime import datetime, timezone
+
+    from unishield.ingest.flow_reader import FlowReader
+
+    header = (" Source IP, Source Port, Destination IP, Destination Port, Protocol, Timestamp, Flow Duration,"
+              " Total Fwd Packets, Total Backward Packets, Label\n")
+    rows = ["192.168.10.5,51000,192.168.10.3,80,6,5/7/2017 9:15,1000,1,1,BENIGN\n",
+            "192.168.10.5,51001,192.168.10.3,80,6,5/7/2017 2:05,1000,1,1,BENIGN\n",
+            "192.168.10.5,51002,192.168.10.3,80,6,5/7/2017 2:05:00 AM,1000,1,1,BENIGN\n"]
+    path = tmp_path / "day.csv"
+    path.write_text(header + "".join(rows), encoding="utf-8")
+    morning, afternoon, explicit = FlowReader(path).read()
+    assert morning.timestamp == datetime(2017, 7, 5, 9, 15, tzinfo=timezone.utc)
+    assert afternoon.timestamp == datetime(2017, 7, 5, 14, 5, tzinfo=timezone.utc)
+    assert explicit.timestamp == datetime(2017, 7, 5, 2, 5, tzinfo=timezone.utc)

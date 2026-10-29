@@ -11,7 +11,9 @@ Dataset profiles (auto-detected from the header, or chosen explicitly):
                  files): forward/backward packet and byte columns, Flow
                  Duration in microseconds, dd/mm/yyyy timestamps that may
                  lack seconds. Timestamps in that dataset are local lab
-                 time and are interpreted as UTC here.
+                 time and are interpreted as UTC here. Some files write
+                 afternoon times as 1:00-5:00 without AM/PM; the lab worked
+                 roughly 08:00-17:00, so hours before 08 are read as PM.
     ctu13      — Argus bidirectional flows (".binetflow") from CTU-13:
                  StartTime/Dur/SrcAddr/Sport/DstAddr/Dport/State/TotPkts/
                  TotBytes/SrcBytes/Label. Reply bytes are TotBytes - SrcBytes;
@@ -34,7 +36,7 @@ import csv
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 
@@ -209,6 +211,23 @@ def argus_conn_state(state: Optional[str], protocol: Optional[str]) -> tuple[Opt
     return "OTH", None
 
 
+_CICIDS_FORMATS = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %I:%M %p")
+
+
+def _cicids_row(data: dict[str, Any]) -> dict[str, Any]:
+    """CIC-IDS2017 writes afternoon times without AM/PM: hours before 08:00 are PM (lab hours 08-17)."""
+    raw = _text(data.get("timestamp"))
+    if raw and not raw.upper().endswith(("AM", "PM")):
+        for fmt in _CICIDS_FORMATS[:2]:
+            try:
+                ts = datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            data["timestamp"] = ts + timedelta(hours=12) if ts.hour < 8 else ts
+            break
+    return data
+
+
 def _ctu13_row(data: dict[str, Any]) -> dict[str, Any]:
     total, orig = _safe_int(data.get("byte_count")), _safe_int(data.get("orig_bytes"))
     if total is not None and orig is not None and 0 <= orig <= total:
@@ -233,12 +252,8 @@ PROFILES: dict[str, DatasetProfile] = {
         },
         signature=frozenset({"flow_duration", "total_fwd_packets", "total_backward_packets"}),
         duration_scale=1e-6,
-        timestamp_formats=(
-            "%d/%m/%Y %H:%M:%S",
-            "%d/%m/%Y %H:%M",
-            "%d/%m/%Y %I:%M:%S %p",
-            "%d/%m/%Y %I:%M %p",
-        ),
+        timestamp_formats=_CICIDS_FORMATS,
+        row_hook=_cicids_row,
     ),
     "ctu13": DatasetProfile(
         name="ctu13",
