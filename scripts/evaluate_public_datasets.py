@@ -26,6 +26,7 @@ from unishield.evaluation.public import (
     leave_one_file_out,
     render_markdown,
     run_file,
+    site_tuned,
     window_metrics,
 )
 
@@ -58,11 +59,19 @@ DATASETS = {
         "title": "CIC-IDS2017 (Canadian Institute for Cybersecurity)",
         "description": "Five days of benign and attack traffic in a lab network, as CICFlowMeter flows "
                        "(TrafficLabelling CSVs).",
-        "home_networks": [],
+        "home_networks": ["192.168.10.0/24"],
+        "spread_minutes": True,
+        "learn_from": "Monday-WorkingHours",            # the attack-free day
         "caveats": [
             "Published analyses report labelling and flow-construction errors in CIC-IDS2017.",
-            "CICFlowMeter timestamps are local lab time with minute resolution in some files.",
-            "CICFlowMeter flows carry no DNS names or TLS fields.",
+            "Timestamps are local lab time. Some files write afternoon times as 1:00-5:00 without AM/PM; hours "
+            "before 08:00 are read as PM (lab hours 08:00-17:00).",
+            "Seven of the eight files have minute-resolution timestamps; for this evaluation each minute's flows "
+            "are spread evenly over the minute in file order, so they are not analysed as one burst. Rates "
+            "inside a minute are therefore approximate.",
+            "CICFlowMeter flows carry no DNS names or TLS fields, so the DNS and encrypted-session detectors "
+            "cannot fire.",
+            "Attack hosts are both ends of every attack-labelled flow (attackers and victims).",
         ],
     },
 }
@@ -76,12 +85,12 @@ def _expand(patterns: list[str]) -> list[Path]:
     return [f for f in files if f.is_file()]
 
 
-def evaluate_dataset(key: str, files: list[Path], synthetic: Path) -> dict:
+def evaluate_dataset(key: str, files: list[Path], synthetic: Path, tuning: bool = False) -> dict:
     spec = DATASETS[key]
     runs = []
     for f in files:
         started = time.time()
-        run = run_file(f, spec["home_networks"] or None)
+        run = run_file(f, spec["home_networks"] or None, spec.get("spread_minutes", False))
         print(f"  {f.name}: {run.records:,} records, {len(run.windows):,} windows, {len(run.alerts)} alerts "
               f"({time.time() - started:.0f} s)")
         runs.append(run)
@@ -99,6 +108,10 @@ def evaluate_dataset(key: str, files: list[Path], synthetic: Path) -> dict:
         } for r in runs],
         "cross_domain": cross_domain(synthetic, all_windows),
         "leave_one_file_out": leave_one_file_out(runs),
+        "site_tuned": site_tuned(
+            files, spec["home_networks"] or None, spread_minutes=spec.get("spread_minutes", False),
+            learn_from=[f for f in files if spec.get("learn_from") and spec["learn_from"] in f.name] or None,
+        ) if tuning and len(files) > 1 else None,
     }
 
 
@@ -109,6 +122,8 @@ def main() -> None:
     parser.add_argument("--synthetic", type=Path, default=Path("data/processed/windows_synthetic.csv"),
                         help="synthetic window dataset for the cross-domain model")
     parser.add_argument("--out", type=Path, default=Path("reports"))
+    parser.add_argument("--site-tuning", action="store_true",
+                        help="also learn thresholds from the other files and rerun each file with them")
     args = parser.parse_args()
 
     report = {"generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), "datasets": []}
@@ -117,7 +132,7 @@ def main() -> None:
         if not files:
             continue
         print(f"{DATASETS[key]['title']}: {len(files)} files")
-        report["datasets"].append(evaluate_dataset(key, files, args.synthetic))
+        report["datasets"].append(evaluate_dataset(key, files, args.synthetic, args.site_tuning))
     if not report["datasets"]:
         parser.error("no input files found")
 

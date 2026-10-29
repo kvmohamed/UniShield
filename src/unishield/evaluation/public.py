@@ -94,6 +94,56 @@ class _TallyingReader(BaseReader):
         return self.inner.errors
 
 
+class _MinuteSpreader(BaseReader):
+    """
+    For files whose timestamps have minute resolution (seven of the eight
+    CIC-IDS2017 TrafficLabelling files): spreads each minute's flows evenly
+    over that minute in file order, so a minute's ~1,000 flows are not
+    analysed as one burst at :00. Files with second resolution pass through
+    unchanged. Two passes over the file; nothing else is altered.
+    """
+
+    def __init__(self, path: Path):
+        from unishield.ingest.detect import open_reader
+
+        self._open = lambda: open_reader(path)[0]
+        first = self._open()
+        super().__init__(path)
+        self.packet_level = False
+        self._last = first
+        self.spread = False
+
+    def validate_source(self) -> bool:
+        return True
+
+    def read(self) -> Iterator:
+        from datetime import timedelta
+        from itertools import islice
+
+        sample = list(islice(self._open().read(), 2000))
+        self.spread = bool(sample) and all(f.timestamp.second == 0 and f.timestamp.microsecond == 0 for f in sample)
+        if not self.spread:
+            self._last = self._open()
+            yield from self._last.read()
+            return
+        counts: Counter = Counter(f.timestamp for f in self._open().read())
+        seen: Counter = Counter()
+        self._last = self._open()
+        for flow in self._last.read():
+            k = flow.timestamp
+            offset = 60.0 * seen[k] / counts[k] if counts[k] else 0.0
+            seen[k] += 1
+            yield flow.model_copy(update={"timestamp": k + timedelta(seconds=offset)})
+
+    @property
+    def records_read(self) -> int:
+        return self._last.records_read
+
+    @property
+    def errors(self) -> int:
+        return self._last.errors
+
+
 @dataclass
 class FileRun:
     name: str
@@ -110,14 +160,20 @@ class FileRun:
     first_attack: dict[str, datetime] = field(default_factory=dict)
 
 
-def run_file(path: Path | str, home_networks: Sequence[str] | None = None) -> FileRun:
-    """Run the default rules pipeline over one labelled file, keeping windows and alerts."""
+def run_file(path: Path | str, home_networks: Sequence[str] | None = None, spread_minutes: bool = False) -> FileRun:
+    """
+    Run the default rules pipeline over one labelled file, keeping windows and
+    alerts. ``spread_minutes`` spreads minute-resolution timestamps (see
+    ``_MinuteSpreader``).
+    """
     from unishield.ingest.detect import open_reader
     from unishield.processing.normalization import Normalizer
     from unishield.processing.pipeline import Pipeline
 
     path = Path(path)
     inner, fmt = open_reader(path)
+    if spread_minutes:
+        inner = _MinuteSpreader(path)
     reader = _TallyingReader(inner)
     recorder = WindowRecorder(path.name, MODEL_FEATURE_KEYS)
     alerts: list[dict[str, Any]] = []
@@ -300,5 +356,120 @@ def render_markdown(report: dict[str, Any]) -> str:
                 lines.append(f"| {name} | {_f(m['pr_auc'])} | {_f(m['roc_auc'])} | {_f(m['at_0.5']['precision'])} | "
                              f"{_f(m['at_0.5']['recall'])} | {_f(m['at_0.5']['false_positive_rate'])} | "
                              f"{_f(m['at_0.9']['recall'])} |")
+        if ds.get("site_tuned"):
+            st = ds["site_tuned"]
+            defaults = {f["name"]: f["host"] for f in ds["files"]}
+            lines += ["", f"### Site tuning ({st.get('design', 'leave one file out')}, percentile {st['percentile']})", "",
+                      "Learning mode, without an asset inventory, with attack-labelled flows removed from the "
+                      "learning traffic (standing in for an attack-free learning period); an evaluated file never "
+                      "influences its own thresholds.", "",
+                      "| File | Hosts detected (default → tuned) | Alerts | Alerts on attack hosts | "
+                      "Host-level precision | Other hosts named |", "|---|---|---|---|---|---|"]
+            for name, t in st["files"].items():
+                d, h = defaults.get(name, {}), t["host"]
+                lines.append(
+                    f"| {name} | {d.get('attack_hosts_detected')}/{d.get('attack_hosts')} → "
+                    f"{h['attack_hosts_detected']}/{h['attack_hosts']} | {d.get('alerts')} → {h['alerts']} | "
+                    f"{d.get('alerts_involving_attack_hosts')} → {h['alerts_involving_attack_hosts']} | "
+                    f"{_f(d.get('alert_precision_host_level'))} → {_f(h['alert_precision_host_level'])} | "
+                    f"{d.get('other_hosts_named')} → {h['other_hosts_named']} |")
+            lines += ["", "Thresholds changed by learning (held-out file: key default → learned):", ""]
+            for name, t in st["files"].items():
+                parts = [f"{k} {v['default']} → {v['learned']}" for k, v in t["changed"].items()]
+                lines.append(f"- {name}: {'; '.join(parts) or 'none'}")
         lines += ["", "### Caveats", ""] + [f"- {c}" for c in ds.get("caveats", [])] + [""]
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Site tuning (learning mode), leave one file out
+# ---------------------------------------------------------------------------
+
+class _CleanReader(BaseReader):
+    """Drops attack-labelled records: stands in for an attack-free learning period."""
+
+    def __init__(self, inner: BaseReader):
+        super().__init__(getattr(inner, "source_path", None))
+        self.inner = inner
+        self.packet_level = getattr(inner, "packet_level", False)
+        self.dropped = 0
+
+    def validate_source(self) -> bool:
+        return self.inner.validate_source()
+
+    def read(self) -> Iterator:
+        for flow in self.inner.read():
+            if (normalise_label(flow.label) or BENIGN) != BENIGN:
+                self.dropped += 1
+                continue
+            yield flow
+
+
+def site_tuned(paths: Sequence[Path], home_networks: Sequence[str] | None, percentile: float = 99.9,
+               scratch: Optional[Path] = None, spread_minutes: bool = False,
+               learn_from: Optional[Sequence[Path]] = None) -> dict[str, Any]:
+    """
+    Learn site thresholds (learning mode, no asset inventory) and rerun files
+    with the learned overlay, scored like the default run.
+
+    Without ``learn_from``: for each file, learn from the other files with
+    attack-labelled flows removed (leave one file out). With ``learn_from``
+    (e.g. an attack-free day): learn once from those files and evaluate every
+    other file. A file never influences its own thresholds.
+    """
+    import tempfile
+
+    import yaml
+
+    from unishield.assets import AssetInventory
+    from unishield.config import config_dir, load_thresholds, reset_thresholds
+    from unishield.evaluation.learning import learn, render_site_thresholds
+    from unishield.ingest.detect import open_reader
+    from unishield.processing.normalization import Normalizer
+
+    base = config_dir() / "thresholds.yaml"
+    defaults = yaml.safe_load(base.read_text(encoding="utf-8"))
+    out: dict[str, Any] = {"percentile": percentile, "files": {},
+                           "design": "learned once from " + ", ".join(p.name for p in learn_from) if learn_from
+                           else "leave one file out"}
+    learned_cache: dict[tuple, Any] = {}
+    targets = [p for p in paths if not learn_from or p not in set(learn_from)]
+    with tempfile.TemporaryDirectory(dir=scratch) as tmp:
+        for held in targets:
+            others = list(learn_from) if learn_from else [p for p in paths if p != held]
+            reset_thresholds()
+            current = load_thresholds(use_site=False)
+            cleaners = []
+
+            def inputs():
+                for p in others:
+                    reader = _CleanReader(_MinuteSpreader(p) if spread_minutes else open_reader(p)[0])
+                    cleaners.append(reader)
+                    yield p.name, reader
+
+            normalizer = Normalizer(home_networks=list(home_networks)) if home_networks else None
+            key = tuple(sorted(str(p) for p in others))
+            if key not in learned_cache:
+                run = learn(inputs(), thresholds=current, threshold_sources=[str(base)], assets=AssetInventory(),
+                            normalizer=normalizer)
+                learned_cache[key] = (run, run.learner.suggest(defaults, percentile=percentile),
+                                      sum(c.dropped for c in cleaners))
+            run, suggestions, dropped = learned_cache[key]
+            overlay = Path(tmp) / f"site_{held.stem}.yaml"
+            meta = run.meta("learned for evaluation", percentile, False)
+            overlay.write_text(render_site_thresholds(suggestions, defaults, current, meta), encoding="utf-8")
+            try:
+                reset_thresholds()
+                load_thresholds(site_path=overlay)
+                tuned = run_file(held, home_networks, spread_minutes)
+            finally:
+                reset_thresholds()
+            out["files"][held.name] = {
+                "learned_from": [p.name for p in others],
+                "learning_records": run.records,
+                "attack_flows_removed": dropped,
+                "changed": {s.key: {"default": s.default, "learned": s.suggested} for s in suggestions if s.changed},
+                "window": window_metrics(tuned.windows),
+                "host": host_metrics(tuned),
+            }
+    return out

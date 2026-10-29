@@ -86,6 +86,8 @@ def main() -> int:
     parser.add_argument("--synthetic-assets", action="store_true",
                         help="apply the generated site's asset inventory instead of assets.yaml")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--home-networks", default=None,
+                        help="comma-separated CIDRs of the monitored network (default: network.home_networks)")
     args = parser.parse_args()
 
     if not args.inputs and not args.synthetic_hours:
@@ -114,8 +116,13 @@ def main() -> int:
         print(f"  {name}: {result.total_records:,} records, {result.total_windows:,} windows", flush=True)
 
     print(f"Learning (no alerts are stored or sent); asset inventory: {len(assets)} entries", flush=True)
+    normalizer = None
+    if args.home_networks:
+        from unishield.processing.normalization import Normalizer
+
+        normalizer = Normalizer(home_networks=args.home_networks.split(","))
     run = learn(inputs, thresholds=get_thresholds(), threshold_sources=threshold_sources(), assets=assets,
-                state_store=store, progress=progress)
+                state_store=store, progress=progress, normalizer=normalizer)
     suggestions = run.learner.suggest(defaults, percentile=args.percentile, margin=args.margin,
                                       allow_tighten=args.allow_tighten)
     meta = run.meta(datetime.now(timezone.utc).isoformat(timespec="seconds"), args.percentile, args.allow_tighten)

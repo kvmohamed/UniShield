@@ -642,17 +642,18 @@ class LearningRun:
 
 def learn(inputs: Iterable[tuple[str, Any]], *, thresholds: dict[str, Any], threshold_sources: list[str],
           assets: Optional[AssetInventory] = None, state_store=None,
-          progress: Optional[Callable[[str, Any], None]] = None) -> LearningRun:
+          progress: Optional[Callable[[str, Any], None]] = None, normalizer=None) -> LearningRun:
     """
     Run one pipeline over ``inputs`` ((name, reader) pairs, in order, so state
     carries over between files) with learning hooks and no alert storage.
+    ``normalizer`` overrides the configured one (e.g. other home networks).
     """
     from unishield.processing.pipeline import Pipeline
 
     assets = assets if assets is not None else AssetInventory.from_config()
     learner = BaselineLearner(thresholds, assets)
     pipeline = Pipeline(window_observer=learner.observe, alert_callback=learner.count_alert, assets=assets,
-                        state_store=state_store)
+                        state_store=state_store, normalizer=normalizer)
     learner.attach(pipeline)
     records, names = 0, []
     for name, reader in inputs:

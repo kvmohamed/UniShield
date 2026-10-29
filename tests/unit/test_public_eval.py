@@ -69,3 +69,18 @@ def test_markdown_report_renders(capture):
         "cross_domain": None, "leave_one_file_out": {}}]}
     text = render_markdown(report)
     assert "## CTU-13 test" in text and "| scenario_test.binetflow |" in text and "PORT_SCAN" in text
+
+
+def test_minute_resolution_flows_are_spread_over_their_minute(tmp_path):
+    from unishield.evaluation.public import _MinuteSpreader
+
+    header = (" Source IP, Source Port, Destination IP, Destination Port, Protocol, Timestamp, Flow Duration,"
+              " Total Fwd Packets, Total Backward Packets, Label\n")
+    rows = [f"192.168.10.5,{50000 + i},192.168.10.3,80,6,7/7/2017 9:{15 + i // 4},1000,1,1,BENIGN\n" for i in range(8)]
+    path = tmp_path / "minutes.csv"
+    path.write_text(header + "".join(rows), encoding="utf-8")
+    reader = _MinuteSpreader(path)
+    times = [f.timestamp for f in reader.read()]
+    assert reader.spread and reader.records_read == 8
+    assert [t.second for t in times] == [0, 15, 30, 45, 0, 15, 30, 45]
+    assert times == sorted(times)
