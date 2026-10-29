@@ -201,29 +201,54 @@ scores are optimistic: trained without a class, the random forest misses
 most unseen attack types (leave-one-attack-out table in the report). See
 [docs/model_card.md](docs/model_card.md) and [docs/evaluation.md](docs/evaluation.md).
 
-**Real traffic: CTU-13** (`reports/public_dataset_evaluation.md`, five botnet
-scenarios, 1.24 million Argus flows from a university network, default
-thresholds with no tuning):
+**Real traffic** (`reports/public_dataset_evaluation.md`): two public labelled
+datasets, run with the default thresholds and then with thresholds learned by
+learning mode (no asset inventory; attack-labelled flows removed from the
+learning traffic). An "attack host" is an infected host (CTU-13) or either
+end of an attack flow (CIC-IDS2017); host-level precision is the share of
+alerts that name an attack host.
 
-| Scenario (botnet) | Infected hosts flagged | Alerts | Alerts naming an infected host | First alert after first botnet flow |
+*CIC-IDS2017* (8 files, 2.83 M CICFlowMeter flows; thresholds learned once from
+Monday, the attack-free day):
+
+| Day (attacks) | Attack hosts flagged, default → tuned | Alerts, default → tuned | Host-level precision, default → tuned |
+|---|---|---|---|
+| Tuesday (FTP/SSH brute force) | 1/2 → 1/2 | 1,145 → 102 | 0.13 → 0.81 |
+| Wednesday (DoS, Heartbleed) | 3/3 → 3/3 | 939 → 111 | 0.18 → 0.78 |
+| Thursday morning (web attacks) | 1/2 → 0/2 | 513 → 13 | 0.07 → 0.00 |
+| Thursday afternoon (infiltration) | 2/2 → 2/2 | 319 → 72 | 0.18 → 0.72 |
+| Friday morning (botnet) | 7/10 → 2/10 | 469 → 30 | 0.35 → 0.50 |
+| Friday afternoon (port scan) | 2/2 → 2/2 | 171 → 33 | 0.27 → 0.97 |
+| Friday afternoon (DDoS) | 2/2 → 2/2 | 155 → 24 | 0.26 → 0.96 |
+
+*CTU-13* (5 botnet scenarios, 1.24 M Argus flows from a university network;
+thresholds learned from the other four scenarios):
+
+| Scenario (botnet) | Infected hosts flagged, default → tuned | Alerts, default → tuned | Alerts naming an infected host (default) | First alert, default |
 |---|---|---|---|---|
-| 5 (Virut) | 1/1 | 46 | 1 | 719 s |
-| 6 (Menti, spam) | 1/1 | 557 | 4 | 6,266 s |
-| 7 (Sogou, 63 botnet flows) | 0/1 | 84 | 0 | – |
-| 11 (Rbot) | 3/3 | 61 | 3 | 38–81 s |
-| 12 (NSIS.ay, P2P) | 3/9 | 313 | 5 | 119–180 s |
+| 5 (Virut) | 1/1 → 0/1 | 46 → 28 | 1 | 719 s |
+| 6 (Menti, spam) | 1/1 → 1/1 | 557 → 190 | 4 | 6,266 s |
+| 7 (Sogou, 63 botnet flows) | 0/1 → 0/1 | 84 → 22 | 0 | – |
+| 11 (Rbot) | 3/3 → 0/3 | 61 → 18 | 3 | 38–81 s |
+| 12 (NSIS.ay, P2P) | 3/9 → 0/9 | 313 → 139 | 5 | 119–180 s |
 
-Infected hosts were flagged in four of five scenarios (8 of 15 hosts), but
-only 1–5 % of alerts name an infected host: on a busy real network the
-beaconing, exfiltration and scan rules tuned on synthetic data fire on
-regular polling, peer-to-peer traffic and large uploads. Gaps found: no spam
-rule (scenario 6), very low-volume bots are invisible (scenario 7), and the
-DDoS thresholds suit high-rate floods only (scenario 11's ICMP flood is about
-60 packets/s at the capture point). The window model trained on synthetic data
-does not transfer (ROC-AUC 0.53 on these windows), and one trained on four
-scenarios and tested on the fifth reaches ROC-AUC 0.33–0.72. Site tuning
-(asset inventory, learning mode) was not applied; CTU-13 "Background" traffic
-is unverified and counted as benign. CIC-IDS2017 is not evaluated yet.
+What this shows:
+
+- With default thresholds most attack hosts are flagged (18/23 on CIC-IDS2017,
+  8/15 on CTU-13), but most alerts are false: precision 0.07–0.35 on the lab
+  network and 0.01–0.05 on the university network, where beaconing,
+  exfiltration and scan rules fire on polling, peer-to-peer and upload traffic.
+- Site tuning works when the learning traffic is really benign: learning from
+  CIC-IDS2017's attack-free Monday cut alerts 5–40 times and raised precision
+  to 0.72–0.97 on five of seven days while keeping almost every attack host,
+  at the cost of missing the botnet and web-attack days. Learning from CTU-13
+  "background" traffic, which is unverified and contains scanning and heavy
+  P2P, loosened the thresholds so far that 7 of 8 detected hosts were lost.
+- Gaps: no spam or brute-force rule, web attacks are invisible in flow
+  metadata, bots with very few flows are missed, and the DDoS thresholds suit
+  high-rate floods only.
+- The window model trained on synthetic data does not transfer (ROC-AUC 0.53
+  on CTU-13 and 0.56 on CIC-IDS2017 windows).
 
 **Soak test** (`reports/soak_test.md`, 30 minutes of wall time at 1,000
 records/s covering 4 h of synthetic site traffic, state snapshots every
@@ -383,7 +408,7 @@ Not a live sensor (files and replayed streams only), not a SOC or IPS, no
 payload inspection; default thresholds tuned on synthetic data (learning
 mode assumes an attack-free learning period and has only been exercised on
 synthetic site traffic); asset roles are trust decisions; models trained on
-synthetic data and weak on unseen attack types; on real CTU-13 traffic the default rules flag most infected hosts but with low alert precision (see results); single process; threat-intel
+synthetic data and weak on unseen attack types; on real traffic (CTU-13, CIC-IDS2017) the default rules flag most attack hosts with low precision, and site tuning helps only with a clean learning period (see results); single process; threat-intel
 matching only as good as the imported lists; outputs tested against
 UniShield's own loopback receivers, not specific SIEM products; local
 accounts only (no SSO or MFA). Full list:

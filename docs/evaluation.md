@@ -11,7 +11,7 @@ and Markdown to `reports/` and records the machine it ran on;
 | Is it fast enough? | `benchmark_pipeline.py` | `benchmark.md` |
 | How long from window end to an alert in the API? | `replay_stream.py` | `realtime_verdict.md` |
 | Is it passive? | `verify_passive_mode.py` | `passive_mode_verification.md` |
-| How does it do on real traffic? | `evaluate_public_datasets.py` | `public_dataset_evaluation.md` |
+| How does it do on real traffic, and does site tuning help? | `evaluate_public_datasets.py --site-tuning` | `public_dataset_evaluation.md` |
 
 ## 1. Scenario detection
 
@@ -111,27 +111,33 @@ destination at config load, at send time and at socket level with the
 policy check bypassed. Result: no static findings and no unexpected runtime
 attempts (see the report for the counts).
 
-## 6. Real traffic (CTU-13)
+## 6. Real traffic (CTU-13, CIC-IDS2017)
 
-`evaluate_public_datasets.py` runs the default pipeline (rules mode, default
-thresholds) over labelled public captures and scores:
+`evaluate_public_datasets.py` runs the default pipeline (rules mode) over
+labelled public captures and scores:
 
-- **host level** — attack hosts (for CTU-13 the infected host: source of
-  From-Botnet, destination of To-Botnet flows) named in at least one alert;
-  alerts naming an attack host, or a flood alert whose destination is a target
-  of attack traffic; other hosts named; traffic time from a host's first
-  attack flow to its first alert;
+- **host level** — attack hosts (CTU-13: the infected host, i.e. source of
+  From-Botnet and destination of To-Botnet flows; CIC-IDS2017: both ends of
+  every attack flow) named in an alert at or after their first attack flow;
+  alerts naming an attack host, or flood alerts whose destination is a target
+  of attack traffic; other hosts named; time from first attack flow to first
+  alert;
 - **window level** — as in section 2; less informative on a busy network,
   where almost every window contains some alert;
 - **models** — the synthetic-trained random forest on the real windows, and
-  leave-one-file-out random forests.
+  leave-one-file-out random forests;
+- **site tuning** (`--site-tuning`) — learning mode without an asset
+  inventory, with attack-labelled flows removed from the learning traffic:
+  CTU-13 learns from the other four scenarios (leave one out), CIC-IDS2017
+  learns once from Monday (attack-free) and is tested on the attack days. A
+  file never influences its own thresholds.
 
-Result on five scenarios (1.24 M flows): infected hosts flagged in four of
-five scenarios (8/15 hosts), with first alerts after 38 s to 104 minutes, but
-1–5 % of alerts name an infected host; the synthetic-trained model scores
-ROC-AUC 0.53. The report lists why each miss happened (spam without a spam
-rule, a bot with 63 flows, a 60 packets/s flood below the DDoS threshold)
-and what raises the false alerts.
+Results: default rules flag 18/23 CIC-IDS2017 and 8/15 CTU-13 attack hosts at
+host-level precision 0.07–0.35 and 0.01–0.05. Tuning on CIC-IDS2017's Monday
+raises precision to 0.72–0.97 on five of seven days with almost all hosts
+kept (botnet and web-attack days lost); tuning on CTU-13 background traffic
+loses 7 of 8 detected hosts. The report lists the misses' causes and the
+learned thresholds.
 
 ## Reproducibility
 

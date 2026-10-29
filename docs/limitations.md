@@ -73,17 +73,21 @@
     supervised scores in `reports/model_evaluation.md` are optimistic; the
     leave-one-attack-out results show that unseen attack types are mostly
     missed by the supervised model.
-12. **Real-traffic results are limited and show low precision.** On five
-    CTU-13 scenarios (`reports/public_dataset_evaluation.md`) the default
-    rules flagged infected hosts in four of five scenarios (8 of 15 hosts),
-    but only 1–5 % of alerts named an infected host: beaconing, exfiltration
-    and scan rules tuned on synthetic data fire on a university network's
-    polling, peer-to-peer and upload traffic. There is no spam rule, bots
-    with very few flows are invisible, and the DDoS thresholds suit high-rate
-    floods only. The synthetic-trained window model does not transfer to real
-    windows (ROC-AUC 0.53). CTU-13 "Background" traffic is unverified, the
-    site-tuning features were not applied, and CIC-IDS2017 has not been
-    evaluated (its download needs a registration the user completes).
+12. **Real-traffic precision is low without site tuning, and tuning needs a
+    clean baseline.** On CIC-IDS2017 (8 days) and five CTU-13 scenarios
+    (`reports/public_dataset_evaluation.md`) the default rules flagged most
+    attack hosts (18/23 and 8/15) but only 7–35 % (lab) and 1–5 %
+    (university) of alerts named one. Thresholds learned from CIC-IDS2017's
+    attack-free Monday raised precision to 72–97 % on five of seven days
+    while keeping almost every host, but lost the botnet and web-attack days;
+    thresholds learned from CTU-13 "background" traffic (unverified, with
+    scanning and P2P) lost 7 of 8 detected hosts. There is no spam or
+    brute-force rule, web attacks are not visible in flow metadata, bots with
+    very few flows are missed, and the DDoS thresholds suit high-rate floods
+    only. The synthetic-trained window model does not transfer (ROC-AUC 0.53
+    and 0.56). For evaluation, CIC-IDS2017 files were time-sorted and their
+    minute-resolution timestamps spread within each minute; the asset
+    inventory was not applied to either dataset.
 13. **Calibration is distribution-specific.** Probabilities are calibrated on
     held-out runs of the same generator and may be miscalibrated elsewhere.
 14. **Window labels.** A window counts as an attack window if it contains any

@@ -74,18 +74,30 @@ connection states the detectors use. The monitored network is
 `reports/public_dataset_evaluation.md`.
 
 ```bash
-python scripts/evaluate_public_datasets.py --ctu13 "data/raw/ctu13/*.binetflow"
+python scripts/evaluate_public_datasets.py --ctu13 "data/raw/ctu13/*.binetflow" --site-tuning
 ```
 
-### CIC-IDS2017 (supported, not yet evaluated)
+### CIC-IDS2017 (evaluated)
 
-Its official download (UNB / Canadian Institute for Cybersecurity) asks for a
-registration form. Use the **GeneratedLabelledFlows / TrafficLabelling** CSVs —
-the "MachineLearningCSV" files have no addresses or timestamps and cannot be
-replayed — in `data/raw/cicids2017/`, then:
+Downloaded by the user from the official UNB / Canadian Institute for
+Cybersecurity site (it asks for a registration form): the
+**GeneratedLabelledFlows / TrafficLabelling** CSVs — the "MachineLearningCSV"
+files have no addresses or timestamps and cannot be replayed — in
+`data/raw/cicids2017/TrafficLabelling_/` (git-ignored). Eight files, five days,
+2,830,743 CICFlowMeter flows (the web-attacks file also has 288,602 empty rows, counted as reader errors). Monitored network: 192.168.10.0/24.
+
+Data fixes, all stated in the report:
+
+- afternoon times written as 1:00–5:00 without AM/PM are read as PM (lab
+  hours 08:00–17:00) — in the flow reader;
+- Monday, Tuesday and Wednesday are not written in time order, so each file
+  is analysed as a stable time-sorted copy (otherwise most of Tuesday and
+  Wednesday was dropped as late) — evaluation only;
+- seven files have minute-resolution timestamps; each minute's flows are
+  spread evenly over the minute in file order — evaluation only.
 
 ```bash
-python scripts/evaluate_public_datasets.py --cicids "data/raw/cicids2017/*.csv"
+python scripts/evaluate_public_datasets.py --cicids "data/raw/cicids2017/TrafficLabelling_/*.csv" --site-tuning
 ```
 
 ### Label mapping

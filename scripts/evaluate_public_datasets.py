@@ -51,8 +51,8 @@ DATASETS = {
             "Most other alerts name hosts inside 147.32.0.0/16: regular polling and peer-to-peer traffic "
             "(HTTP, SSH attempts, BitTorrent, POP3 were seen behind beacon alerts) raises C2_BEACONING, large "
             "uploads raise DATA_EXFILTRATION, and failed connection bursts raise PORT_SCAN. Default thresholds "
-            "were tuned on synthetic traffic; the asset inventory and learning mode exist for this, but were not "
-            "applied here.",
+            "were tuned on synthetic traffic. Learning mode is evaluated below (no asset inventory); CTU-13 "
+            "background traffic is not a clean learning baseline.",
         ],
     },
     "cicids2017": {

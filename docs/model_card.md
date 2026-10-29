@@ -59,16 +59,16 @@ before → after: random forest 0.027 / 0.027 → 0.025 / 0.010; XGBoost 0.021 /
 Window recall is limited mainly by beaconing windows, which contain a single
 small check-in flow each.
 
-## Performance on real traffic (CTU-13)
+## Performance on real traffic (CTU-13, CIC-IDS2017)
 
-Scored on 3,263 analysed windows from five CTU-13 scenarios
-(`reports/public_dataset_evaluation.md`):
+From `reports/public_dataset_evaluation.md`:
 
-- trained on the synthetic dataset: ROC-AUC 0.53, PR-AUC 0.57 — about chance;
-  it flags almost every window (recall 1.00 at precision 0.56, the attack
-  share), so it does not transfer from the generator to a real network;
-- trained on four CTU-13 scenarios and tested on the fifth: ROC-AUC 0.33–0.72
-  depending on the held-out botnet.
+- trained on the synthetic dataset and scored on real windows: ROC-AUC 0.53
+  (CTU-13, 3,263 windows) and 0.56 (CIC-IDS2017, 29,396 windows) — about
+  chance; it does not transfer from the generator to a real network;
+- trained on the other files of the same dataset and tested on each held-out
+  file: ROC-AUC 0.33–0.72 (CTU-13 scenarios) and 0.53–0.84 (CIC-IDS2017 days),
+  with almost no windows above the calibrated thresholds.
 
 Do not enable `hybrid` mode on a real network on the strength of the
 synthetic scores.

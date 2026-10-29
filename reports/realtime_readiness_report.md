@@ -556,3 +556,15 @@ Not verified here: the new CI jobs and the Ubuntu/Windows matrix on these commit
 Run on five scenarios (5, 6, 7, 11, 12; 1,235,536 flows, ~5 h of traffic), default thresholds: infected hosts flagged in 4/5 scenarios (8/15 hosts), but 1–5 % of alerts name an infected host. False alerts come mainly from beaconing (regular polling, P2P), exfiltration (uploads) and scan rules on internal hosts. Misses: scenario 6 spam (no spam rule; under the HOST_SCAN fan-out threshold), scenario 7 (63 botnet flows), scenario 11's ICMP flood (~60 packets/s at the capture point). Synthetic-trained window model on real windows: ROC-AUC 0.53; leave-one-scenario-out: 0.33–0.72.
 
 Not done: CIC-IDS2017 (download needs the user's registration), site tuning (asset inventory, learning mode) on CTU-13, the remaining eight CTU-13 scenarios.
+
+### Public-dataset evaluation: CIC-IDS2017 and site tuning (2026-10-29)
+
+| Item | Change | Evidence |
+|---|---|---|
+| CIC-IDS2017 times | Afternoon times written without AM/PM read as PM (lab hours 08:00-17:00). | `tests/unit/test_readers.py` |
+| Out-of-order files | Evaluation analyses a stable time-sorted copy and reports late-dropped records (before the fix Wednesday yielded 946 windows instead of 6,088). | `tests/unit/test_public_eval.py` |
+| Minute timestamps | Evaluation spreads each minute's flows over the minute in file order. | `tests/unit/test_public_eval.py` |
+| Site tuning | `learn()` takes other home networks; `evaluate_public_datasets.py --site-tuning` learns thresholds without assets (attack flows removed from learning traffic) leave one file out or from a named attack-free file, and compares default vs tuned. | `reports/public_dataset_evaluation.md` |
+| Host metric | An alert counts for an attack host only from that host's first attack flow on. | `tests/unit/test_public_eval.py` |
+
+CIC-IDS2017 (8 files, 2,830,743 flows, 0 late drops; 288,602 empty rows in the web-attacks file counted as reader errors): default rules flag 18/23 attack hosts at host-level precision 0.07-0.35; with thresholds learned from Monday, precision 0.72-0.97 on five of seven attack days with almost all hosts kept, botnet day 7/10 -> 2/10, web attacks 1/2 -> 0/2. CTU-13 with thresholds learned from the other scenarios' background traffic: 8/15 -> 1/15 hosts. Synthetic-trained window model: ROC-AUC 0.56 on CIC-IDS2017 windows.
