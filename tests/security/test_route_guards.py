@@ -20,7 +20,8 @@ pytestmark = pytest.mark.security
 RANK = {"viewer": 1, "analyst": 2, "admin": 3}
 PUBLIC = {("GET", "/dashboard"), ("GET", "/health"), ("POST", "/auth/login"), ("POST", "/auth/logout"),
           ("GET", "/auth/me")}
-PATH_VALUES = {"alert_id": "US-NOPE0000", "threat_class": "PORT_SCAN", "username": "nobody", "source": "nofeed"}
+PATH_VALUES = {"alert_id": "US-NOPE0000", "threat_class": "PORT_SCAN", "username": "nobody", "source": "nofeed",
+               "rule_id": "999999"}
 
 
 def operations(app):

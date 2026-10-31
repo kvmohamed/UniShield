@@ -32,6 +32,8 @@ def list_alerts(
     since: Optional[datetime] = Query(default=None, description="window_end >= since (traffic time)"),
     until: Optional[datetime] = Query(default=None, description="window_end < until (traffic time)"),
     min_confidence: Optional[float] = Query(default=None, ge=0, le=1),
+    suppressed: Literal["exclude", "include", "only"] = Query(
+        default="exclude", description="alerts matching an analyst suppression rule"),
     sort: Literal["window_end", "timestamp", "severity", "confidence", "threat_class"] = "window_end",
     order: Literal["asc", "desc"] = "desc",
     limit: int = Query(default=100, ge=1, le=1000),
@@ -42,7 +44,7 @@ def list_alerts(
     items, total = ctx.repository.list(AlertQuery(
         threat_class=threat_class, severity=severity, source_ip=source_ip, destination_ip=destination_ip,
         detector_name=detector, run_id=run_id, since=since, until=until, min_confidence=min_confidence,
-        sort=sort, descending=order == "desc", limit=limit, offset=offset,
+        suppressed=suppressed, sort=sort, descending=order == "desc", limit=limit, offset=offset,
     ))
     response.headers["X-Total-Count"] = str(total)
     return items

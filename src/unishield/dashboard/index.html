@@ -183,10 +183,12 @@ td select, td button.btn { padding: 3px 8px; font-size: 12.5px; }
         <select id="f-class" aria-label="Threat class"><option value="">All classes</option></select>
         <select id="f-sev" aria-label="Severity"><option value="">All severities</option></select>
         <input id="f-src" placeholder="source IP" size="14" aria-label="Source IP">
+        <select id="f-supp" aria-label="Suppressed alerts"><option value="exclude">Hide suppressed</option>
+          <option value="include">Include suppressed</option><option value="only">Only suppressed</option></select>
         <button class="btn" id="btn-filter">Apply</button>
       </div>
       <div class="table-wrap"><table><thead><tr><th>Window end</th><th>Severity</th><th>Class</th>
-        <th>Source</th><th>Conf.</th></tr></thead><tbody id="feed"></tbody></table></div>
+        <th>Source</th><th>Conf.</th><th>Verdict</th></tr></thead><tbody id="feed"></tbody></table></div>
       <div class="pager"><span id="page-info"></span>
         <button class="btn" id="pg-prev">Previous</button><button class="btn" id="pg-next">Next</button></div>
     </div>
@@ -194,6 +196,12 @@ td select, td button.btn { padding: 3px 8px; font-size: 12.5px; }
       <h2>Alert details</h2>
       <div id="detail"><div class="empty">Select an alert to see its evidence.</div></div>
     </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <h2>Suppression rules</h2>
+    <div class="msg">Scoped to a threat class and a source or destination, always expiring. Matching alerts are still
+      stored (feed filter "Only suppressed") but not sent to exports or notifications.</div>
+    <div id="suppressions"></div>
   </div>
 </section>
 
@@ -220,6 +228,7 @@ td select, td button.btn { padding: 3px 8px; font-size: 12.5px; }
     <div class="card"><h2>Live pipeline metrics</h2><dl class="kv" id="live-metrics"></dl></div>
   </div>
   <div class="card" style="margin-top:14px"><h2>Detection approach comparison (held-out windows)</h2><div id="evaluation"></div></div>
+  <div class="card" style="margin-top:14px"><h2>Analyst review (verdicts on stored alerts)</h2><div id="review"></div></div>
 </section>
 
 <section id="tab-architecture" role="tabpanel" hidden>
@@ -344,6 +353,8 @@ state.me = null;
 state.showLogin = false;
 const canRead = () => !!state.me && (state.me.authenticated || state.me.effective_role === "viewer");
 const isAdmin = () => !!state.me && state.me.role === "admin";
+const isAnalyst = () => !!state.me && (state.me.role === "analyst" || state.me.role === "admin");
+const VERDICTS = { true_positive: "True positive", benign_true_positive: "Benign (authorised)", false_positive: "False positive" };
 const hasSession = () => !!state.me && state.me.via === "session";
 
 async function api(path, opts = {}) {
@@ -563,16 +574,21 @@ async function loadOverview() {
 
 async function loadFeed() {
   const params = { limit: PAGE, offset: state.offset, threat_class: $("f-class").value, severity: $("f-sev").value,
-    source_ip: $("f-src").value.trim() };
+    source_ip: $("f-src").value.trim(), suppressed: $("f-supp").value };
   try {
     const { body, headers } = await api("/alerts?" + qs(params));
     state.total = Number(headers.get("X-Total-Count") || body.length);
     const tb = clear($("feed"));
-    if (!body.length) tb.append(el("tr", {}, el("td", { colspan: 5, class: "empty", text: "No matching alerts" })));
-    body.forEach((a) => tb.append(alertRow(a, showDetail)));
+    if (!body.length) tb.append(el("tr", {}, el("td", { colspan: 6, class: "empty", text: "No matching alerts" })));
+    const ids = new URLSearchParams(); body.forEach((a) => ids.append("alert_id", a.alert_id));
+    const verdicts = body.length ? (await api("/feedback/verdicts?" + ids.toString())).body : {};
+    body.forEach((a) => { const tr = alertRow(a, showDetail);
+      tr.append(el("td", { text: (verdicts[a.alert_id] ? VERDICTS[verdicts[a.alert_id]] : "–") + (a.suppressed_by ? " · suppressed" : "") }));
+      tb.append(tr); });
     $("page-info").textContent = state.total ? `${state.offset + 1}–${Math.min(state.offset + PAGE, state.total)} of ${fmtNum(state.total)}` : "";
     $("pg-prev").disabled = state.offset === 0; $("pg-next").disabled = state.offset + PAGE >= state.total;
-  } catch (e) { clear($("feed")).append(el("tr", {}, el("td", { colspan: 5, class: "empty", text: e.message }))); }
+  } catch (e) { clear($("feed")).append(el("tr", {}, el("td", { colspan: 6, class: "empty", text: e.message }))); }
+  await loadSuppressions();
   const { body: tl } = await api("/alerts/timeline?bucket_sec=" + pickBucket());
   barChart($("timeline"), tl.buckets.map((b) => ({ ...b, label: fmtTime(b.bucket_start), short: fmtTime(b.bucket_start).slice(11, 16) })),
     { stack: SEVERITIES, fmt: (v) => fmtNum(v) });
@@ -601,6 +617,11 @@ function showDetail(a, tr) {
   if (!(a.mitre_techniques || []).length) mitre.textContent = "–";
   kv.append(el("dt", { text: "MITRE ATT&CK" }), mitre);
   box.append(kv);
+  const why = el("div", {}, el("div", { class: "msg", text: "Loading explanation…" }));
+  const review = el("div");
+  box.append(el("h2", { style: "margin-top:14px", text: "Why it fired" }), why,
+    el("h2", { style: "margin-top:14px", text: "Analyst verdict" }), review);
+  loadExplanation(a, why); loadVerdict(a, review);
   const matches = Array.isArray((a.evidence || {}).intel_matches) ? a.evidence.intel_matches : [];
   if (matches.length) {
     box.append(el("h2", { style: "margin-top:14px", text: "Threat-intelligence matches" }),
@@ -613,6 +634,91 @@ function showDetail(a, tr) {
   const note = a.detector_name === "ml_detector" ? "Confidence is a calibrated probability from the window model." :
     "Confidence is a rule or anomaly score, not a calibrated probability.";
   box.append(el("div", { class: "msg", style: "margin-top:8px", text: note }));
+}
+
+function bullets(items) { return el("ul", { style: "margin:4px 0 8px 18px;padding:0" }, ...items.map((t) => el("li", { text: t }))); }
+
+async function loadExplanation(a, box) {
+  try {
+    const { body: x } = await api(`/alerts/${encodeURIComponent(a.alert_id)}/explanation`);
+    clear(box).append(el("div", { text: x.rule }));
+    if (x.observed.length) box.append(el("div", { class: "msg", text: "Observed" }), bullets(x.observed));
+    if (x.thresholds.length) box.append(el("div", { class: "msg", text: "Against the configured thresholds" }), bullets(x.thresholds));
+    box.append(el("div", { class: "msg", text: "Context" }), bullets(x.context));
+    if (x.caveats.length) box.append(el("div", { class: "msg", text: "Caveats" }), bullets(x.caveats));
+    if (x.benign_causes.length) box.append(el("div", { class: "msg", text: "Benign causes to rule out" }), bullets(x.benign_causes));
+  } catch (e) { clear(box).append(el("div", { class: "msg err", text: "No explanation — " + e.message })); }
+}
+
+async function loadVerdict(a, box) {
+  let current = null;
+  try { current = (await api(`/alerts/${encodeURIComponent(a.alert_id)}/verdict`)).body; } catch (e) { /* shown below */ }
+  clear(box);
+  box.append(el("div", { text: current && current.verdict ? `${VERDICTS[current.verdict]} — ${current.analyst}, ${fmtTime(current.updated_at)}` +
+    (current.note ? `: ${current.note}` : "") : "Not reviewed yet." }));
+  if (!isAnalyst()) return;
+  const note = el("input", { placeholder: "note (optional)", maxlength: 2000, style: "flex:1;min-width:160px", "aria-label": "Verdict note" });
+  if (current && current.note) note.value = current.note;
+  const msg = el("div", { class: "msg", role: "status" });
+  const save = async (verdict) => {
+    try { await api(`/alerts/${encodeURIComponent(a.alert_id)}/verdict`, { method: "PUT", json: { verdict, note: note.value.trim() || null } });
+      await loadVerdict(a, box); loadFeed(); }
+    catch (e) { msg.className = "msg err"; msg.textContent = "Not saved — " + e.message; }
+  };
+  const controls = el("div", { class: "controls", style: "margin-top:6px" }, note,
+    ...Object.entries(VERDICTS).map(([v, label]) => { const b = el("button", { class: "btn" + (current && current.verdict === v ? " primary" : ""), text: label });
+      b.addEventListener("click", () => save(v)); return b; }));
+  if (current && current.verdict) {
+    const clr = el("button", { class: "btn", text: "Clear" });
+    clr.addEventListener("click", async () => { await api(`/alerts/${encodeURIComponent(a.alert_id)}/verdict`, { method: "DELETE" }); await loadVerdict(a, box); loadFeed(); });
+    controls.append(clr);
+  }
+  box.append(controls, msg);
+  if (a.threat_class === "INTEL_MATCH" || (a.evidence || {}).intel_matches || a.suppressed_by) return;
+  const useSrc = el("input", { type: "checkbox", "aria-label": "Match the source" }); useSrc.checked = !!a.source_ip;
+  const useDst = el("input", { type: "checkbox", "aria-label": "Match the destination" }); useDst.checked = !a.source_ip && !!a.destination_ip;
+  const days = el("input", { type: "number", min: 1, max: 365, value: 30, style: "width:70px", "aria-label": "Days until the rule expires" });
+  const reason = el("input", { placeholder: "reason (required)", maxlength: 500, style: "flex:1;min-width:160px", "aria-label": "Suppression reason" });
+  const go = el("button", { class: "btn", text: "Suppress similar" });
+  go.addEventListener("click", async () => {
+    try {
+      const rule = (await api("/suppressions", { method: "POST", json: { threat_class: a.threat_class,
+        source: useSrc.checked ? a.source_ip : null, destination: useDst.checked ? a.destination_ip : null,
+        detector: a.detector_name, reason: reason.value.trim(), days: Number(days.value), from_alert_id: a.alert_id } })).body;
+      msg.className = "msg"; msg.textContent = `Rule ${rule.id} created; it expires ${fmtTime(rule.expires_at)}.`; loadSuppressions();
+    } catch (e) { msg.className = "msg err"; msg.textContent = "Not created — " + e.message; }
+  });
+  box.append(el("div", { class: "msg", style: "margin-top:8px", text: `Suppress future ${a.threat_class} alerts from ${a.detector_name} for:` }),
+    el("div", { class: "controls" }, el("label", {}, useSrc, " source " + (a.source_ip || "–")),
+      el("label", {}, useDst, " destination " + (a.destination_ip || "–")), days, el("span", { class: "msg", text: "days" }), reason, go));
+}
+
+async function loadSuppressions() {
+  const box = $("suppressions");
+  try {
+    const { body: rules } = await api("/suppressions");
+    clear(box);
+    if (!rules.length) { box.append(el("div", { class: "empty", text: "No suppression rules." })); return; }
+    const tb = el("tbody");
+    rules.forEach((r) => {
+      const actions = el("td");
+      if (isAnalyst() && r.expires_at > new Date().toISOString()) {
+        const t = el("button", { class: "btn", text: r.enabled ? "Disable" : "Enable" });
+        t.addEventListener("click", async () => { await api(`/suppressions/${r.id}`, { method: "PATCH", json: { enabled: !r.enabled } }); loadSuppressions(); });
+        actions.append(t);
+      }
+      if (isAdmin()) {
+        const d = el("button", { class: "btn danger", text: "Delete" });
+        d.addEventListener("click", async () => { await api(`/suppressions/${r.id}`, { method: "DELETE" }); loadSuppressions(); });
+        actions.append(" ", d);
+      }
+      tb.append(el("tr", {}, ...[r.id, r.threat_class, r.source || "any", r.destination || "any", r.detector_name || "any",
+        r.reason, r.created_by, fmtTime(r.expires_at), fmtNum(r.hits), r.active ? "active" : (r.enabled ? "expired" : "disabled")]
+        .map((v) => el("td", { text: String(v) })), actions));
+    });
+    box.append(el("div", { class: "table-wrap" }, el("table", {}, el("thead", {}, el("tr", {}, ...["#", "Class", "Source", "Destination",
+      "Detector", "Reason", "By", "Expires", "Hits", "State", ""].map((h) => el("th", { text: h })))), tb)));
+  } catch (e) { clear(box).append(el("div", { class: "msg err", text: e.message })); }
 }
 
 async function loadTraffic() {
@@ -658,6 +764,20 @@ async function loadBenchmark() {
     Object.entries(ev.approaches).map(([k, a]) => [k, fmtNum(a.precision, 3), fmtNum(a.recall, 3), fmtNum(a.f1, 3),
       fmtNum(a.false_positive_rate, 4), fmtNum(a.pr_auc, 3), `${fmtNum(a.episodes_detected)}/${fmtNum(a.episodes)}`, fmtNum(a.delay_median_sec, 1)])));
   e.append(el("div", { class: "msg", style: "margin-top:8px", text: "Synthetic, generator-produced data: see reports/model_evaluation.md for limitations and the leave-one-attack-out results." }));
+}
+
+async function loadReview() {
+  const box = $("review");
+  try {
+    const { body: s } = await api("/feedback/summary");
+    clear(box);
+    if (!s.reviewed) { box.append(el("div", { class: "empty", text: "No alerts reviewed yet. Record verdicts in the alert details." })); return; }
+    box.append(el("div", { class: "msg", text: `${fmtNum(s.reviewed)} of ${fmtNum(s.alerts)} alerts reviewed · reviewed precision ${fmtNum(s.reviewed_precision, 3)}` }));
+    box.append(table(["Detector", "Class", "Alerts", "Reviewed", "True pos.", "Benign", "False pos.", "Reviewed precision"],
+      s.by_detector.filter((r) => r.reviewed).map((r) => [r.detector, r.threat_class, fmtNum(r.alerts), fmtNum(r.reviewed),
+        fmtNum(r.true_positive), fmtNum(r.benign_true_positive), fmtNum(r.false_positive), fmtNum(r.reviewed_precision, 3)])));
+    box.append(el("div", { class: "msg", style: "margin-top:8px", text: s.note }));
+  } catch (e) { clear(box).append(el("div", { class: "msg err", text: e.message })); }
 }
 
 async function loadArchitecture() {
@@ -838,7 +958,7 @@ async function refreshTab() {
     if (state.tab === "overview") await loadOverview();
     else if (state.tab === "alerts") await loadFeed();
     else if (state.tab === "traffic") await loadTraffic();
-    else if (state.tab === "benchmark") await loadBenchmark();
+    else if (state.tab === "benchmark") { await loadBenchmark(); await loadReview(); }
     else if (state.tab === "architecture") await loadArchitecture();
     else if (state.tab === "admin") await loadAdmin();
     else if (state.tab === "account") loadAccount();
