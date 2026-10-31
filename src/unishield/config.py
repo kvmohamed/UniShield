@@ -405,6 +405,28 @@ class SiteConfig(BaseModel):
     thresholds_file: Optional[str] = None               # overlay over thresholds.yaml, e.g. thresholds.site.yaml
 
 
+class LiveConfig(BaseModel):
+    """Live, receive-only inputs (ingest/collector.py, ingest/zeek_follow.py)."""
+    netflow_bind: str = "127.0.0.1"                     # interface facing the exporters (receive only)
+    netflow_port: int = Field(default=2055, gt=0, lt=65536)
+    allowed_exporters: list[str] = Field(default_factory=list)   # CIDRs; empty = any exporter
+    zeek_from_start: bool = False                       # follow from the end of existing logs (like tail -F)
+    zeek_poll_interval_sec: float = Field(default=1.0, gt=0, le=60)
+    tick_interval_sec: float = Field(default=1.0, gt=0, le=60)
+    # Flow exports report a flow after it ends (active/inactive timeouts), so
+    # records arrive late; windows wait this long before closing.
+    allowed_lateness_sec: float = Field(default=120.0, ge=0, le=3600)
+
+    @field_validator("allowed_exporters")
+    @classmethod
+    def valid_networks(cls, v: list[str]) -> list[str]:
+        import ipaddress
+
+        for net in v:
+            ipaddress.ip_network(net, strict=False)
+        return v
+
+
 class StateConfig(BaseModel):
     """Restart-safe detector state (see processing/state_store.py)."""
     enabled: bool = False
@@ -500,6 +522,7 @@ class UnishieldConfig(BaseModel):
     paths: PathsConfig = PathsConfig()
     site: SiteConfig = SiteConfig()
     state: StateConfig = StateConfig()
+    live: LiveConfig = LiveConfig()
 
     @model_validator(mode="after")
     def outbound_only_to_analyst_side(self) -> "UnishieldConfig":
@@ -553,6 +576,8 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "UNISHIELD_THRESHOLDS_FILE": ("site", "thresholds_file"),
     "UNISHIELD_STATE_ENABLED": ("state", "enabled"),
     "UNISHIELD_STATE_FILE": ("state", "path"),
+    "UNISHIELD_NETFLOW_BIND": ("live", "netflow_bind"),
+    "UNISHIELD_NETFLOW_PORT": ("live", "netflow_port"),
 }
 
 

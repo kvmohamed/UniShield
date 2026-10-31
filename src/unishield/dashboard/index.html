@@ -149,6 +149,12 @@ td select, td button.btn { padding: 3px 8px; font-size: 12.5px; }
       <button class="btn" id="btn-stop">Stop</button>
       <button class="btn danger" id="btn-clear">Clear alerts</button>
     </div>
+    <div class="controls" style="margin-top:8px">
+      <button class="btn" id="btn-live-netflow" title="Receive NetFlow v5/v9 and IPFIX on the configured address (live.netflow_bind / netflow_port). Receive only.">Listen for NetFlow/IPFIX</button>
+      <input id="live-zeek-dir" placeholder="data/zeek_live" style="flex:1;min-width:220px" aria-label="Zeek log directory under the data directory">
+      <button class="btn" id="btn-live-zeek">Follow Zeek logs</button>
+    </div>
+    <div class="msg" id="live-msg" role="status" hidden></div>
     <div class="msg" id="run-msg" role="status"></div>
   </div>
   <div class="grid kpis" id="kpis"></div>
@@ -444,6 +450,28 @@ $("btn-replay").addEventListener("click", () => {
   adminAction("Replay", "/replay/start?" + qs({ file_path: p }));
 });
 $("btn-stop").addEventListener("click", () => adminAction("Stop", "/replay/stop"));
+$("btn-live-netflow").addEventListener("click", () => adminAction("Listen", "/live/netflow/start"));
+$("btn-live-zeek").addEventListener("click", () => {
+  const d = $("live-zeek-dir").value.trim();
+  if (!d) { message("Enter a Zeek log directory under the data directory", true); return; }
+  adminAction("Follow", "/live/zeek/start?" + qs({ directory: d }));
+});
+
+async function loadLive() {
+  const box = $("live-msg");
+  try {
+    const { body: s } = await api("/live/status");
+    if (!s.live) { box.hidden = true; return; }
+    const where = s.listening ? "listening on " + s.listening : "following " + s.following;
+    const parts = [(s.running ? "Live: " : "Live input stopped: ") + where, fmtNum(s.records) + " records"];
+    if (s.datagrams !== undefined) parts.push(fmtNum(s.datagrams) + " datagrams",
+      fmtNum(s.lost_records + s.lost_datagrams) + " lost in transit",
+      s.rejected_exporters + " from unlisted exporters", s.malformed + " malformed");
+    if (s.rotations !== undefined) parts.push(s.rotations + " rotations", s.errors + " unreadable lines");
+    if (s.last_record_time) parts.push("last record " + s.last_record_time.replace("T", " ").slice(0, 19));
+    box.textContent = parts.join(" · "); box.hidden = false;
+  } catch (e) { box.hidden = true; }
+}
 $("btn-clear").addEventListener("click", () => adminAction("Clear", "/alerts"));
 $("btn-filter").addEventListener("click", () => { state.offset = 0; loadFeed(); });
 $("pg-prev").addEventListener("click", () => { state.offset = Math.max(0, state.offset - PAGE); loadFeed(); });
@@ -834,6 +862,7 @@ async function poll() {
     $("hdr-run").textContent = status.status + (status.source ? " · " + status.source : "") +
       (status.records_processed ? " · " + fmtNum(status.records_processed) + " records" : "");
     $("hdr-mode").textContent = "mode: " + (status.detection_mode || "rules");
+    if (isAdmin()) await loadLive();
     const dataTab = state.tab !== "admin" && state.tab !== "account";
     if (dataTab && (state.running || status.alerts_generated !== state.lastAlertCount)) {
       state.lastAlertCount = status.alerts_generated;

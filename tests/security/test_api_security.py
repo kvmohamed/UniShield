@@ -181,6 +181,7 @@ def test_no_mutating_get_endpoints(api_client):
         ("DELETE", "/alerts"): "admin", ("POST", "/users"): "admin", ("PATCH", "/users/{username}"): "admin",
         ("DELETE", "/users/{username}"): "admin", ("POST", "/export"): "admin", ("POST", "/intel/import"): "admin",
         ("DELETE", "/intel/sources/{source}"): "admin", ("POST", "/intel/purge-expired"): "admin",
+        ("POST", "/live/netflow/start"): "admin", ("POST", "/live/zeek/start"): "admin",
     }
     found = {(m.upper(), path): op["x-unishield-role"] for path, ops in client.app.openapi()["paths"].items()
              for m, op in ops.items() if m.upper() in ("POST", "PUT", "PATCH", "DELETE")}

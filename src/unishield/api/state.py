@@ -104,6 +104,7 @@ class AppContext:
         self.started = time.time()
         self.replay: dict[str, Any] = dict(_IDLE)
         self.pipeline: Optional[Pipeline] = None
+        self.reader = None
         self.thread: Optional[threading.Thread] = None
         self.maintenance: Optional[MaintenanceWorker] = None
         self._model_status: Optional[str] = None
@@ -186,7 +187,7 @@ class AppContext:
     def start_replay(self, reader, source: str, fmt: str, clear: bool = True,
                      detection_mode: str | None = None,
                      state_store: PipelineStateStore | None = None,
-                     learning: bool = False) -> dict[str, Any]:
+                     learning: bool = False, allowed_lateness_sec: float | None = None) -> dict[str, Any]:
         """Start the pipeline on ``reader`` in a background thread. Raises RuntimeError if one is running."""
         intel = self.intel_matcher()                    # outside the lock: may create the repository
         with self._lock:
@@ -203,9 +204,11 @@ class AppContext:
                 learner.attach(pipeline)
             else:
                 pipeline = Pipeline(alert_callback=self._store_alert, detection_mode=detection_mode,
-                                    intel=intel, state_store=state_store)
+                                    intel=intel, state_store=state_store,
+                                    allowed_lateness_sec=allowed_lateness_sec)
             run_id = f"{'learn' if learning else 'run'}-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
             self.pipeline = pipeline
+            self.reader = reader
             self._learner = learner
             self.replay = dict(_IDLE, status="running", run_id=run_id, source=source, format=fmt,
                                detection_mode=pipeline.detection_mode, started_at=time.time(), learning=learning)
@@ -281,8 +284,19 @@ class AppContext:
     def stop_replay(self) -> bool:
         if self.pipeline is not None and self.running:
             self.pipeline.stop()
+            stop_reader = getattr(getattr(self, "reader", None), "stop", None)
+            if callable(stop_reader):                   # live readers block on input: wake them
+                stop_reader()
             return True
         return False
+
+    def live_status(self) -> dict[str, Any]:
+        """The live reader's own counters while a live run is active (or after it ended)."""
+        reader = getattr(self, "reader", None)
+        if reader is None or not getattr(reader, "live", False):
+            return {"live": False}
+        stats = reader.stats() if hasattr(reader, "stats") else {}
+        return {"live": True, "running": self.running, "kind": type(reader).__name__, **stats}
 
     def wait(self, timeout: float) -> None:
         thread = self.thread
@@ -422,4 +436,5 @@ class AppContext:
         self.stop_outputs()
         self.replay = dict(_IDLE)
         self.pipeline = None
+        self.reader = None
         self.thread = None

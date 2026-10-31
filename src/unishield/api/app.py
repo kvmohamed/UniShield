@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from unishield import __app_name__, __version__
-from unishield.api.routers import alerts, audit, auth, exports, intel, replay, system, users
+from unishield.api.routers import alerts, audit, auth, exports, intel, live, replay, system, users
 from unishield.api.security import (
     CSRF_HEADER,
     DASHBOARD_CSP,
@@ -126,6 +126,7 @@ def create_app(repository: AlertRepository | None = None) -> FastAPI:
     app.include_router(system.router)
     app.include_router(alerts.router)
     app.include_router(replay.router)
+    app.include_router(live.router)
     app.include_router(exports.router)
     app.include_router(intel.router)
     app.include_router(users.router)

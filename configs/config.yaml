@@ -214,6 +214,18 @@ site:
   thresholds_file: null             # overlay over thresholds.yaml, e.g. "thresholds.site.yaml"
                                     # (written by scripts/learn_baseline.py); UNISHIELD_THRESHOLDS_FILE
 
+live:
+  # Live, receive-only inputs (POST /live/start). The flow-export collector
+  # only binds and receives NetFlow v5/v9 and IPFIX over UDP; it never sends,
+  # connects or replies. Zeek follow mode tails a Zeek log directory.
+  netflow_bind: "127.0.0.1"         # interface facing the exporters; UNISHIELD_NETFLOW_BIND
+  netflow_port: 2055                # UNISHIELD_NETFLOW_PORT
+  allowed_exporters: []             # CIDRs allowed to send flow exports; empty = any
+  zeek_from_start: false            # true: read existing log lines first, then follow
+  zeek_poll_interval_sec: 1
+  tick_interval_sec: 1              # how often idle windows are closed on wall-clock time
+  allowed_lateness_sec: 120         # exports report flows after they end; wait this long
+
 state:
   # Restart-safe detector state: beacon histories, upload baselines, the
   # statistical baseline and the Isolation Forest are snapshotted to this
