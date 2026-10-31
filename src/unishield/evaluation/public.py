@@ -205,10 +205,22 @@ class FileRun:
     attack_targets: list[str] = field(default_factory=list)
     first_attack: dict[str, datetime] = field(default_factory=dict)
     late_dropped: int = 0
+    asset_actions: dict[str, int] = field(default_factory=dict)
+
+
+def load_inventory(path: Path | str):
+    """An AssetInventory from an assets.yaml-style file."""
+    import yaml
+
+    from unishield.assets import AssetInventory
+    from unishield.config import AssetInventoryConfig
+
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    return AssetInventory(AssetInventoryConfig.model_validate(data))
 
 
 def run_file(path: Path | str, home_networks: Sequence[str] | None = None, spread_minutes: bool = False,
-             sort_by_time: bool = False) -> FileRun:
+             sort_by_time: bool = False, assets=None) -> FileRun:
     """
     Run the default rules pipeline over one labelled file, keeping windows and
     alerts. ``sort_by_time`` analyses a time-sorted copy (``time_sorted_copy``);
@@ -218,7 +230,7 @@ def run_file(path: Path | str, home_networks: Sequence[str] | None = None, sprea
 
     if sort_by_time:
         with tempfile.TemporaryDirectory() as tmp:
-            run = run_file(time_sorted_copy(Path(path), Path(tmp)), home_networks, spread_minutes)
+            run = run_file(time_sorted_copy(Path(path), Path(tmp)), home_networks, spread_minutes, assets=assets)
         run.path = str(path)
         return run
     from unishield.ingest.detect import open_reader
@@ -241,16 +253,20 @@ def run_file(path: Path | str, home_networks: Sequence[str] | None = None, sprea
         })
 
     kwargs: dict[str, Any] = {"detection_mode": "rules", "window_observer": recorder, "alert_callback": keep}
+    if assets is not None:
+        kwargs["assets"] = assets
     if home_networks:
         kwargs["normalizer"] = Normalizer(home_networks=list(home_networks))
-    result = Pipeline(**kwargs).run(reader)
+    pipeline = Pipeline(**kwargs)
+    result = pipeline.run(reader)
+    asset_actions = {f"{a} {c} ({r})": n for (a, c, r), n in sorted(pipeline.asset_policy.counts.items())}
     late = (result.ingest.get("windowing") or {}).get("late_dropped", 0)
     hours = ((reader.last_ts - reader.first_ts).total_seconds() / 3600) if reader.first_ts else 0.0
     return FileRun(
         name=path.name, path=str(path), fmt=fmt, records=reader.records_read, reader_errors=reader.errors,
         labels=dict(reader.labels.most_common()), traffic_hours=round(hours, 2), windows=recorder.records,
         alerts=alerts, attack_hosts=sorted(reader.attack_hosts), attack_targets=sorted(reader.attack_targets),
-        first_attack=reader.first_attack, late_dropped=late,
+        first_attack=reader.first_attack, late_dropped=late, asset_actions=asset_actions,
     )
 
 
@@ -436,6 +452,31 @@ def render_markdown(report: dict[str, Any]) -> str:
             for name, t in st["files"].items():
                 parts = [f"{k} {v['default']} → {v['learned']}" for k, v in t["changed"].items()]
                 lines.append(f"- {name}: {'; '.join(parts) or 'none'}")
+        if ds.get("with_assets"):
+            wa = ds["with_assets"]
+            defaults = {f["name"]: f["host"] for f in ds["files"]}
+            tuned = {n: t["host"] for n, t in ((ds.get("site_tuned") or {}).get("files") or {}).items()}
+            lines += ["", f"### With an asset inventory (`{wa['inventory']}`)", "",
+                      wa.get("note", ""), "",
+                      "| File | Hosts: default / +assets / tuned / tuned+assets | Alerts: default / +assets / "
+                      "tuned / tuned+assets | Host-level precision: default / +assets / tuned / tuned+assets |",
+                      "|---|---|---|---|"]
+            for f in ds["files"]:
+                name = f["name"]
+                a = wa["default"].get(name)
+                ta = (wa.get("tuned") or {}).get("files", {}).get(name, {}).get("host")
+                d, t = defaults.get(name), tuned.get(name)
+                if a is None:
+                    continue
+                cols = [d, a, t, ta]
+                lines.append(
+                    f"| {name} | " + " / ".join(f"{c['attack_hosts_detected']}/{c['attack_hosts']}" if c else "–"
+                                                for c in cols)
+                    + " | " + " / ".join(str(c["alerts"]) if c else "–" for c in cols)
+                    + " | " + " / ".join(_f(c["alert_precision_host_level"]) if c else "–" for c in cols) + " |")
+            if wa.get("asset_actions"):
+                lines += ["", "Alerts changed by asset roles (action, class, role: count): "
+                          + "; ".join(f"{k}: {v}" for k, v in wa["asset_actions"].items())]
         lines += ["", "### Caveats", ""] + [f"- {c}" for c in ds.get("caveats", [])] + [""]
     return "\n".join(lines) + "\n"
 
@@ -466,10 +507,12 @@ class _CleanReader(BaseReader):
 
 def site_tuned(paths: Sequence[Path], home_networks: Sequence[str] | None, percentile: float = 99.9,
                scratch: Optional[Path] = None, spread_minutes: bool = False,
-               learn_from: Optional[Sequence[Path]] = None, sort_by_time: bool = False) -> dict[str, Any]:
+               learn_from: Optional[Sequence[Path]] = None, sort_by_time: bool = False,
+               assets=None) -> dict[str, Any]:
     """
-    Learn site thresholds (learning mode, no asset inventory) and rerun files
-    with the learned overlay, scored like the default run.
+    Learn site thresholds (learning mode; with ``assets`` the inventory is used
+    both while learning and when rerunning) and rerun files with the learned
+    overlay, scored like the default run.
 
     Without ``learn_from``: for each file, learn from the other files with
     attack-labelled flows removed (leave one file out). With ``learn_from``
@@ -511,7 +554,8 @@ def site_tuned(paths: Sequence[Path], home_networks: Sequence[str] | None, perce
             normalizer = Normalizer(home_networks=list(home_networks)) if home_networks else None
             key = tuple(sorted(str(p) for p in others))
             if key not in learned_cache:
-                run = learn(inputs(), thresholds=current, threshold_sources=[str(base)], assets=AssetInventory(),
+                run = learn(inputs(), thresholds=current, threshold_sources=[str(base)],
+                            assets=assets if assets is not None else AssetInventory(),
                             normalizer=normalizer)
                 learned_cache[key] = (run, run.learner.suggest(defaults, percentile=percentile),
                                       sum(c.dropped for c in cleaners))
@@ -522,7 +566,7 @@ def site_tuned(paths: Sequence[Path], home_networks: Sequence[str] | None, perce
             try:
                 reset_thresholds()
                 load_thresholds(site_path=overlay)
-                tuned = run_file(held, home_networks, spread_minutes, sort_by_time)
+                tuned = run_file(held, home_networks, spread_minutes, sort_by_time, assets=assets)
             finally:
                 reset_thresholds()
             out["files"][held.name] = {

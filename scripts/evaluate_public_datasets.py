@@ -22,6 +22,7 @@ from pathlib import Path
 
 from unishield.evaluation.public import (
     cross_domain,
+    load_inventory,
     host_metrics,
     leave_one_file_out,
     render_markdown,
@@ -36,6 +37,7 @@ DATASETS = {
         "description": "Botnet captures in a university network, as Argus bidirectional flows with labels "
                        "Botnet / Normal / Background.",
         "home_networks": ["147.32.0.0/16"],
+        "assets": "configs/evaluation/ctu13_assets.yaml",
         "caveats": [
             "Background flows are unverified university traffic and are counted as benign; some may be "
             "malicious or misconfigured, so 'other hosts named' is an upper bound on false positives.",
@@ -64,6 +66,7 @@ DATASETS = {
         "spread_minutes": True,
         "sort_by_time": True,                         # several files are not written in time order
         "learn_from": "Monday-WorkingHours",            # the attack-free day
+        "assets": "configs/evaluation/cicids2017_assets.yaml",
         "caveats": [
             "Published analyses report labelling and flow-construction errors in CIC-IDS2017.",
             "Timestamps are local lab time. Some files write afternoon times as 1:00-5:00 without AM/PM; hours "
@@ -122,6 +125,34 @@ def evaluate_dataset(key: str, files: list[Path], synthetic: Path, tuning: bool 
     }
 
 
+def asset_columns(key: str, files: list[Path], tuning: bool) -> dict:
+    """Default and (optionally) site-tuned runs with the dataset's asset inventory."""
+    spec = DATASETS[key]
+    inventory_path = Path(spec["assets"])
+    out = {"inventory": str(inventory_path).replace("\\", "/"),
+           "note": "Roles taken from the dataset's published description (CIC-IDS2017) or seen in the traffic "
+                   "(CTU-13); only roles an operator would know. With site tuning the inventory is also used "
+                   "while learning.",
+           "default": {}, "asset_actions": {}}
+    actions: dict[str, int] = {}
+    for f in files:
+        inventory = load_inventory(inventory_path)
+        run = run_file(f, spec["home_networks"] or None, spec.get("spread_minutes", False),
+                       spec.get("sort_by_time", False), assets=inventory)
+        out["default"][f.name] = host_metrics(run)
+        for k, n in run.asset_actions.items():
+            actions[k] = actions.get(k, 0) + n
+        print(f"  {f.name} with assets: {len(run.alerts)} alerts")
+    if tuning and len(files) > 1:
+        out["tuned"] = site_tuned(
+            files, spec["home_networks"] or None, spread_minutes=spec.get("spread_minutes", False),
+            sort_by_time=spec.get("sort_by_time", False),
+            learn_from=[f for f in files if spec.get("learn_from") and spec["learn_from"] in f.name] or None,
+            assets=load_inventory(inventory_path))
+    out["asset_actions"] = actions
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     parser.add_argument("--ctu13", nargs="*", default=[], help="CTU-13 .binetflow files (globs allowed)")
@@ -131,15 +162,28 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("reports"))
     parser.add_argument("--site-tuning", action="store_true",
                         help="also learn thresholds from the other files and rerun each file with them")
+    parser.add_argument("--assets-only", action="store_true",
+                        help="keep the existing report and add only the asset-inventory columns")
     args = parser.parse_args()
 
-    report = {"generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), "datasets": []}
+    report_path = args.out / "public_dataset_evaluation.json"
+    if args.assets_only:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    else:
+        report = {"generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), "datasets": []}
     for key, patterns in (("ctu13", args.ctu13), ("cicids2017", args.cicids)):
         files = _expand(patterns)
         if not files:
             continue
         print(f"{DATASETS[key]['title']}: {len(files)} files")
-        report["datasets"].append(evaluate_dataset(key, files, args.synthetic, args.site_tuning))
+        if args.assets_only:
+            ds = next((d for d in report["datasets"] if d.get("key") == key), None)
+            if ds is None:
+                parser.error(f"{key} is not in {report_path}; run without --assets-only first")
+            ds["with_assets"] = asset_columns(key, files, args.site_tuning)
+            ds["caveats"] = DATASETS[key]["caveats"]
+        else:
+            report["datasets"].append(evaluate_dataset(key, files, args.synthetic, args.site_tuning))
     if not report["datasets"]:
         parser.error("no input files found")
 

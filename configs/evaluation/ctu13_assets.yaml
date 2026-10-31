@@ -1,0 +1,9 @@
+# Asset inventory for evaluating UniShield on CTU-13 (scripts/evaluate_public_datasets.py).
+# CTU-13 publishes no list of the university's servers. The only entry is the resolver that the
+# capture itself shows answering DNS for the network (147.32.80.9 on UDP port 53).
+version: 1
+assets:
+  - name: university-resolver
+    addresses: ["147.32.80.9"]
+    roles: [dns_resolver]
+    description: "DNS resolver seen in the traffic"

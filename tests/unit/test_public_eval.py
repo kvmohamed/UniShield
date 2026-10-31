@@ -106,3 +106,17 @@ def test_out_of_order_file_is_analysed_without_late_drops(tmp_path):
     assert "9:10" in lines[1] and "1:14" in lines[-1]      # 09:10 first, 13:14 last
     fixed = run_file(path, ["192.168.10.0/24"], sort_by_time=True)
     assert fixed.late_dropped == 0 and fixed.records == 10 and fixed.path == str(path)
+
+
+def test_asset_inventory_is_applied_and_counted(capture, tmp_path):
+    from unishield.evaluation.public import load_inventory
+
+    inventory_file = tmp_path / "assets.yaml"
+    inventory_file.write_text("version: 1\nassets:\n  - name: audit\n    addresses: [\"147.32.84.165\"]\n"
+                              "    roles: [vulnerability_scanner]\n", encoding="utf-8")
+    plain = run_file(capture, ["147.32.0.0/16"])
+    audited = run_file(capture, ["147.32.0.0/16"], assets=load_inventory(inventory_file))
+    assert any(a["threat_class"] == "PORT_SCAN" and a["severity"] != "INFO" for a in plain.alerts)
+    scans = [a for a in audited.alerts if a["threat_class"] == "PORT_SCAN"]
+    assert scans and all(a["severity"] == "INFO" for a in scans)
+    assert any(k.startswith("info PORT_SCAN (vulnerability_scanner)") for k in audited.asset_actions)

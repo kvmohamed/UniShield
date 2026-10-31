@@ -1,0 +1,18 @@
+# Asset inventory for evaluating UniShield on CIC-IDS2017 (scripts/evaluate_public_datasets.py).
+# Entries are the lab servers named in the dataset's published network description
+# (https://www.unb.ca/cic/datasets/ids-2017.html): what an operator of that network would list.
+# Workstations, the firewall and the attacker machines are deliberately not listed.
+version: 1
+assets:
+  - name: dc-dns
+    addresses: ["192.168.10.3"]
+    roles: [dns_resolver, server]
+    description: "DNS + domain controller (Windows Server 2016)"
+  - name: web-server-16
+    addresses: ["192.168.10.50"]
+    roles: [server]
+    description: "Ubuntu 16 web server (public 205.174.165.68)"
+  - name: ubuntu-server-12
+    addresses: ["192.168.10.51"]
+    roles: [server]
+    description: "Ubuntu 12 server (public 205.174.165.66)"
