@@ -32,6 +32,10 @@ intelligence is imported from files you bring across yourself.
 - Inbound to UniShield: the API/dashboard port (default `127.0.0.1:8000`,
   or 443 on a reverse proxy) from analysts' machines only, over HTTPS
   (section 6), with accounts enabled (section 5).
+- Live flow exports (optional): allow UDP to `live.netflow_port` (default
+  2055) only from the exporters, typically the receiving side of the diode,
+  and list them in `live.allowed_exporters`. The collector only receives;
+  nothing is sent back, so no return path is needed.
 - Outbound from UniShield: allow, at the host or network firewall, only the
   destinations you also put in `outbound.allowed_destinations` (SIEM syslog
   port, SMTP relay, webhook receiver). Deny everything else, and in
@@ -746,6 +750,40 @@ stored alerts are in the database); beacon pairs and destinations idle for
 longer than `beaconing.history_sec` are dropped; re-alert memories prune
 expired entries.
 
+## Live input
+
+Two receive-only live inputs replace file replay when the site has them
+(`live:` in `configs/config.yaml`; started from the dashboard or the API by
+an administrator, stopped with `POST /replay/stop`; counters at
+`GET /live/status`):
+
+- **NetFlow v5/v9 and IPFIX**: point the exporter (router, switch, a probe
+  such as softflowd or nProbe, or the diode's flow output) at
+  `live.netflow_bind:live.netflow_port`. Bind the interface facing the
+  exporters (`UNISHIELD_NETFLOW_BIND`) rather than `0.0.0.0`, and set
+  `live.allowed_exporters`. Biflow IPFIX (RFC 5103) keeps request and
+  response bytes apart, which the exfiltration and beaconing rules use;
+  unidirectional exports leave them unknown. Sampled exports are not scaled.
+- **Zeek follow**: give the directory Zeek writes (the current log
+  directory, under `paths.data_dir` / `ingest.allowed_dirs`).
+  `live.zeek_from_start: false` starts at the end of the existing logs, like
+  `tail -F`. Rotation is followed; lines written between the last poll and
+  a rotation are read from the renamed file while it stays in the directory.
+
+UDP has no retransmission. The collector asks for a 4 MB receive buffer
+(exporters send in bursts) and counts gaps in the exporters' sequence
+numbers as `lost_records` (v5, IPFIX) or `lost_datagrams` (v9) in
+`/live/status`; a growing count means the host or the path drops exports.
+On Linux the buffer is capped by `net.core.rmem_max`.
+
+Flow exports arrive after the flows end, so windows wait
+`live.allowed_lateness_sec` before closing (120 s). Lower it for exporters
+with short active/inactive timeouts; records older than that are dropped
+and counted.
+
+`scripts/demo_live_feed.py` plays synthetic scenarios to either input on
+the same machine (loopback only) to check a deployment end to end.
+
 ## 22. Checklist
 
 - [ ] `UNISHIELD_ENV=production`, `auth.mode: accounts`, API docs off
@@ -756,6 +794,7 @@ expired entries.
 - [ ] `/health` monitored (503 and `degraded`); audit log reviewed or forwarded
 - [ ] `network.home_networks` lists the monitored ranges; outbound destinations allow-listed and firewalled
 - [ ] `scripts/verify_passive_mode.py` passes on the installed version
+- [ ] live input (if used): collector bound to the exporter-facing interface, `live.allowed_exporters` set, UDP port firewalled to the exporters
 - [ ] `configs/assets.yaml` reviewed with the owners of the listed hosts.
 - [ ] Learning run over a reviewed period; report read; overlay selected.
 - [ ] State persistence enabled, on a writable volume.

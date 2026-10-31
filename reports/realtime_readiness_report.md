@@ -185,7 +185,7 @@ Run: `.venv/Scripts/python.exe -m pytest tests/ -q` → **95 passed, 1 failed, 2
 | **CSV (project format)** | Yes (lossy) | 50/50 records; direction discarded. API path works. |
 | **JSON flows (project format)** | Reader yes / **API no** | Direct `FlowReader`: 50/50. `POST /replay/start` picks `ZeekReader` → **0 records**, status "completed". |
 | **Public-dataset CSV (CICIDS2017-style)** | **No** | 0/2 rows (timestamp format); when forced, duration unit wrong by 10⁶, packet/byte counts lost, labels dropped. |
-| **Live input** | Missing | No live capture or tail-follow of Zeek logs. |
+| **Live input** | Missing | No live capture or tail-follow of Zeek logs. (Addressed 2026-10-31: receive-only NetFlow/IPFIX collector and Zeek follow mode, see the repair log.) |
 
 ## 4. Are detectors connected to the pipeline? (item 7)
 
@@ -582,3 +582,16 @@ Rerun of the public-dataset evaluation: 47 new alerts, 45 on attack hosts. CIC-I
 ### Asset-inventory comparison (2026-10-31)
 
 `evaluate_public_datasets.py --assets-only --site-tuning` with `configs/evaluation/cicids2017_assets.yaml` (DNS/domain controller 192.168.10.3, servers .50 and .51 from the dataset's published network description) and `configs/evaluation/ctu13_assets.yaml` (resolver 147.32.80.9 seen in the traffic): no alert changed on either dataset, default or tuned. The roles act only on DNS-based alerts and the flows carry no DNS names; the datasets contain no scanner, backup, monitoring or mail-server roles to list. Test: `tests/unit/test_public_eval.py::test_asset_inventory_is_applied_and_counted`.
+
+### Live receive-only input (2026-10-31)
+
+| Item | Change | Evidence |
+|---|---|---|
+| Flow-export decoding | `ingest/netflow.py`: NetFlow v5, v9 (templates per exporter and source id) and IPFIX (templates per exporter and domain, enterprise fields, withdrawals, variable-length fields, RFC 5103 reverse elements for biflows); times from FIRST/LAST_SWITCHED with uptime, IPFIX absolute times or sysInitTime; data before its template counted and skipped; template cache bounded. | `tests/unit/test_live_input.py` |
+| Collector | `ingest/collector.py`: binds one UDP socket and only calls `recvfrom`; exporter allow-list (CIDRs); malformed datagrams counted; heartbeat ticks while idle. The passive scan allows it to import `socket` and nothing else; the runtime check runs it under the strict tripwire with a stand-in socket that offers only bind/settimeout/getsockname/recvfrom/close. | `tests/unit/test_live_input.py`, `tests/security/test_passive_mode.py`, `reports/passive_mode_verification.md` |
+| Zeek follow | `ingest/zeek_follow.py`: tails `conn.log` (JSON or TSV, header read when starting at the end), joins `dns.log`/`ssl.log` by `uid` from a bounded cache, follows rotation and reads the old file's remainder; files are not held open between polls. | `tests/unit/test_live_input.py` |
+| Clock ticks | `ClockTick` from idle live readers; the pipeline closes due windows on it. Live runs use `live.allowed_lateness_sec` (120 s). | `test_clock_tick_closes_idle_windows_before_the_stream_ends` |
+| API and dashboard | `POST /live/netflow/start` (address from config only), `POST /live/zeek/start` (directory under the data directories), `GET /live/status`; starts are admin-only and audited; dashboard buttons and counters. | `tests/unit/test_live_input.py`, route-guard tests |
+| Demo feed | `scripts/demo_live_feed.py` sends synthetic scenarios as v5/IPFIX to a loopback collector (refuses other destinations) or writes Zeek JSON logs. | port_scan detected over v5 and IPFIX; dns_tunnel detected over Zeek follow |
+
+Not done: no real exporter or Zeek sensor has been used; latency on live inputs is unmeasured; NetFlow v9/IPFIX options templates (sampling rate) are ignored.

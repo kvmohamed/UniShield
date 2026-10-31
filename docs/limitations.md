@@ -2,9 +2,18 @@
 
 ## What UniShield is not
 
-1. **Not a live sensor.** It analyses files and replayed streams in event
-   time. It does not capture from network interfaces; "real time" in the
-   reports means near-real-time processing of a replayed stream.
+1. **Not a packet-capture sensor.** It analyses files and replayed streams
+   in event time, and can receive flow exports (NetFlow v5/v9, IPFIX over
+   UDP) or follow Zeek logs as they are written. It never captures from a
+   network interface; something upstream (a router, a probe, Zeek) has to
+   produce the metadata. The live inputs have been tested with synthetic
+   loopback feeds only, not with real exporters or a production Zeek
+   sensor, and their alert latency there is unmeasured: flow exports
+   report a flow only after it ends, and windows wait
+   `live.allowed_lateness_sec` (120 s by default) for late records. NetFlow
+   v9/IPFIX options templates (sampling rates) are not applied, so byte and
+   packet counts from sampled exporters are not scaled up. "Real time" in
+   the reports means near-real-time processing of a replayed stream.
 2. **Not a SOC or IPS.** It cannot block, rate-limit or remediate; that is
    intentional for a one-way network. Its only outbound traffic is the
    optional delivery of alerts to the analyst network (files, syslog, email,

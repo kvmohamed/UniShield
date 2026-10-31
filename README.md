@@ -102,9 +102,25 @@ Architecture, stage by stage: [docs/architecture.md](docs/architecture.md).
 | Zeek logs | JSON lines/array or TSV; a directory with `conn.log` (+`dns.log`, `ssl.log`) is joined on `uid` |
 | Flow CSV / JSON | flexible column names; CIC-IDS2017 CSVs detected automatically |
 | Synthetic | seeded, labelled scenarios (`build_scenario(name, seed)`) |
+| Live: NetFlow v5/v9, IPFIX | receive-only UDP collector (`POST /live/netflow/start`); binds `live.netflow_bind:netflow_port`, never sends or replies; exporters limited by `live.allowed_exporters`; IPFIX biflows (RFC 5103) keep both directions |
+| Live: Zeek follow | tails a Zeek log directory as Zeek writes it (`POST /live/zeek/start`), JSON or TSV, joins `dns.log`/`ssl.log` by `uid`, survives log rotation |
 
 The format is detected from file content. The replay API reads only under
-`paths.data_dir` / `ingest.allowed_dirs`.
+`paths.data_dir` / `ingest.allowed_dirs`. Live inputs run as the current
+analysis (one at a time, stopped with `POST /replay/stop`); while idle they
+close windows on the wall clock. Flow exporters report a flow only after it
+ends (active/inactive timeouts), so live windows wait
+`live.allowed_lateness_sec` (default 120 s) before closing: alerts from
+live input arrive about that much later than the traffic.
+
+Try it without a router or sensor (synthetic traffic, loopback only):
+
+```bash
+# dashboard: Overview > "Listen for NetFlow/IPFIX", then
+python scripts/demo_live_feed.py netflow --scenario port_scan --speed 5
+# or "Follow Zeek logs" on data/zeek_live, then
+python scripts/demo_live_feed.py zeek data/zeek_live --scenario dns_tunnel
+```
 
 ---
 
@@ -185,7 +201,9 @@ the alert being returned by the API took a median of 97.9 ms of wall time
 (max 175 ms; per-run P95 mean 105 ms), of which window-close wait 40 ms,
 detection + storage 40 ms and API polling 10 ms (medians). All 27 alerts
 reached the API. Classification: near-real-time event-time processing of
-replayed traffic — not a live capture sensor.
+replayed traffic. The live inputs (NetFlow/IPFIX, Zeek follow) have been
+exercised with synthetic loopback feeds only; their latency with real
+exporters has not been measured.
 
 **Detection approaches** (`reports/model_evaluation.md`, held-out runs, window level):
 
@@ -294,11 +312,13 @@ destination is refused at config load, at send time and at socket level.
 | GET | `/alerts/summary`, `/alerts/timeline`, `/alerts/{id}` | viewer | summary, severity timeline, detail |
 | GET | `/incidents`, `/threats/{class}` | viewer | alerts grouped by entity and time; alerts of one class |
 | GET | `/replay/status`, `/replay/runs` | viewer | current run, recent runs |
+| GET | `/live/status` | viewer | live input counters (datagrams, records, rejected exporters, malformed, rotations) |
 | GET | `/system/architecture`, `/benchmark/latest`, `/evaluation/latest` | viewer | stage, detector, model, output, intel and safety status; measured reports |
 | GET | `/system/assets` | viewer | asset inventory, effective role policies, what they downgraded or suppressed |
 | GET | `/learning/latest` | viewer | suggested site thresholds and report from the last learning run |
 | GET | `/outputs/status`, `/intel/status` | viewer | export, syslog and notification status (no secrets); imported indicators per kind and source |
 | POST | `/replay/start`, `/replay/demo`, `/replay/stop` | admin | analyse a file under the data directory (`state=` to continue from the state snapshot, `learning=true` for learning mode) / a synthetic scenario; stop |
+| POST | `/live/netflow/start`, `/live/zeek/start` | admin | start the receive-only flow-export collector (address from config only) / follow a Zeek log directory under the data directory |
 | DELETE | `/alerts` | admin | delete stored alerts |
 | POST | `/export` | admin | write JSON lines / CEF / STIX files of stored alerts and incidents |
 | POST | `/intel/import` | admin | import an indicator file (request body) |
@@ -415,8 +435,9 @@ check them with `make audit-deps` (pip-audit), as CI does.
 
 ## Limitations
 
-Not a live sensor (files and replayed streams only), not a SOC or IPS, no
-payload inspection; default thresholds tuned on synthetic data (learning
+No packet capture from interfaces (live input is flow exports and Zeek
+logs, tested with synthetic loopback feeds only, not with real routers or
+sensors), not a SOC or IPS, no payload inspection; default thresholds tuned on synthetic data (learning
 mode assumes an attack-free learning period and has only been exercised on
 synthetic site traffic); asset roles are trust decisions; models trained on
 synthetic data and weak on unseen attack types; on real traffic (CTU-13, CIC-IDS2017) the default rules flag most attack hosts with low precision, and site tuning helps only with a clean learning period (see results); single process; threat-intel

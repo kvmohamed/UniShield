@@ -72,6 +72,8 @@ as confidence.
 python scripts/replay_pcap.py --input data/samples/attack_synflood.pcap
 python scripts/replay_pcap.py --input data/samples/zeek --json
 python scripts/verify_passive_mode.py
+python scripts/demo_live_feed.py netflow --scenario port_scan --speed 5   # after "Listen for NetFlow/IPFIX"
+python scripts/demo_live_feed.py zeek data/zeek_live --scenario dns_tunnel  # after "Follow Zeek logs"
 python scripts/import_intel.py --source demo-c2 my_blocklist.txt   # offline threat intel
 python scripts/export_alerts.py --formats stix                     # JSON lines / CEF / STIX files
 pytest                       # unit, integration and security tests

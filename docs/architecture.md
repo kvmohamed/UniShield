@@ -41,7 +41,7 @@ syslog, email and webhooks, all through one allow-listed transport
 
 | Stage | Module | What it does |
 |---|---|---|
-| Ingest | `ingest/` | `detect.open_reader` picks the reader from file content. `PcapReader` streams packets with scapy's offline reader (one record per IP packet, DNS question/rcode, plaintext TLS ClientHello/ServerHello fields and JA3). `ZeekReader` reads JSON lines/arrays or TSV, joining `conn`, `dns` and `ssl` logs on `uid`. `FlowReader` maps flexible CSV/JSON columns, including CIC-IDS2017. |
+| Ingest | `ingest/` | `detect.open_reader` picks the reader from file content. `PcapReader` streams packets with scapy's offline reader (one record per IP packet, DNS question/rcode, plaintext TLS ClientHello/ServerHello fields and JA3). `ZeekReader` reads JSON lines/arrays or TSV, joining `conn`, `dns` and `ssl` logs on `uid`. `FlowReader` maps flexible CSV/JSON columns, including CIC-IDS2017. Live readers: `FlowExportCollector` (`ingest/collector.py`, receive-only UDP; decoding in `ingest/netflow.py`: NetFlow v5, v9 and IPFIX templates per exporter and domain, RFC 5103 biflows) and `ZeekFollowReader` (`ingest/zeek_follow.py`, tails `conn.log`, joins `dns.log`/`ssl.log` by `uid`, follows rotation). While idle they yield `ClockTick`s so windows close on the wall clock. |
 | Sessionizer | `processing/sessionizer.py` | Packet records → bidirectional flows with per-direction counts, connection state (S0/REJ/S1/SF/RST/OTH), idle/active timeouts and a bound on active flows. Flows are released in start-time order. |
 | Normaliser | `processing/normalization.py` | Direction from `network.home_networks`, TLS version names, optional salted IP hashing. |
 | Windows | `processing/window.py` | Grid-aligned sliding windows in traffic (event) time: a window closes when the first record past its end arrives, with configurable allowed lateness; the last windows are flushed at end of input. |
@@ -119,6 +119,13 @@ clock) besides its traffic-time window. `scripts/benchmark_pipeline.py`
 measures throughput and close-to-storage latency; `scripts/replay_stream.py`
 replays traffic at a fixed pace and adds the delay until the window closes
 and until the API returns the alert ([evaluation.md](evaluation.md)).
+
+Live inputs have no end of stream: a reader that receives nothing yields a
+`ClockTick` carrying its estimate of the current traffic time (last record
+time plus the wall-clock time since it arrived), and the pipeline closes the
+windows that are due. Live runs use `live.allowed_lateness_sec` (default
+120 s) instead of `processing.allowed_lateness_sec`, because flow exporters
+report a flow only when it ends or hits its active timeout.
 
 ## Deployment
 

@@ -134,11 +134,13 @@ Operating details for each mitigation are in [deployment.md](deployment.md).
 | Schema drift and failed upgrades | Alembic migrations; the API refuses to start on an outdated schema when auto-migration is off; tests check the migrated schema against the code on SQLite and PostgreSQL |
 | Resource exhaustion | Bounded windows, sessionizer active-flow cap, bounded per-pair and per-source state, file size limit, request body limits in the proxy examples, password length cap (hashing cost), bounded rate-limiter memory, alert retention |
 | Process compromise spreading on the host | systemd unit and container run unprivileged with no capabilities, a read-only system and only state/log directories writable |
-| Accidental active behaviour in code | `scripts/verify_passive_mode.py` (run in CI): AST scan for network/process/crypto capabilities (scoped allowance for the outbound transport only) and a runtime tripwire around sockets and scapy send/capture, including the login flow |
+| Accidental active behaviour in code | `scripts/verify_passive_mode.py` (run in CI): AST scan for network/process/crypto capabilities (scoped allowance for the outbound transport; the flow-export collector may only import `socket` and has no allowed calls) and a runtime tripwire around sockets and scapy send/capture, including the login flow and the collector |
+| Forged or flooding flow exports (UDP is spoofable) | `live.allowed_exporters` drops other sources (counted); bounded template cache (10,000) and datagram size; malformed datagrams are counted and skipped; the collector binds only the configured address and never replies, so it cannot be used to reflect traffic. A spoofed exporter address inside the allow-list is not detected: restrict the collector port at the firewall to the exporters' path |
+| Crafted Zeek log lines | Lines are parsed as data (JSON or TSV), malformed ones are counted; the enrichment cache is bounded (200,000 uids); the followed directory must lie under the data directories |
 
 ## Out of scope
 
-Live capture from interfaces, payload inspection, response or blocking;
+Packet capture from interfaces, payload inspection, response or blocking;
 multi-tenant isolation; single sign-on (OIDC/SAML/LDAP) and multi-factor
 authentication; fetching threat intelligence; encryption of export files
 at rest; and protection against an attacker with write access to
