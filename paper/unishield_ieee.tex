@@ -1,0 +1,195 @@
+% UniShield -- IEEE conference paper draft (IEEEtran, conference mode).
+% Compile: pdflatex unishield_ieee && bibtex unishield_ieee && pdflatex unishield_ieee && pdflatex unishield_ieee
+% (or upload paper/ to Overleaf). Every number below comes from the reports in ../reports/;
+% the comment next to each table names its source. Before submission: fill in the
+% authors, check the target conference's page limit and template, and verify every reference.
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+
+\begin{document}
+
+\title{UniShield: Verifiably Passive, Metadata-Only Threat Detection for One-Way Networks, and What Public Traffic Says About It}
+
+\author{\IEEEauthorblockN{Author One}
+\IEEEauthorblockA{\textit{Department} \\
+\textit{Institution}\\
+City, Country \\
+email}
+\and
+\IEEEauthorblockN{Author Two}
+\IEEEauthorblockA{\textit{Department} \\
+\textit{Institution}\\
+City, Country \\
+email}
+}
+
+\maketitle
+
+\begin{abstract}
+Networks that protect critical infrastructure are often connected to the outside only through a one-way link (a data diode). A monitor on the receiving side can observe copies of traffic but must never send anything back, so it cannot probe, block or decrypt. We present UniShield, a metadata-only intrusion detector built for this setting. It processes flow and packet metadata in event-time sliding windows with rule detectors for floods, scans, command-and-control beaconing, exfiltration, DGA and DNS tunnelling, login brute force, spam and suspicious encrypted sessions, followed by robust statistics, an Isolation Forest and an optional calibrated window classifier. Its passivity is verified rather than asserted: a static scan of every module and a runtime socket tripwire show that only one analyst-side delivery module can open connections, and never toward the monitored network. We evaluate UniShield on its own labelled scenarios and on two public datasets, CTU-13 (1.24\,M flows) and CIC-IDS2017 (2.83\,M flows). With default thresholds it flags 8 of 15 and 19 of 23 attack hosts, but at most 35\,\% of its alerts name an attack host (at most 5\,\% on the university network). Thresholds learned from an attack-free day raise this host-level precision to 76--97\,\% on five of seven CIC-IDS2017 attack days while keeping almost every host, whereas learning from unverified background traffic loses most detections. A classifier trained on synthetic traffic does not transfer to real traffic (ROC-AUC 0.53--0.56). We report these results, including the negative ones, with the data corrections they required.
+\end{abstract}
+
+\begin{IEEEkeywords}
+intrusion detection, unidirectional networks, data diode, passive monitoring, network flows, operational technology, evaluation methodology
+\end{IEEEkeywords}
+
+\section{Introduction}
+Operational-technology (OT) and other high-assurance networks are frequently separated from less trusted networks by unidirectional gateways or data diodes, which physically allow data to leave but not to enter~\cite{okhravi2010diodes,nist80082r3}. Security monitoring for such a network sits on the receiving side of the link: it sees copies of traffic, typically as flow records or captures, and reports to analysts on a separate network. This placement removes the usual response options of an intrusion prevention system. The monitor cannot block, reset connections, probe a suspicious host or decrypt sessions, and in plants and grids automatic blocking would in any case risk availability and safety~\cite{nist80082r3}. What remains is detection: early, explainable and evidently harmless to the monitored network.
+
+Two practical questions follow. First, how can an operator be confident that a monitoring tool is in fact passive, rather than relying on documentation? Second, how well does metadata-only detection work on real traffic, as opposed to the synthetic or idealised data on which such tools are often tuned? The second question is not new: network intrusion detection is known to suffer from evaluation pitfalls, label errors and poor transfer between environments~\cite{sommer2010outside,arp2022dos,engelen2021troubleshooting}. We address both questions with an implemented system and a measurement-first evaluation.
+
+Our contributions are:
+\begin{itemize}
+\item \textbf{A passive detector for one-way networks.} UniShield combines rule detectors over rolling cross-window state, robust statistics, an Isolation Forest and an optional isotonically calibrated window classifier, using only metadata, including TLS handshake fingerprints (JA3) for encrypted sessions (Section~\ref{sec:design}).
+\item \textbf{Verified passivity.} An abstract-syntax-tree scan of every module and a runtime tripwire around sockets and packet-crafting functions show that no ingestion, analysis or API path sends traffic, and that the single module allowed to deliver alerts to the analyst network refuses monitored-network destinations at configuration, send and socket level (Section~\ref{sec:passive}).
+\item \textbf{A host-level evaluation on public traffic.} We evaluate on CTU-13~\cite{garcia2014empirical} and CIC-IDS2017~\cite{sharafaldin2018toward}, report which attack hosts are named and how precise the alerts are, correct three timestamp and ordering problems in CIC-IDS2017 that otherwise silently discard most of two days, and test site tuning without leaking test data (Section~\ref{sec:eval}).
+\item \textbf{Measured, including negative, results.} Default rules find most attack hosts at low precision; tuning on a clean day restores precision; tuning on unclean traffic does not; and a supervised model trained on synthetic data does not transfer (Section~\ref{sec:results}).
+\end{itemize}
+
+\section{Background and Related Work}
+\textbf{Signature and protocol-analysis NIDS.} Snort~\cite{roesch1999snort} matches packet signatures; Zeek (formerly Bro)~\cite{paxson1999bro} turns traffic into protocol logs and scripted detections. Both normally run where they can also feed blocking or active response. UniShield consumes Zeek logs among other inputs and targets the behaviours that signatures miss in encrypted or novel traffic, using metadata only.
+
+\textbf{Behavioural and learning-based detection.} Botnet detectors such as BotMiner~\cite{gu2008botminer} correlate communication and activity patterns; DGA detection uses the statistics of failed lookups~\cite{antonakakis2012dga}; Kitsune~\cite{mirsky2018kitsune} learns normal traffic online with autoencoders. Sommer and Paxson argue that anomaly detection suits the ``closed world'' of misuse detection poorly and that operational evaluation is essential~\cite{sommer2010outside}; Arp et al.\ catalogue pitfalls such as data snooping, spurious correlations and inappropriate baselines~\cite{arp2022dos}. Our evaluation follows these recommendations: run-level splits, ablations that exposed a spurious feature, leave-one-attack-out and cross-dataset tests.
+
+\textbf{Datasets.} CTU-13 contains thirteen botnet captures from a university network with botnet, normal and unverified background labels~\cite{garcia2014empirical}. CIC-IDS2017 contains five days of benign and attack traffic from a lab network as CICFlowMeter flows~\cite{sharafaldin2018toward}; later analyses document flow-construction and labelling errors~\cite{engelen2021troubleshooting}. We use both, report their caveats and describe the corrections we applied.
+
+\textbf{One-way networks.} Data diodes enforce unidirectional flow in hardware and are recommended for OT boundaries~\cite{okhravi2010diodes,nist80082r3}. Monitoring designed for this setting must therefore be detection-only by construction; we are not aware of prior detectors that make that property testable.
+
+\section{Threat Model and Requirements}
+The monitored network lies behind a one-way link; UniShield receives copies of its traffic (packet captures, Zeek logs or flow exports) and serves analysts on a separate network. Adversaries are external attackers (floods, scans, brute force) and compromised internal hosts (beaconing to command-and-control (C2), exfiltration, DGA, DNS tunnelling, spam, unusual encrypted sessions). UniShield must never probe, send packets into, connect back into, block or decrypt anything in the monitored network; it may deliver alerts to explicitly allow-listed analyst-side destinations. Each alert class is mapped to MITRE ATT\&CK~\cite{strom2018attack} where a technique exists. Threats to UniShield itself (unauthorised API use, injected alert content, tampered models, misdirected delivery) are mitigated by role-based accounts with an audit log, output escaping, SHA-256-checked model artifacts and a destination policy.
+
+\section{Design}\label{sec:design}
+\textbf{Ingestion and windows.} Readers detect the input format from content: PCAP/PCAPNG (parsed offline; packets are aggregated into bidirectional flows with connection state and the client's JA3 fingerprint~\cite{althouse2017ja3}), Zeek JSON/TSV logs, and flow CSV/JSON including CTU-13 binetflow and CIC-IDS2017 exports. A normaliser infers direction from the configured home networks. Records enter grid-aligned sliding windows in traffic (event) time, 10\,s long every 5\,s; a window closes when the first record past its end arrives.
+
+\textbf{Detectors.} Table~\ref{tab:detectors} lists the rule detectors. Detectors that need longer evidence than one window keep bounded state across windows: per (source, destination, port) inter-arrival histories for beaconing, per-source upload baselines with robust $z$-scores for exfiltration, and per-login-service attempt counts and per-host SMTP fan-out for brute force and spam. Thresholds were chosen from how the behaviours work (e.g.\ a person does not log in 30 times a minute) rather than fitted to the evaluation data. After the rules, a robust-$z$ detector (median and MAD over a baseline of unexplained windows~\cite{leys2013mad}) and an Isolation Forest~\cite{liu2008isolation} score only windows that no rule explained. An optional window classifier (random forest~\cite{breiman2001rf} or XGBoost~\cite{chen2016xgboost}) reports isotonically calibrated probabilities~\cite{zadrozny2002calibration}; rule confidences are scores, not probabilities. A correlator deduplicates alerts in traffic time and groups them into incidents.
+
+\begin{table}[t]
+\caption{Rule detectors (metadata only)}\label{tab:detectors}
+\centering\footnotesize
+\begin{tabular}{@{}p{2.1cm}p{4.3cm}p{1.1cm}@{}}
+\toprule
+Class & Evidence & ATT\&CK \\
+\midrule
+Floods & per-destination peak packet, half-open and UDP rates & T1498 \\
+Scans & per-source attempts across ports/hosts, failures & T1046 \\
+Beaconing & regular inter-arrival times across windows & T1071 \\
+Exfiltration & upload volume vs.\ source baseline, rare destinations & T1041 \\
+DGA / tunnelling & generated names with NXDOMAIN; long unique subdomains & T1568.002, T1572 \\
+Brute force & $\geq$30 short connections to one login port in 60\,s, most connected & T1110 \\
+Spam & direct SMTP to $\geq$20 external servers in 5\,min & -- \\
+Encrypted session & outdated TLS, JA3 blocklist, long low-rate sessions & T1573 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Site tuning.} A learning mode runs the pipeline over a site's traffic without alerting, records how close benign traffic came to each threshold and suggests an overlay (99.9th percentile with headroom) that never rewrites the defaults. An asset inventory assigns roles (vulnerability scanner, backup, mail or DNS server, monitoring) whose expected behaviour is downgraded or suppressed, always counted.
+
+\textbf{Passivity by construction and by test.}\label{sec:passive} Readers only open files; the API only listens. Delivery of alerts (files, syslog, e-mail, webhooks) is confined to one transport module whose destinations must be allow-listed and outside the home networks, checked at configuration load, at send time after name resolution, and at socket level. A verification script parses every module's syntax tree for networking, process, cryptography and packet-sending capabilities (only the transport module's lines are allowed) and runs every input format, all scenarios and the API under a tripwire that refuses any socket operation outside the transport's policy. On the current code base it reports no findings and no refused attempt from readers, pipeline or detectors.
+
+\section{Evaluation Methodology}\label{sec:eval}
+\textbf{Synthetic scenarios.} A seeded generator produces labelled scenarios (floods, scans, beacons at 30 and 60\,s, exfiltration episodes, DGA, DNS tunnelling, encrypted-session anomalies, brute force, spam and a hard benign scenario built to trip naive rules). A window dataset from 220 runs (18\,444 windows) is split by run into train, calibration and test sets so overlapping windows never cross sets.
+
+\textbf{Public datasets.} We use five CTU-13 scenarios with different botnets (5 Virut, 6 Menti, 7 Sogou, 11 Rbot, 12 NSIS.ay; 1\,235\,536 Argus flows, home network 147.32.0.0/16) and all eight CIC-IDS2017 TrafficLabelling files (2\,830\,743 flows, home network 192.168.10.0/24). CIC-IDS2017 needed three corrections, without which most of Tuesday and Wednesday is silently dropped by event-time windowing: afternoon times written without AM/PM are read as PM (lab hours 08--17\,h); files not written in time order are analysed as stable time-sorted copies; and minute-resolution timestamps are spread evenly within each minute in file order. After correction no record is dropped as late. The web-attack file additionally contains 288\,602 empty rows, which the reader counts as errors.
+
+\textbf{Metrics.} Because one alert per attacker matters more to an analyst than per-window counts on a busy network, we report host-level results: an attack host (CTU-13: the infected host; CIC-IDS2017: either end of an attack flow) is detected if an alert names it at or after its first attack flow; host-level precision is the share of alerts that name an attack host; we also report other hosts named and the time to first alert. On synthetic data we additionally report window-level precision, recall, F1 and episode detection with delay.
+
+\textbf{Site tuning without leakage.} Thresholds are learned with attack-labelled flows removed from the learning traffic (standing in for an attack-free period). For CTU-13 each scenario is evaluated with thresholds learned from the other four; for CIC-IDS2017 thresholds are learned once from Monday (attack-free) and applied to the attack days. A file never influences its own thresholds.
+
+\section{Results}\label{sec:results}
+\subsection{Synthetic scenarios and models}
+Every scenario raises its expected classes and the hard benign scenario raises none (five seeds each). Table~\ref{tab:synthetic} compares detection approaches on held-out runs. Window recall is limited by beaconing and exfiltration, whose evidence builds over several windows; every approach except the Isolation Forest reports all 48 test episodes. An ablation exposed a spurious feature in an early version of the generator: only attack flows carried TLS metadata, so removing the TLS feature group dropped random-forest F1 from 1.00 to 0.82; after fixing the generator, the supervised scores fell to the values shown. Trained without a class, the random forest flags none of that class's test windows for beaconing, exfiltration, DGA, tunnelling, encrypted-session anomalies and UDP floods, which motivates keeping rules as the primary detectors.
+
+% source: reports/model_evaluation.md (11 scenarios x 20 seeds; generated before the brute-force and spam scenarios were added)
+\begin{table}[t]
+\caption{Synthetic held-out windows (rules vs.\ models)}\label{tab:synthetic}
+\centering\footnotesize
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Approach & Precision & Recall & F1 & Episodes \\
+\midrule
+Rules & 1.000 & 0.423 & 0.594 & 48/48 \\
+Rules + statistics (default) & 1.000 & 0.495 & 0.662 & 48/48 \\
+Random forest ($P\geq0.9$) & 1.000 & 0.684 & 0.813 & 48/48 \\
+XGBoost ($P\geq0.9$) & 0.998 & 0.753 & 0.859 & 48/48 \\
+Isolation Forest & 0.000 & 0.000 & 0.000 & 0/48 \\
+Hybrid (rules OR RF) & 1.000 & 0.697 & 0.821 & 48/48 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Public traffic with default thresholds}
+Tables~\ref{tab:cicids} and~\ref{tab:ctu} report host-level results. With default thresholds UniShield names 19 of 23 attack hosts on CIC-IDS2017 and 8 of 15 infected hosts on CTU-13, typically within minutes, but most alerts are false: host-level precision is 0.07--0.35 on the lab network and at most 0.05 on the university network, and the attack-free Monday alone produces 1\,093 alerts. Inspection attributes most false alerts to beaconing, exfiltration and scan rules firing on regular polling, peer-to-peer traffic and large uploads. Misses have identifiable causes: web attacks are not visible in flow metadata; CTU-13's Sogou bot made 63 flows in 21 minutes; and scenario~11's ICMP flood reaches about 60 packets/s at the capture point, far below the volumetric threshold.
+
+% source: reports/public_dataset_evaluation.md (CIC-IDS2017; default vs. thresholds learned from Monday)
+\begin{table}[t]
+\caption{CIC-IDS2017: default vs.\ learned from Monday}\label{tab:cicids}
+\centering\footnotesize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Day (attacks) & Hosts & Alerts & Host-level prec. \\
+\midrule
+Tue (FTP/SSH brute force) & 2/2 $\to$ 2/2 & 1163 $\to$ 115 & 0.14 $\to$ 0.83 \\
+Wed (DoS) & 3/3 $\to$ 3/3 & 939 $\to$ 111 & 0.18 $\to$ 0.78 \\
+Thu (web attacks) & 1/2 $\to$ 0/2 & 513 $\to$ 13 & 0.07 $\to$ 0.00 \\
+Thu (infiltration) & 2/2 $\to$ 2/2 & 325 $\to$ 84 & 0.21 $\to$ 0.76 \\
+Fri (botnet) & 7/10 $\to$ 2/10 & 469 $\to$ 30 & 0.35 $\to$ 0.50 \\
+Fri (port scan) & 2/2 $\to$ 2/2 & 173 $\to$ 35 & 0.28 $\to$ 0.97 \\
+Fri (DDoS) & 2/2 $\to$ 2/2 & 155 $\to$ 24 & 0.26 $\to$ 0.96 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% source: reports/public_dataset_evaluation.md (CTU-13; default vs. learned from the other four scenarios)
+\begin{table}[t]
+\caption{CTU-13: default vs.\ learned from the other scenarios}\label{tab:ctu}
+\centering\footnotesize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Scenario (botnet) & Hosts & Alerts & First alert (default) \\
+\midrule
+5 (Virut) & 1/1 $\to$ 0/1 & 46 $\to$ 28 & 719\,s \\
+6 (Menti, spam) & 1/1 $\to$ 1/1 & 567 $\to$ 199 & 491\,s \\
+7 (Sogou) & 0/1 $\to$ 0/1 & 85 $\to$ 23 & -- \\
+11 (Rbot) & 3/3 $\to$ 0/3 & 61 $\to$ 18 & 38--81\,s \\
+12 (NSIS.ay) & 3/9 $\to$ 0/9 & 313 $\to$ 139 & 119--180\,s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Site tuning needs a clean baseline}
+Thresholds learned from CIC-IDS2017's attack-free Monday cut alerts by a factor of 5 to 40 and raise host-level precision to 0.76--0.97 on five of seven attack days while keeping almost every attack host (Table~\ref{tab:cicids}). The learned overlay mainly raised scan fan-out thresholds (e.g.\ 20$\to$47 hosts), tightened the beacon regularity bound (coefficient of variation 0.30$\to$0.05) and effectively disabled the robust-$z$ detector; the cost is the botnet and web-attack days. On CTU-13 the same procedure learns from ``background'' traffic that is unverified and contains scanning and heavy peer-to-peer use; thresholds rise so far that 7 of 8 detected hosts are lost (Table~\ref{tab:ctu}). Learning is only as good as the cleanliness of its period. Adding an asset inventory of the servers an operator would know (CIC-IDS2017's published DNS server and two servers, CTU-13's resolver) changed no result, because those roles act only on DNS-based alerts and these flows carry no DNS names.
+
+\subsection{Rules added after the first evaluation}
+The first evaluation showed that a spam bot (CTU-13 scenario~6, 4\,398 failed SMTP attempts) and FTP/SSH password guessing (CIC-IDS2017 Tuesday) were missed. We added brute-force and spam rules with thresholds derived from tool and client behaviour and re-ran everything. Of the 47 new alerts, 45 name an attack host: Tuesday's brute-force host is now found (first alert after 116\,s), the spam bot is reported after 491\,s instead of 6\,266\,s, nothing fired on Monday, and two brute-force alerts name CTU-13 background hosts. We present this as a before/after result on the same data rather than as an independent test.
+
+\subsection{Learned models do not transfer}
+The random forest trained on synthetic windows scores ROC-AUC 0.53 on CTU-13 windows and 0.56 on CIC-IDS2017 windows, essentially chance. Trained on the other files of the same dataset and tested on each held-out file, it reaches 0.33--0.72 (CTU-13) and 0.53--0.84 (CIC-IDS2017); at the calibrated 0.9 threshold it flags at most about 10\,\% of the held-out attack windows. Calibrated supervised models are therefore not enabled by default.
+
+\subsection{Performance and latency}
+% source: reports/benchmark.md and reports/realtime_verdict.md (re-measured on the final code, 2026-10-31)
+On a 12-thread desktop CPU, the pipeline processes 23\,696 records/s (minimum 21\,776 over five runs of 19\,610 records, default detectors, alerts stored in SQLite), against a 1\,000 records/s target; the 95th-percentile latency from window close to stored alert is 64\,ms (worst run 74\,ms). Offline PCAP parsing in Python is the slow path at 3\,856 packets/s, so large captures should be converted to Zeek logs. In paced replays at 20$\times$ real time, an alert became visible through the API a median of 98\,ms (maximum 175\,ms) of wall time after its window ended; all alerts were delivered. In traffic time, detection therefore follows activity by at most one window length plus the wait for the next record, except for behaviours that need several windows of evidence by design.
+
+\section{Discussion and Limitations}
+\textbf{Threats to validity.} CTU-13 background traffic is unverified and counted as benign, so its false-positive figures are upper bounds; CIC-IDS2017 has documented label and flow errors~\cite{engelen2021troubleshooting} and required the timestamp corrections described above; our host-level metric counts both ends of an attack flow as attack hosts on CIC-IDS2017; and the brute-force and spam rules were added after we had seen the misses they address. The synthetic results use UniShield's own generator, so its supervised scores are optimistic.
+
+\textbf{Scope.} UniShield analyses files and replayed streams in event time; it is not a live capture sensor, and receive-only collectors for live flow export are future work. It sees connections, not outcomes: whether a login succeeded or what a message or encrypted session contained is never known. Thresholds suit high-rate floods, and low-volume bots remain hard. It runs as a single process and was not evaluated with a real SIEM.
+
+\textbf{Implications.} For detection-only deployments the useful operating point is not ``maximum recall'' but ``every attacker named once among few alerts''. On these datasets that point is reached by rules plus tuning on a clean period, not by synthetic-trained learning.
+
+\section{Conclusion}
+UniShield shows that a monitor for one-way networks can be both useful and verifiably passive. On public traffic its default rules find most attack hosts at low precision; learning thresholds from an attack-free day restores precision on most attack days; learning from unverified traffic and transferring synthetic-trained models do not work. Future work includes receive-only live collectors, a pilot on an operational network with a clean learning period, and broader public-dataset coverage.
+
+\section*{Artifact availability}
+Source code, configurations, evaluation scripts and the generated reports are available at \url{https://github.com/kvmohamed/UniShield}; the public datasets must be obtained from their publishers.
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
