@@ -24,6 +24,7 @@ import logging
 import re
 from typing import Iterable, Iterator, Optional
 
+from unishield.ingest.base import ClockTick
 from unishield.schemas.flow import FlowDirection, NormalisedFlow
 
 logger = logging.getLogger("unishield.processing.normalization")
@@ -144,9 +145,9 @@ class Normalizer:
         return flow
 
     def normalize_stream(self, flows: Iterable[NormalisedFlow]) -> Iterator[NormalisedFlow]:
-        """Normalise records lazily, preserving order."""
+        """Normalise records lazily, preserving order; live readers' clock ticks pass through."""
         for flow in flows:
-            yield self.normalize(flow)
+            yield flow if isinstance(flow, ClockTick) else self.normalize(flow)
 
     def stats(self) -> dict:
         return {

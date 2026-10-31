@@ -59,6 +59,7 @@ class SourceType(str, Enum):
     FLOW_CSV = "flow_csv"
     FLOW_JSON = "flow_json"
     LIVE_CAPTURE = "live_capture"
+    FLOW_EXPORT = "flow_export"
     SIMULATED = "simulated"
 
 

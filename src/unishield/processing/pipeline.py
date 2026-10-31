@@ -53,7 +53,7 @@ from unishield.features.intel import IntelFeatureExtractor
 from unishield.features.service_abuse import ServiceAbuseFeatureExtractor
 from unishield.features.scan import ScanFeatureExtractor
 from unishield.features.volume import VolumeFeatureExtractor
-from unishield.ingest.base import BaseReader
+from unishield.ingest.base import BaseReader, ClockTick
 from unishield.intel.enrich import enrich_alerts
 from unishield.intel.matcher import IntelMatcher
 from unishield.processing.normalization import Normalizer
@@ -75,6 +75,7 @@ _ALERT_SOURCE = {
     InputSource.ZEEK_TSV: SourceType.ZEEK_LOG,
     InputSource.FLOW_CSV: SourceType.FLOW_CSV,
     InputSource.FLOW_JSON: SourceType.FLOW_JSON,
+    InputSource.FLOW_EXPORT: SourceType.FLOW_EXPORT,
     InputSource.SIMULATED: SourceType.SIMULATED,
 }
 
@@ -263,6 +264,7 @@ class Pipeline:
         intel: IntelMatcher | None = None,
         assets: AssetInventory | None = None,
         state_store: PipelineStateStore | None = None,
+        allowed_lateness_sec: float | None = None,
     ):
         """
         Args:
@@ -281,11 +283,15 @@ class Pipeline:
                 other alerts; ignored when ``intel.enabled`` is false.
             assets: Asset inventory whose role policies are applied to the
                 alerts (see ``unishield.assets``); defaults to ``site.assets_file``.
+            allowed_lateness_sec: Overrides ``processing.allowed_lateness_sec``
+                (live flow exports report flows after they end, so records
+                arrive late by up to the exporter's active timeout).
             state_store: Restores cross-window state before the first run and
                 snapshots it periodically and at the end of every run.
         """
         config = get_config()
         self._config = config
+        self._allowed_lateness_override = allowed_lateness_sec
         self._normalizer_override = normalizer
         self._sessionize = sessionize
         self._reader: BaseReader | None = None
@@ -350,7 +356,8 @@ class Pipeline:
             window_size_sec=self.window_size_sec,
             slide_interval_sec=self.slide_interval_sec,
             max_records=p.max_records_in_memory,
-            allowed_lateness_sec=p.allowed_lateness_sec,
+            allowed_lateness_sec=(p.allowed_lateness_sec if self._allowed_lateness_override is None
+                                  else self._allowed_lateness_override),
         )
 
     @property
@@ -453,6 +460,11 @@ class Pipeline:
                 if self._should_stop:
                     logger.info("Pipeline stopped by request")
                     break
+                if isinstance(flow, ClockTick):           # live reader idle: close due windows by clock
+                    if flow.event_time is not None:
+                        for window in self.window.advance(flow.event_time):
+                            self._process_window(window, result)
+                    continue
 
                 record_start = time.perf_counter()
                 result.total_records += 1

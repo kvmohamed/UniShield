@@ -9,10 +9,25 @@ any packets or contacting external systems.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, Optional
 
 from unishield.schemas.flow import NormalisedFlow
+
+
+@dataclass(frozen=True)
+class ClockTick:
+    """
+    Emitted by live readers while no record arrives: the reader's estimate of
+    the current traffic time (last record time plus the wall-clock time since
+    it arrived). The pipeline uses it to close windows during quiet periods;
+    it is not a record and is never counted or analysed. ``None`` before the
+    first record: nothing to close yet, but the run loop regains control
+    (and can notice a stop request) while the input is idle.
+    """
+    event_time: Optional[datetime]
 
 
 class BaseReader(ABC):

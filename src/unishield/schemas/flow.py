@@ -49,6 +49,7 @@ class InputSource(str, Enum):
     ZEEK_TSV = "zeek_tsv"
     FLOW_CSV = "flow_csv"
     FLOW_JSON = "flow_json"
+    FLOW_EXPORT = "flow_export"          # NetFlow v5/v9 or IPFIX received live
     SIMULATED = "simulated"
 
 
