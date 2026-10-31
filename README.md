@@ -124,6 +124,25 @@ python scripts/demo_live_feed.py zeek data/zeek_live --scenario dns_tunnel
 
 ---
 
+## Analyst workflow
+
+Each alert in the dashboard explains itself: what the rule looks for, the
+observed values against the configured thresholds, threat-intel and asset
+context, common benign causes to rule out, and what metadata cannot show
+(encrypted content is never decrypted). Analysts record a verdict — true
+positive, benign true positive (real but authorised) or false positive —
+with a note. The benchmark tab shows the reviewed precision per detector;
+`GET /feedback/export` gives the labelled alerts for threshold tuning.
+
+A false positive from a known host can be suppressed: a rule names the
+threat class and a source and/or destination (address, CIDR or hash),
+optionally one detector, a reason and an expiry (at most
+`feedback.max_suppression_days`, 90). Matching alerts are still stored and
+listed under "Only suppressed", but not sent to exports or notifications;
+alerts with threat-intel matches are never suppressed. Every verdict and
+rule change is in the audit log. For hosts that legitimately behave this
+way permanently, asset roles (`configs/assets.yaml`) are the better tool.
+
 ## Analyst-side integrations
 
 Everything below is local files or traffic to the **analyst network**; none
@@ -308,11 +327,17 @@ destination is refused at config load, at send time and at socket level.
 | GET | `/auth/me` | public | the caller's identity, role and CSRF token |
 | POST | `/auth/password` | viewer (session) | change your own password |
 | GET | `/metrics`, `/metrics/traffic` | viewer | pipeline and process metrics; per-window traffic, top alert entities |
-| GET | `/alerts` | viewer | filters (class, severity, IPs, detector, run, time, confidence), sort, pagination (`X-Total-Count`) |
+| GET | `/alerts` | viewer | filters (class, severity, IPs, detector, run, time, confidence, `suppressed=exclude/include/only`), sort, pagination (`X-Total-Count`) |
 | GET | `/alerts/summary`, `/alerts/timeline`, `/alerts/{id}` | viewer | summary, severity timeline, detail |
 | GET | `/incidents`, `/threats/{class}` | viewer | alerts grouped by entity and time; alerts of one class |
 | GET | `/replay/status`, `/replay/runs` | viewer | current run, recent runs |
 | GET | `/live/status` | viewer | live input counters (datagrams, records, rejected exporters, malformed, rotations) |
+| GET | `/alerts/{id}/explanation` | viewer | why the alert fired: rule, observed values against thresholds, context, benign causes to rule out, caveats |
+| GET | `/alerts/{id}/verdict`, `/feedback/verdicts`, `/feedback/summary`, `/suppressions` | viewer | verdicts; reviewed precision per detector and class; suppression rules |
+| PUT, DELETE | `/alerts/{id}/verdict` | analyst | record or clear a verdict (true positive / benign true positive / false positive, with a note) |
+| GET | `/feedback/export` | analyst | labelled alerts as CSV or JSON lines |
+| POST, PATCH | `/suppressions`, `/suppressions/{id}` | analyst | create an expiring suppression rule (class + source/destination) / switch it on or off |
+| DELETE | `/suppressions/{id}` | admin | delete a suppression rule |
 | GET | `/system/architecture`, `/benchmark/latest`, `/evaluation/latest` | viewer | stage, detector, model, output, intel and safety status; measured reports |
 | GET | `/system/assets` | viewer | asset inventory, effective role policies, what they downgraded or suppressed |
 | GET | `/learning/latest` | viewer | suggested site thresholds and report from the last learning run |
@@ -327,7 +352,9 @@ destination is refused at config load, at send time and at socket level.
 | GET, POST, PATCH, DELETE | `/users`, `/users/{name}` | admin (session) | user management |
 | GET | `/audit` | admin | audit log (filters, pagination) |
 
-Roles: viewer < analyst < admin (analyst currently reads like a viewer).
+Roles: viewer < analyst < admin. Analysts record verdicts, create and switch
+suppression rules and export labels; administrators also run analyses,
+delete data and manage accounts.
 Browsers authenticate with the session cookie and send `X-CSRF-Token` on
 state-changing requests; automation sends a service token in `X-API-Key`
 (`unishield-admin token create --name siem --role viewer`). Every route

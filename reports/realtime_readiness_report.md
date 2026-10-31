@@ -595,3 +595,15 @@ Rerun of the public-dataset evaluation: 47 new alerts, 45 on attack hosts. CIC-I
 | Demo feed | `scripts/demo_live_feed.py` sends synthetic scenarios as v5/IPFIX to a loopback collector (refuses other destinations) or writes Zeek JSON logs. | port_scan detected over v5 and IPFIX; dns_tunnel detected over Zeek follow |
 
 Not done: no real exporter or Zeek sensor has been used; latency on live inputs is unmeasured; NetFlow v9/IPFIX options templates (sampling rate) are ignored.
+
+### Analyst feedback and explanations (2026-10-31)
+
+| Item | Change | Evidence |
+|---|---|---|
+| Explanations | `explain.py`: per threat class, the rule in plain words, observed values against the thresholds recorded in the evidence, threat-intel and asset context, benign causes to rule out, caveats (encrypted content not decrypted, spoofable flood sources, model trained on synthetic data). Missing evidence is skipped, never guessed. `GET /alerts/{id}/explanation`. | `tests/unit/test_feedback.py` (every scenario alert of every class explained) |
+| Verdicts | `storage/feedback.py` + migration `0006_analyst_feedback`: one verdict per alert (true / benign true / false positive, note, analyst), deleted with the alert; reviewed precision per detector and class; labelled export (CSV, JSON lines). | `tests/unit/test_feedback.py` |
+| Suppression rules | Threat class + source/destination (IP, CIDR or address hash), optional detector, reason, expiry (at most 90 days by default). Matching alerts are stored with `suppressed_by`, hidden by default (`/alerts?suppressed=`), excluded from summaries and outputs; threat-intel matches are never suppressed. | `tests/unit/test_feedback.py` |
+| Roles and audit | The analyst role now has its own actions (verdicts, rules, label export); deleting a rule needs an administrator. All changes audited. | route-guard tests, `tests/security/test_api_security.py` |
+| Dashboard | "Why it fired" and verdict controls in the alert details, "Suppress similar", suppression-rule table, verdict column and suppressed filter in the feed, analyst-review card on the benchmark tab. | checked in the browser against a local test server |
+
+Not done: verdicts are not yet fed back automatically into thresholds or model training; the reviewed precision is biased towards the alerts analysts chose to review.

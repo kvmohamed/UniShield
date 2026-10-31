@@ -111,8 +111,8 @@ sudo -u unishield .venv/bin/unishield-admin user create alice --role admin
 | Role | Can |
 |---|---|
 | viewer | read every data endpoint and the dashboard |
-| analyst | everything a viewer can; reserved for alert feedback and annotations (no analyst-only endpoint exists yet) |
-| admin | start/stop replays and demos, delete alerts, manage users, read the audit log |
+| analyst | everything a viewer can; record verdicts on alerts, create and switch suppression rules, export labelled alerts |
+| admin | everything an analyst can; start/stop replays, demos and live inputs, delete alerts and suppression rules, manage users, read the audit log |
 
 Administrators manage further users in the dashboard (Admin tab) or with
 `unishield-admin user list | set-role | set-password | disable | enable |

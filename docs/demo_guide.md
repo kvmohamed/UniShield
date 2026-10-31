@@ -80,6 +80,14 @@ pytest                       # unit, integration and security tests
 pytest -m performance        # performance targets on this machine
 ```
 
+## 5. Analyst review
+
+Open an alert in "Alerts & timeline": "Why it fired" lists the observed
+values against the thresholds and the benign causes to rule out. Sign in as
+an analyst to record a verdict or "Suppress similar" (with a reason and an
+expiry), run the same demo again and switch the feed to "Only suppressed".
+The benchmark tab shows the reviewed precision per detector.
+
 ## Talking points
 
 - Detection is metadata only; TLS is never decrypted.
