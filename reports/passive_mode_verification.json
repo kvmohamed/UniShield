@@ -1,6 +1,6 @@
 {
   "passed": true,
-  "files_scanned": 121,
+  "files_scanned": 129,
   "static_findings": [],
   "scoped_allowance": {
     "module": "unishield/export/transport.py",
@@ -91,6 +91,21 @@
       }
     ]
   },
+  "receive_only_allowance": {
+    "module": "unishield/ingest/collector.py",
+    "allowed_imports": [
+      "socket"
+    ],
+    "allowed_calls": [],
+    "occurrences": [
+      {
+        "file": "unishield/ingest/collector.py",
+        "line": 23,
+        "kind": "import",
+        "name": "socket"
+      }
+    ]
+  },
   "runtime_attempts": [],
   "runtime_exercised": [
     "pipeline:pcap:pcap (with threat intel)",
@@ -111,9 +126,12 @@
     "pipeline:scenario:exfil_episodes (0 INTEL_MATCH alerts from the sample indicators)",
     "pipeline:scenario:dga (0 INTEL_MATCH alerts from the sample indicators)",
     "pipeline:scenario:dns_tunnel (0 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:ssh_bruteforce (0 INTEL_MATCH alerts from the sample indicators)",
+    "pipeline:scenario:spam_bot (0 INTEL_MATCH alerts from the sample indicators)",
     "pipeline:scenario:encrypted_anomaly (1 INTEL_MATCH alerts from the sample indicators)",
     "pipeline:scenario:beacon_60s (2 INTEL_MATCH alerts from the sample indicators)",
     "readers, pipeline and detectors: 0 socket operations of any kind (loopback refused too)",
+    "live:flow_export collector (receive-only): 3 datagrams, 70 records, 1 alerts; socket methods used: bind, close, getsockname, recvfrom, setsockopt, settimeout; 0 real socket operations of any kind (loopback refused too)",
     "api:/auth/login:200",
     "api:/replay/demo:completed",
     "api:/health",
@@ -128,40 +146,40 @@
     "api:/audit",
     "api:/system/assets",
     "loopback socket operations allowed (event-loop internals): 103",
-    "outbound:syslog/udp \u2192 127.0.0.1:56679 (allow-listed): 4 messages",
-    "outbound:syslog/tcp \u2192 127.0.0.1:55873 (allow-listed): 4 messages",
-    "outbound:email \u2192 127.0.0.1:55874 (allow-listed): 1 message(s)",
-    "outbound:webhook \u2192 http://127.0.0.1:55875 (allow-listed): 1 message(s)",
+    "outbound:syslog/udp \u2192 127.0.0.1:56769 (allow-listed): 4 messages",
+    "outbound:syslog/tcp \u2192 127.0.0.1:58919 (allow-listed): 4 messages",
+    "outbound:email \u2192 127.0.0.1:58920 (allow-listed): 1 message(s)",
+    "outbound:webhook \u2192 http://127.0.0.1:58921 (allow-listed): 1 message(s)",
     "export files (local): 3 alerts written to 4 rotating files"
   ],
   "runtime_outbound_allowed": [
-    "socket.sendto(('127.0.0.1', 56679))",
-    "socket.sendto(('127.0.0.1', 56679))",
-    "socket.sendto(('127.0.0.1', 56679))",
-    "socket.sendto(('127.0.0.1', 56679))",
-    "socket.create_connection(('127.0.0.1', 55873))",
+    "socket.sendto(('127.0.0.1', 56769))",
+    "socket.sendto(('127.0.0.1', 56769))",
+    "socket.sendto(('127.0.0.1', 56769))",
+    "socket.sendto(('127.0.0.1', 56769))",
+    "socket.create_connection(('127.0.0.1', 58919))",
     "socket.getaddrinfo('127.0.0.1')",
-    "socket.connect(('127.0.0.1', 55873))",
-    "socket.sendall(('127.0.0.1', 55873))",
-    "socket.create_connection(('127.0.0.1', 55874))",
+    "socket.connect(('127.0.0.1', 58919))",
+    "socket.sendall(('127.0.0.1', 58919))",
+    "socket.create_connection(('127.0.0.1', 58920))",
     "socket.getaddrinfo('127.0.0.1')",
-    "socket.connect(('127.0.0.1', 55874))",
-    "socket.sendall(('127.0.0.1', 55874))",
-    "socket.sendall(('127.0.0.1', 55874))",
-    "socket.sendall(('127.0.0.1', 55874))",
-    "socket.sendall(('127.0.0.1', 55874))",
-    "socket.sendall(('127.0.0.1', 55874))",
-    "socket.sendall(('127.0.0.1', 55874))",
-    "socket.create_connection(('127.0.0.1', 55875))",
+    "socket.connect(('127.0.0.1', 58920))",
+    "socket.sendall(('127.0.0.1', 58920))",
+    "socket.sendall(('127.0.0.1', 58920))",
+    "socket.sendall(('127.0.0.1', 58920))",
+    "socket.sendall(('127.0.0.1', 58920))",
+    "socket.sendall(('127.0.0.1', 58920))",
+    "socket.sendall(('127.0.0.1', 58920))",
+    "socket.create_connection(('127.0.0.1', 58921))",
     "socket.getaddrinfo('127.0.0.1')",
-    "socket.connect(('127.0.0.1', 55875))",
-    "socket.sendall(('127.0.0.1', 55875))",
-    "socket.sendall(('127.0.0.1', 55875))"
+    "socket.connect(('127.0.0.1', 58921))",
+    "socket.sendall(('127.0.0.1', 58921))",
+    "socket.sendall(('127.0.0.1', 58921))"
   ],
   "runtime_expected_refusals": [
     "config load: syslog destination 10.0.0.5 refused (inside network.home_networks)",
     "send time: delivery to 10.0.0.5 refused by the destination policy before any socket use",
     "socket level: with the policy check bypassed, the tripwire refused sendto(10.0.0.5, 514)"
   ],
-  "generated_at": "2026-10-28T18:44:29+00:00"
+  "generated_at": "2026-10-31T12:05:17+00:00"
 }

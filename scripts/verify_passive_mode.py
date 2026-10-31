@@ -21,7 +21,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from unishield.evaluation.passive import render_markdown, verify
+from unishield.evaluation.passive import RECEIVE_ONLY_MODULE, render_markdown, verify
 
 
 def main() -> int:
@@ -37,8 +37,10 @@ def main() -> int:
         json.dumps(dict(report.to_dict(), generated_at=generated), indent=2), encoding="utf-8")
     (args.out / "passive_mode_verification.md").write_text(render_markdown(report, generated), encoding="utf-8")
 
+    receive_only = sum(1 for f in report.scoped_allowances if f.file == RECEIVE_ONLY_MODULE)
     print(f"Static scan: {report.files_scanned} modules, {len(report.static_findings)} findings, "
-          f"{len(report.scoped_allowances)} scoped allowances in the outbound transport")
+          f"{len(report.scoped_allowances) - receive_only} scoped allowances in the outbound transport, "
+          f"{receive_only} in the receive-only collector")
     for f in report.static_findings:
         print(f"  {f.file}:{f.line} {f.kind} {f.name}")
     print(f"Runtime: {len(report.runtime_exercised)} paths exercised, "

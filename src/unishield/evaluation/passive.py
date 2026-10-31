@@ -16,6 +16,10 @@ Static (AST) scan of every module under ``src/unishield``:
       and call connect/create_connection/sendto/sendall. Every allowed
       occurrence is listed in the report; anything else in that file (and
       the same names anywhere else) is still a finding.
+    - receive-only allowance: ``unishield/ingest/collector.py`` (the
+      NetFlow/IPFIX collector) may import socket to bind and receive. It has
+      no allowed calls: connect, send or any other forbidden name in it is a
+      finding like anywhere else.
 
 Runtime tripwire: socket connect/send/DNS-resolution functions and scapy's
 send and capture functions are replaced by functions that record the
@@ -58,7 +62,7 @@ FORBIDDEN_CALLS = {
     "send", "sendp", "sendpfast", "sr", "sr1", "srp", "srp1", "srloop", "srploop", "sniff", "AsyncSniffer",
     "traceroute", "arping", "send_raw",
     # sockets and HTTP
-    "connect", "connect_ex", "sendto", "sendall", "create_connection", "urlopen",
+    "connect", "connect_ex", "sendto", "sendall", "sendmsg", "create_connection", "urlopen",
     # processes
     "system", "popen", "Popen", "spawnl", "execv", "execve",
 }
@@ -71,6 +75,11 @@ ALLOWED_DOTTED_CALLS = {"self.engine.connect", "engine.connect"}
 OUTBOUND_MODULE = "unishield/export/transport.py"
 OUTBOUND_ALLOWED_IMPORTS = {"socket", "ssl", "smtplib", "http.client"}
 OUTBOUND_ALLOWED_CALLS = {"connect", "create_connection", "sendto", "sendall"}
+
+# The one module allowed to listen (bind + recvfrom) for flow exports; it may
+# import socket and nothing it calls may send or connect.
+RECEIVE_ONLY_MODULE = "unishield/ingest/collector.py"
+RECEIVE_ONLY_ALLOWED_IMPORTS = {"socket"}
 
 
 @dataclass
@@ -104,7 +113,13 @@ class PassiveReport:
                 "module": OUTBOUND_MODULE,
                 "allowed_imports": sorted(OUTBOUND_ALLOWED_IMPORTS),
                 "allowed_calls": sorted(OUTBOUND_ALLOWED_CALLS),
-                "occurrences": [f.__dict__ for f in self.scoped_allowances],
+                "occurrences": [f.__dict__ for f in self.scoped_allowances if f.file == OUTBOUND_MODULE],
+            },
+            "receive_only_allowance": {
+                "module": RECEIVE_ONLY_MODULE,
+                "allowed_imports": sorted(RECEIVE_ONLY_ALLOWED_IMPORTS),
+                "allowed_calls": [],
+                "occurrences": [f.__dict__ for f in self.scoped_allowances if f.file == RECEIVE_ONLY_MODULE],
             },
             "runtime_attempts": self.runtime_attempts,
             "runtime_exercised": self.runtime_exercised,
@@ -133,7 +148,7 @@ def _call_name(node: ast.Call) -> tuple[str | None, str | None]:
 
 
 def scan_with_allowances(root: Path | None = None) -> tuple[list[StaticFinding], list[StaticFinding], int]:
-    """(findings, scoped allowances used by the outbound transport, files scanned)."""
+    """(findings, scoped allowances used by the transport and the collector, files scanned)."""
     import unishield
 
     root = root or Path(unishield.__file__).parent
@@ -143,6 +158,7 @@ def scan_with_allowances(root: Path | None = None) -> tuple[list[StaticFinding],
     for path in files:
         rel = path.relative_to(root.parent).as_posix()
         outbound = rel == OUTBOUND_MODULE
+        receive_only = rel == RECEIVE_ONLY_MODULE
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
         def report(kind: str, name: str, line: int, allowed: bool) -> None:
@@ -154,6 +170,8 @@ def scan_with_allowances(root: Path | None = None) -> tuple[list[StaticFinding],
                     if alias.name in FORBIDDEN_MODULES or alias.name.split(".")[0] in FORBIDDEN_MODULES:
                         report("import", alias.name, node.lineno, outbound and alias.name in OUTBOUND_ALLOWED_IMPORTS)
                     elif outbound and alias.name == "socket":
+                        report("import", alias.name, node.lineno, True)
+                    elif receive_only and alias.name in RECEIVE_ONLY_ALLOWED_IMPORTS:
                         report("import", alias.name, node.lineno, True)
             elif isinstance(node, ast.ImportFrom) and node.module:
                 if node.module in FORBIDDEN_MODULES or node.module.split(".")[0] in FORBIDDEN_MODULES:
@@ -404,6 +422,102 @@ def runtime_check() -> tuple[list[str], list[str]]:
     return attempts, exercised
 
 
+class _ReceiveOnlySocket:
+    """
+    Stand-in UDP socket for the collector check: hands out queued datagrams
+    and records every method the collector calls. Only setsockopt, bind,
+    settimeout, getsockname, recvfrom and close exist; anything else
+    (connect, send...) is recorded as an attempt and refused.
+    """
+
+    ALLOWED = ("setsockopt", "bind", "settimeout", "getsockname", "recvfrom", "close")
+
+    def __init__(self, datagrams: list[bytes], exporter: str, attempts: list[str]):
+        self._queue = list(datagrams)
+        self._exporter = exporter
+        self._attempts = attempts
+        self._address = ("127.0.0.1", 0)
+        self.calls: set[str] = set()
+
+    def __getattr__(self, name: str):
+        self._attempts.append(f"collector socket: {name} called (only {', '.join(self.ALLOWED)} exist)")
+        raise PermissionError(f"receive-only socket: {name}")
+
+    def setsockopt(self, *args):
+        self.calls.add("setsockopt")
+
+    def bind(self, address):
+        self.calls.add("bind")
+        self._address = address
+
+    def settimeout(self, value):
+        self.calls.add("settimeout")
+
+    def getsockname(self):
+        self.calls.add("getsockname")
+        return self._address
+
+    def recvfrom(self, size):
+        self.calls.add("recvfrom")
+        if not self._queue:
+            raise socket.timeout()
+        return self._queue.pop(0)[:size], (self._exporter, 2055)
+
+    def close(self):
+        self.calls.add("close")
+
+
+def _collector_check() -> tuple[list[str], str]:
+    """
+    Run the receive-only collector under a strict tripwire (loopback refused).
+
+    The collector gets a stand-in socket holding NetFlow v5 and IPFIX
+    datagrams (no sender in UniShield's code is needed); any socket method
+    other than setsockopt/bind/settimeout/getsockname/recvfrom/close, and any real
+    socket send, connect or name lookup, is recorded. tests/ingest checks
+    the same collector on a real loopback UDP socket.
+    """
+    import threading
+    from datetime import datetime, timedelta, timezone
+
+    from unishield.data.flow_export_samples import encode_ipfix, encode_v5
+    from unishield.ingest.collector import FlowExportCollector
+    from unishield.processing.pipeline import Pipeline
+    from unishield.schemas.flow import InputSource, NormalisedFlow, ProtocolType
+
+    start = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    flows = [NormalisedFlow(timestamp=start + timedelta(seconds=i / 10), source_ip="10.0.0.5",
+                            destination_ip=f"10.0.1.{i % 250 + 1}", source_port=40000 + i, destination_port=22,
+                            protocol=ProtocolType.TCP, duration=0.01, byte_count=60, packet_count=1,
+                            tcp_flags="SYN", source_type=InputSource.FLOW_EXPORT)
+             for i in range(70)]
+    datagrams = [encode_v5(flows[i:i + 30], start + timedelta(minutes=2), sequence=i) for i in range(0, 60, 30)]
+    datagrams.append(encode_ipfix(flows[60:], start + timedelta(minutes=2), biflow=True))
+    attempts: list[str] = []
+    sockets: list[_ReceiveOnlySocket] = []
+
+    def factory(*_args):
+        sockets.append(_ReceiveOnlySocket(datagrams, "192.0.2.1", attempts))
+        return sockets[-1]
+
+    collector = FlowExportCollector("127.0.0.1", 2055, tick_interval=0.2, socket_factory=factory)
+    timer = threading.Timer(1.0, collector.stop)
+    with _Tripwire(allow_loopback=False) as wire:
+        timer.start()
+        try:
+            result = Pipeline().run(collector)
+        finally:
+            timer.cancel()
+            collector.stop()
+            collector.close()
+    stats = collector.stats()
+    used = sorted(set().union(*(s.calls for s in sockets))) if sockets else []
+    note = (f"live:flow_export collector (receive-only): {stats['datagrams']} datagrams, {stats['records']} "
+            f"records, {len(result.alerts)} alerts; socket methods used: {', '.join(used) or 'none'}; "
+            f"{wire.loopback_calls} real socket operations of any kind (loopback refused too)")
+    return attempts + list(wire.attempts), note
+
+
 def runtime_check_detailed() -> tuple[list[str], list[str], list[str], list[str]]:
     """(attempts, exercised paths, allowed outbound socket calls, expected refusals)."""
     from fastapi.testclient import TestClient
@@ -443,6 +557,9 @@ def runtime_check_detailed() -> tuple[list[str], list[str], list[str], list[str]
         attempts = list(strict.attempts)
         exercised.append(f"readers, pipeline and detectors: {strict.loopback_calls} socket operations of any kind "
                          "(loopback refused too)")
+        collector_attempts, collector_note = _collector_check()
+        attempts += collector_attempts
+        exercised.append(collector_note)
         with _Tripwire() as wire:
             app = create_app(AlertRepository.from_url("sqlite://"))
             password = secrets.token_urlsafe(18)
@@ -506,9 +623,20 @@ def render_markdown(report: PassiveReport, generated_at: str) -> str:
               "destination against the policy before resolving or connecting and connects only to the checked "
               "address. Any other forbidden name in that file, or any of these names elsewhere, is a finding. "
               "Allowed occurrences:", ""]
-    if report.scoped_allowances:
+    transport = [f for f in report.scoped_allowances if f.file == OUTBOUND_MODULE]
+    if transport:
         lines += ["| Line | Kind | Name |", "|---|---|---|"]
-        lines += [f"| {f.line} | {f.kind} | `{f.name}` |" for f in report.scoped_allowances]
+        lines += [f"| {f.line} | {f.kind} | `{f.name}` |" for f in transport]
+    else:
+        lines.append("None.")
+    receive = [f for f in report.scoped_allowances if f.file == RECEIVE_ONLY_MODULE]
+    lines += ["", "### Receive-only allowance: the flow-export collector", "",
+              f"`{RECEIVE_ONLY_MODULE}` may import `socket` to bind a UDP socket and receive NetFlow/IPFIX "
+              "datagrams. No call is allowed in it: connect, send or any other forbidden name there is a finding. "
+              "Allowed occurrences:", ""]
+    if receive:
+        lines += ["| Line | Kind | Name |", "|---|---|---|"]
+        lines += [f"| {f.line} | {f.kind} | `{f.name}` |" for f in receive]
     else:
         lines.append("None.")
     lines += ["", "## Runtime tripwire", "",

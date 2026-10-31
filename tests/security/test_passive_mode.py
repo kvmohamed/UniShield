@@ -12,6 +12,7 @@ import pytest
 
 from unishield.evaluation.passive import (
     OUTBOUND_MODULE,
+    RECEIVE_ONLY_MODULE,
     _PolicyBypass,
     _Tripwire,
     runtime_check_detailed,
@@ -56,11 +57,34 @@ def test_unishield_source_has_no_active_capabilities():
     assert findings == [], findings
 
 
-def test_only_the_outbound_transport_has_the_scoped_allowance():
+def test_only_the_transport_and_the_collector_have_scoped_allowances():
     findings, allowances, _ = scan_with_allowances()
     assert findings == []
-    assert allowances and {a.file for a in allowances} == {OUTBOUND_MODULE}
-    assert {a.name for a in allowances if a.kind == "import"} == {"socket", "ssl", "smtplib", "http.client"}
+    assert {a.file for a in allowances} == {OUTBOUND_MODULE, RECEIVE_ONLY_MODULE}
+    transport = {a.name for a in allowances if a.file == OUTBOUND_MODULE and a.kind == "import"}
+    assert transport == {"socket", "ssl", "smtplib", "http.client"}
+    assert [(a.kind, a.name) for a in allowances if a.file == RECEIVE_ONLY_MODULE] == [("import", "socket")]
+
+
+COLLECTOR_LIKE = """
+import socket
+
+def listen(port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("0.0.0.0", port))
+    data, addr = sock.recvfrom(65535)
+    sock.sendto(b"ack", addr)
+    sock.connect(addr)
+"""
+
+
+def test_receive_only_allowance_covers_the_import_and_nothing_it_could_send_with(tmp_path):
+    pkg = tmp_path / "unishield"
+    (pkg / "ingest").mkdir(parents=True)
+    (pkg / "ingest" / "collector.py").write_text(COLLECTOR_LIKE, encoding="utf-8")
+    findings, allowances, _ = scan_with_allowances(pkg)
+    assert {f.name for f in findings} == {"sock.sendto", "sock.connect"}     # a reply or a connect is a finding
+    assert [a.name for a in allowances] == ["socket"]
 
 
 TRANSPORT_LIKE = """

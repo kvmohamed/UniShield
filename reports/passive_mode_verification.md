@@ -1,6 +1,6 @@
 # UniShield — Passive-Mode Verification
 
-Generated 2026-10-28T18:44:29+00:00 by `scripts/verify_passive_mode.py`.
+Generated 2026-10-31T12:05:17+00:00 by `scripts/verify_passive_mode.py`.
 
 **Result: PASSED**
 
@@ -8,7 +8,7 @@ UniShield never sends anything into the monitored network. Its only outbound pat
 
 ## Static scan
 
-121 Python modules under `src/unishield` were parsed. Forbidden imports: Crypto, aiohttp, asyncssh, cryptography, ftplib, http.client, httpx, nmap, paramiko, pexpect, requests, smtplib, ssl, subprocess, telnetlib, urllib.request. Forbidden calls: AsyncSniffer, Popen, arping, connect, connect_ex, create_connection, execv, execve, popen, send, send_raw, sendall, sendp, sendpfast, sendto, sniff, spawnl, sr, sr1, srloop, srp, srp1, srploop, system, traceroute, urlopen (allowed: engine.connect, self.engine.connect — the local alert database).
+129 Python modules under `src/unishield` were parsed. Forbidden imports: Crypto, aiohttp, asyncssh, cryptography, ftplib, http.client, httpx, nmap, paramiko, pexpect, requests, smtplib, ssl, subprocess, telnetlib, urllib.request. Forbidden calls: AsyncSniffer, Popen, arping, connect, connect_ex, create_connection, execv, execve, popen, send, send_raw, sendall, sendmsg, sendp, sendpfast, sendto, sniff, spawnl, sr, sr1, srloop, srp, srp1, srploop, system, traceroute, urlopen (allowed: engine.connect, self.engine.connect — the local alert database).
 
 No findings.
 
@@ -30,6 +30,14 @@ No findings.
 | 167 | call | `smtp.connect` |
 | 187 | call | `socket.create_connection` |
 | 197 | call | `socket.create_connection` |
+
+### Receive-only allowance: the flow-export collector
+
+`unishield/ingest/collector.py` may import `socket` to bind a UDP socket and receive NetFlow/IPFIX datagrams. No call is allowed in it: connect, send or any other forbidden name there is a finding. Allowed occurrences:
+
+| Line | Kind | Name |
+|---|---|---|
+| 23 | import | `socket` |
 
 ## Runtime tripwire
 
@@ -53,9 +61,12 @@ Socket connect/send and name-resolution functions and scapy's send/receive/sniff
 - pipeline:scenario:exfil_episodes (0 INTEL_MATCH alerts from the sample indicators)
 - pipeline:scenario:dga (0 INTEL_MATCH alerts from the sample indicators)
 - pipeline:scenario:dns_tunnel (0 INTEL_MATCH alerts from the sample indicators)
+- pipeline:scenario:ssh_bruteforce (0 INTEL_MATCH alerts from the sample indicators)
+- pipeline:scenario:spam_bot (0 INTEL_MATCH alerts from the sample indicators)
 - pipeline:scenario:encrypted_anomaly (1 INTEL_MATCH alerts from the sample indicators)
 - pipeline:scenario:beacon_60s (2 INTEL_MATCH alerts from the sample indicators)
 - readers, pipeline and detectors: 0 socket operations of any kind (loopback refused too)
+- live:flow_export collector (receive-only): 3 datagrams, 70 records, 1 alerts; socket methods used: bind, close, getsockname, recvfrom, setsockopt, settimeout; 0 real socket operations of any kind (loopback refused too)
 - api:/auth/login:200
 - api:/replay/demo:completed
 - api:/health
@@ -70,10 +81,10 @@ Socket connect/send and name-resolution functions and scapy's send/receive/sniff
 - api:/audit
 - api:/system/assets
 - loopback socket operations allowed (event-loop internals): 103
-- outbound:syslog/udp → 127.0.0.1:56679 (allow-listed): 4 messages
-- outbound:syslog/tcp → 127.0.0.1:55873 (allow-listed): 4 messages
-- outbound:email → 127.0.0.1:55874 (allow-listed): 1 message(s)
-- outbound:webhook → http://127.0.0.1:55875 (allow-listed): 1 message(s)
+- outbound:syslog/udp → 127.0.0.1:56769 (allow-listed): 4 messages
+- outbound:syslog/tcp → 127.0.0.1:58919 (allow-listed): 4 messages
+- outbound:email → 127.0.0.1:58920 (allow-listed): 1 message(s)
+- outbound:webhook → http://127.0.0.1:58921 (allow-listed): 1 message(s)
 - export files (local): 3 alerts written to 4 rotating files
 
 Outbound socket operations allowed for the transport (loopback receivers standing in for the analyst-side SIEM, mail relay and webhook):
