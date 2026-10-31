@@ -81,8 +81,8 @@ window closed), peak RSS and CPU. Targets: ≥ 1,000 records/s and P95 alert
 latency < 2 s after the window closes, in every run. A separate measurement
 covers the PCAP path (scapy parsing + sessionization + detection).
 
-Result on the development machine: 25,829 records/s mean (min 25,214);
-alert-latency P95 51.8 ms mean (max 55.0); PCAP path 3,881 packets/s.
+Result on the development machine (re-measured 2026-10-31 on the final code): 23,696 records/s mean (min 21,776);
+alert-latency P95 63.5 ms mean (max 73.5); PCAP path 3,856 packets/s.
 `pytest -m performance` checks the same targets on smaller workloads.
 
 ## 4. Real-time verification
@@ -92,7 +92,7 @@ through the real pipeline (5 runs) while the real API is polled every 0.1 s
 through an in-process client. Per alert it measures the window-close delay
 (window end in replayed time → window closed), processing (closed → stored),
 API visibility (stored → first returned) and end to end (window end →
-visible). Result: median end to end 90.5 ms of wall time, max 218 ms, all 27
+visible). Result: median end to end 97.9 ms of wall time, max 175 ms, all 27
 alerts seen. In traffic time an alert follows its activity by at most one
 window length plus the close delay; evidence-accumulating detectors take
 longer by design.

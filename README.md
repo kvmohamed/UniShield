@@ -173,17 +173,17 @@ the default `rules` mode and no other rule class (`reports/demo_detection.json`;
 
 | Measure | Mean | Min | Max |
 |---|---|---|---|
-| Throughput, records/s (target ≥ 1,000) | 25,829 | 25,214 | 26,480 |
-| P95 alert latency after window close, ms (target < 2,000) | 51.8 | 50.0 | 55.0 |
-| Window processing P95, ms | 13.5 | 13.2 | 14.2 |
-| Peak resident memory, MB | 131 | 125 | 137 |
-| PCAP path (scapy parsing + sessionizer), packets/s | 3,881 | 3,721 | 3,963 |
+| Throughput, records/s (target ≥ 1,000) | 23,696 | 21,776 | 24,410 |
+| P95 alert latency after window close, ms (target < 2,000) | 63.5 | 51.0 | 73.5 |
+| Window processing P95, ms | 14.5 | 14.3 | 14.6 |
+| Peak resident memory, MB | 144 | 138 | 148 |
+| PCAP path (scapy parsing + sessionizer), packets/s | 3,856 | 3,756 | 3,915 |
 
 **Real-time replay** (`reports/realtime_verdict.md`, 5 paced replays at 20×,
 API polled every 0.1 s): from the end of an alert's window in replayed time to
-the alert being returned by the API took a median of 90.5 ms of wall time
-(max 218 ms; per-run P95 mean 110 ms), of which window-close wait 40 ms,
-detection + storage 26 ms and API polling 16 ms (medians). All 27 alerts
+the alert being returned by the API took a median of 97.9 ms of wall time
+(max 175 ms; per-run P95 mean 105 ms), of which window-close wait 40 ms,
+detection + storage 40 ms and API polling 10 ms (medians). All 27 alerts
 reached the API. Classification: near-real-time event-time processing of
 replayed traffic — not a live capture sensor.
 

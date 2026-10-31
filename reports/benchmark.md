@@ -1,6 +1,6 @@
 # UniShield — Pipeline Benchmark
 
-Generated 2026-10-21T19:10:43+00:00 by `scripts/benchmark_pipeline.py`.
+Generated 2026-10-31T11:20:03+00:00 by `scripts/benchmark_pipeline.py`.
 
 - Machine: Windows-10-10.0.19045-SP0, AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD, 12 logical CPUs, 7.4 GB RAM
 - Python 3.12.10
@@ -11,30 +11,30 @@ Generated 2026-10-21T19:10:43+00:00 by `scripts/benchmark_pipeline.py`.
 
 | Measure | Mean | Median | SD | Min | Max |
 |---|---|---|---|---|---|
-| Throughput (records/s) | 25828.8 | 25824.2 | 489.062 | 25213.6 | 26480.0 |
-| Window processing P95 (ms) | 13.476 | 13.294 | 0.406 | 13.174 | 14.158 |
-| Alert latency after window close, P95 (ms) | 51.832 | 51.11 | 1.914 | 50.015 | 55.013 |
-| Peak resident memory (MB) | 131.08 | 131.7 | 4.595 | 125.1 | 137.2 |
-| CPU (% of one core) | 99.98 | 99.8 | 0.626 | 99.2 | 100.8 |
+| Throughput (records/s) | 23696.06 | 24155.4 | 1101.407 | 21775.6 | 24410.4 |
+| Window processing P95 (ms) | 14.49 | 14.513 | 0.085 | 14.348 | 14.572 |
+| Alert latency after window close, P95 (ms) | 63.518 | 62.015 | 9.549 | 51.012 | 73.52 |
+| Peak resident memory (MB) | 143.68 | 143.5 | 4.128 | 138.4 | 148.5 |
+| CPU (% of one core) | 100.24 | 100.4 | 0.783 | 99.0 | 101.1 |
 
 ## Targets
 
-- Met: >= 1000 records/s in every run (worst run: 25213.6)
-- Met: P95 alert latency after window close < 2000 ms in every run (worst run: 55.013)
+- Met: >= 1000 records/s in every run (worst run: 21775.6)
+- Met: P95 alert latency after window close < 2000 ms in every run (worst run: 73.52)
 
 ## Per run
 
 | Seed | Records | Windows | Alerts | Wall (s) | Records/s | Window P95 (ms) | Alert latency P95 (ms) | Peak RSS (MB) |
 |---|---|---|---|---|---|---|---|---|
-| 1000 | 19,610 | 453 | 12 | 0.7406 | 26,480.0 | 13.219 | 51.11 | 125.1 |
-| 1001 | 19,610 | 464 | 12 | 0.7516 | 26,090.3 | 13.174 | 50.015 | 128.4 |
-| 1002 | 19,610 | 446 | 12 | 0.7594 | 25,824.2 | 14.158 | 55.013 | 131.7 |
-| 1003 | 19,610 | 468 | 13 | 0.7679 | 25,535.9 | 13.294 | 51.012 | 133.0 |
-| 1004 | 19,610 | 456 | 12 | 0.7778 | 25,213.6 | 13.536 | 52.012 | 137.2 |
+| 1000 | 19,610 | 453 | 12 | 0.8051 | 24,355.9 | 14.572 | 51.012 | 138.4 |
+| 1001 | 19,610 | 464 | 12 | 0.8033 | 24,410.4 | 14.348 | 73.52 | 141.1 |
+| 1002 | 19,610 | 446 | 12 | 0.9006 | 21,775.6 | 14.488 | 62.015 | 143.5 |
+| 1003 | 19,610 | 468 | 13 | 0.8118 | 24,155.4 | 14.513 | 72.522 | 146.9 |
+| 1004 | 19,610 | 456 | 12 | 0.8245 | 23,783.0 | 14.53 | 58.522 | 148.5 |
 
 ## PCAP path
 
-Offline parsing of a written 10,000-packet SYN-flood capture with scapy, sessionization and detection (3 runs): mean 3,880.864 packets/s (median 3,958.563, min 3,721.045, max 3,962.982). Packet parsing in Python is the slowest stage; for high-rate captures, convert to Zeek logs first and replay those.
+Offline parsing of a written 10,000-packet SYN-flood capture with scapy, sessionization and detection (3 runs): mean 3,856.251 packets/s (median 3,897.313, min 3,756.353, max 3,915.088). Packet parsing in Python is the slowest stage; for high-rate captures, convert to Zeek logs first and replay those.
 
 ## Notes
 

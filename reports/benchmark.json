@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-21T19:10:43+00:00",
+  "generated_at": "2026-10-31T11:20:03+00:00",
   "machine": {
     "platform": "Windows-10-10.0.19045-SP0",
     "python": "3.12.10",
@@ -25,20 +25,20 @@
         "DATA_EXFILTRATION": 4,
         "C2_BEACONING": 1
       },
-      "wall_seconds": 0.7406,
-      "records_per_second": 26480.0,
+      "wall_seconds": 0.8051,
+      "records_per_second": 24355.9,
       "window_processing_ms": {
-        "p50": 0.235,
-        "p95": 13.219,
-        "max": 58.185
+        "p50": 0.269,
+        "p95": 14.572,
+        "max": 66.378
       },
       "alert_latency_after_close_ms": {
-        "p50": 20.004,
-        "p95": 51.11,
-        "max": 51.11
+        "p50": 21.508,
+        "p95": 51.012,
+        "max": 51.012
       },
-      "peak_rss_mb": 125.1,
-      "cpu_percent_of_one_core": 99.2,
+      "peak_rss_mb": 138.4,
+      "cpu_percent_of_one_core": 99.0,
       "errors": 0,
       "seed": 1000
     },
@@ -56,20 +56,20 @@
         "DATA_EXFILTRATION": 4,
         "C2_BEACONING": 1
       },
-      "wall_seconds": 0.7516,
-      "records_per_second": 26090.3,
+      "wall_seconds": 0.8033,
+      "records_per_second": 24410.4,
       "window_processing_ms": {
-        "p50": 0.228,
-        "p95": 13.174,
-        "max": 61.252
+        "p50": 0.262,
+        "p95": 14.348,
+        "max": 73.284
       },
       "alert_latency_after_close_ms": {
-        "p50": 21.005,
-        "p95": 50.015,
-        "max": 50.015
+        "p50": 22.005,
+        "p95": 73.52,
+        "max": 73.52
       },
-      "peak_rss_mb": 128.4,
-      "cpu_percent_of_one_core": 99.8,
+      "peak_rss_mb": 141.1,
+      "cpu_percent_of_one_core": 101.1,
       "errors": 0,
       "seed": 1001
     },
@@ -87,20 +87,20 @@
         "DATA_EXFILTRATION": 4,
         "C2_BEACONING": 1
       },
-      "wall_seconds": 0.7594,
-      "records_per_second": 25824.2,
+      "wall_seconds": 0.9006,
+      "records_per_second": 21775.6,
       "window_processing_ms": {
-        "p50": 0.231,
-        "p95": 14.158,
-        "max": 65.031
+        "p50": 0.272,
+        "p95": 14.488,
+        "max": 121.472
       },
       "alert_latency_after_close_ms": {
-        "p50": 19.004,
-        "p95": 55.013,
-        "max": 55.013
+        "p50": 21.005,
+        "p95": 62.015,
+        "max": 62.015
       },
-      "peak_rss_mb": 131.7,
-      "cpu_percent_of_one_core": 100.8,
+      "peak_rss_mb": 143.5,
+      "cpu_percent_of_one_core": 100.6,
       "errors": 0,
       "seed": 1002
     },
@@ -118,20 +118,20 @@
         "DATA_EXFILTRATION": 4,
         "C2_BEACONING": 1
       },
-      "wall_seconds": 0.7679,
-      "records_per_second": 25535.9,
+      "wall_seconds": 0.8118,
+      "records_per_second": 24155.4,
       "window_processing_ms": {
-        "p50": 0.23,
-        "p95": 13.294,
-        "max": 63.032
+        "p50": 0.267,
+        "p95": 14.513,
+        "max": 72.267
       },
       "alert_latency_after_close_ms": {
-        "p50": 15.005,
-        "p95": 51.012,
-        "max": 51.012
+        "p50": 23.005,
+        "p95": 72.522,
+        "max": 72.522
       },
-      "peak_rss_mb": 133.0,
-      "cpu_percent_of_one_core": 99.7,
+      "peak_rss_mb": 146.9,
+      "cpu_percent_of_one_core": 100.1,
       "errors": 0,
       "seed": 1003
     },
@@ -149,19 +149,19 @@
         "DATA_EXFILTRATION": 4,
         "C2_BEACONING": 1
       },
-      "wall_seconds": 0.7778,
-      "records_per_second": 25213.6,
+      "wall_seconds": 0.8245,
+      "records_per_second": 23783.0,
       "window_processing_ms": {
-        "p50": 0.227,
-        "p95": 13.536,
-        "max": 65.275
+        "p50": 0.263,
+        "p95": 14.53,
+        "max": 72.417
       },
       "alert_latency_after_close_ms": {
         "p50": 21.005,
-        "p95": 52.012,
-        "max": 52.012
+        "p95": 58.522,
+        "max": 58.522
       },
-      "peak_rss_mb": 137.2,
+      "peak_rss_mb": 148.5,
       "cpu_percent_of_one_core": 100.4,
       "errors": 0,
       "seed": 1004
@@ -169,50 +169,50 @@
   ],
   "statistics": {
     "throughput_records_per_sec": {
-      "mean": 25828.8,
-      "median": 25824.2,
-      "stdev": 489.062,
-      "min": 25213.6,
-      "max": 26480.0
+      "mean": 23696.06,
+      "median": 24155.4,
+      "stdev": 1101.407,
+      "min": 21775.6,
+      "max": 24410.4
     },
     "window_processing_p95_ms": {
-      "mean": 13.476,
-      "median": 13.294,
-      "stdev": 0.406,
-      "min": 13.174,
-      "max": 14.158
+      "mean": 14.49,
+      "median": 14.513,
+      "stdev": 0.085,
+      "min": 14.348,
+      "max": 14.572
     },
     "alert_latency_after_close_p95_ms": {
-      "mean": 51.832,
-      "median": 51.11,
-      "stdev": 1.914,
-      "min": 50.015,
-      "max": 55.013
+      "mean": 63.518,
+      "median": 62.015,
+      "stdev": 9.549,
+      "min": 51.012,
+      "max": 73.52
     },
     "peak_rss_mb": {
-      "mean": 131.08,
-      "median": 131.7,
-      "stdev": 4.595,
-      "min": 125.1,
-      "max": 137.2
+      "mean": 143.68,
+      "median": 143.5,
+      "stdev": 4.128,
+      "min": 138.4,
+      "max": 148.5
     },
     "cpu_percent_of_one_core": {
-      "mean": 99.98,
-      "median": 99.8,
-      "stdev": 0.626,
-      "min": 99.2,
-      "max": 100.8
+      "mean": 100.24,
+      "median": 100.4,
+      "stdev": 0.783,
+      "min": 99.0,
+      "max": 101.1
     }
   },
   "pcap": {
     "packets": 10000,
     "runs": 3,
     "packets_per_second": {
-      "mean": 3880.864,
-      "median": 3958.563,
-      "stdev": 138.424,
-      "min": 3721.045,
-      "max": 3962.982
+      "mean": 3856.251,
+      "median": 3897.313,
+      "stdev": 86.97,
+      "min": 3756.353,
+      "max": 3915.088
     },
     "alerts_by_class": {
       "SYN_FLOOD": 1
@@ -221,12 +221,12 @@
   "targets": {
     "throughput": {
       "description": ">= 1000 records/s in every run",
-      "worst": 25213.6,
+      "worst": 21775.6,
       "met": true
     },
     "alert_latency": {
       "description": "P95 alert latency after window close < 2000 ms in every run",
-      "worst": 55.013,
+      "worst": 73.52,
       "met": true
     }
   }
