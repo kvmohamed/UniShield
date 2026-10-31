@@ -477,6 +477,9 @@ def render_markdown(report: dict[str, Any]) -> str:
             if wa.get("asset_actions"):
                 lines += ["", "Alerts changed by asset roles (action, class, role: count): "
                           + "; ".join(f"{k}: {v}" for k, v in wa["asset_actions"].items())]
+            else:
+                lines += ["", "No alert was changed by the inventory's roles: the listed roles (DNS resolver, "
+                          "server) only act on DNS-based alerts, and these flow records carry no DNS names."]
         lines += ["", "### Caveats", ""] + [f"- {c}" for c in ds.get("caveats", [])] + [""]
     return "\n".join(lines) + "\n"
 

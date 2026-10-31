@@ -252,6 +252,10 @@ What this shows:
   is now found (1/2 → 2/2, first alert after 116 s), and CTU-13 scenario 6's spam
   bot is reported after 491 s instead of 6,266 s. None fired on the attack-free
   Monday.
+- Adding an asset inventory (CIC-IDS2017's published DNS/domain controller and
+  servers; CTU-13's resolver) changed no result: its roles only act on
+  DNS-based alerts, and these flow records carry no DNS names. Inventories
+  matter where scanners, backup, monitoring or mail servers exist.
 - Remaining gaps: web attacks are invisible in flow metadata, bots with very
   few flows are missed, and the DDoS thresholds suit high-rate floods only.
 - The window model trained on synthetic data does not transfer (ROC-AUC 0.53

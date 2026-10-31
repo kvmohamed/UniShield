@@ -131,6 +131,8 @@ labelled public captures and scores:
   CTU-13 learns from the other four scenarios (leave one out), CIC-IDS2017
   learns once from Monday (attack-free) and is tested on the attack days. A
   file never influences its own thresholds.
+- **asset inventory** (`--assets-only`, adds columns to an existing report)
+  — default and tuned runs with `configs/evaluation/<dataset>_assets.yaml`.
 
 Results: default rules flag 18/23 CIC-IDS2017 and 8/15 CTU-13 attack hosts at
 host-level precision 0.07–0.35 and 0.01–0.05. Tuning on CIC-IDS2017's Monday

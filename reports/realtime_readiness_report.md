@@ -578,3 +578,7 @@ CIC-IDS2017 (8 files, 2,830,743 flows, 0 late drops; 288,602 empty rows in the w
 | Scenarios and labels | `ssh_bruteforce`, `spam_bot`; CIC-IDS2017 FTP-/SSH-Patator -> BRUTE_FORCE. | scenario check, 5 seeds each |
 
 Rerun of the public-dataset evaluation: 47 new alerts, 45 on attack hosts. CIC-IDS2017 Tuesday 1/2 -> 2/2 attack hosts (first alert 116 s); CTU-13 scenario 6 spam bot first alert 6,266 s -> 491 s; no new alerts on the attack-free Monday; 2 BRUTE_FORCE alerts on CTU-13 background hosts.
+
+### Asset-inventory comparison (2026-10-31)
+
+`evaluate_public_datasets.py --assets-only --site-tuning` with `configs/evaluation/cicids2017_assets.yaml` (DNS/domain controller 192.168.10.3, servers .50 and .51 from the dataset's published network description) and `configs/evaluation/ctu13_assets.yaml` (resolver 147.32.80.9 seen in the traffic): no alert changed on either dataset, default or tuned. The roles act only on DNS-based alerts and the flows carry no DNS names; the datasets contain no scanner, backup, monitoring or mail-server roles to list. Test: `tests/unit/test_public_eval.py::test_asset_inventory_is_applied_and_counted`.

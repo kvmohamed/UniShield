@@ -95,8 +95,12 @@
     very few flows are missed, and the DDoS thresholds suit high-rate floods
     only. The synthetic-trained window model does not transfer (ROC-AUC 0.53
     and 0.56). For evaluation, CIC-IDS2017 files were time-sorted and their
-    minute-resolution timestamps spread within each minute; the asset
-    inventory was not applied to either dataset.
+    minute-resolution timestamps spread within each minute. An asset
+    inventory of the servers an operator would know (CIC-IDS2017's published
+    DNS/domain controller and servers, CTU-13's resolver) changed no result,
+    because those roles act only on DNS-based alerts and the flows carry no
+    DNS names; neither dataset has scanners, backup, monitoring or mail
+    servers to list.
 13. **Calibration is distribution-specific.** Probabilities are calibrated on
     held-out runs of the same generator and may be miscalibrated elsewhere.
 14. **Window labels.** A window counts as an attack window if it contains any

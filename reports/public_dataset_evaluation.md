@@ -73,6 +73,20 @@ Thresholds changed by learning (held-out file: key default → learned):
 - scenario6_capture20110816.binetflow: ddos.packets_per_second 10000 → 23387; scanning.unique_dest_ports 25 → 300; scanning.horizontal_scan_hosts 20 → 29; scanning.horizontal_scan_hosts_any 50 → 159; scanning.burst_connections 30 → 300; exfiltration.min_upload_mb 5 → 518; exfiltration.baseline_deviation_sigma 3.5 → 6990.0; beaconing.regularity_cv_threshold 0.3 → 0.05; statistical.mad_threshold 3.5 → 220.0
 - scenario7_capture20110816-2.binetflow: ddos.packets_per_second 10000 → 19788; scanning.unique_dest_ports 25 → 425; scanning.horizontal_scan_hosts 20 → 87; scanning.horizontal_scan_hosts_any 50 → 141; scanning.burst_connections 30 → 300; exfiltration.min_upload_mb 5 → 89.3; exfiltration.baseline_deviation_sigma 3.5 → 1550.0; beaconing.regularity_cv_threshold 0.3 → 0.05; statistical.mad_threshold 3.5 → 2260.0
 
+### With an asset inventory (`configs/evaluation/ctu13_assets.yaml`)
+
+Roles taken from the dataset's published description (CIC-IDS2017) or seen in the traffic (CTU-13); only roles an operator would know. With site tuning the inventory is also used while learning.
+
+| File | Hosts: default / +assets / tuned / tuned+assets | Alerts: default / +assets / tuned / tuned+assets | Host-level precision: default / +assets / tuned / tuned+assets |
+|---|---|---|---|
+| scenario11_capture20110818-2.binetflow | 3/3 / 3/3 / 0/3 / 0/3 | 61 / 61 / 18 / 18 | 0.049 / 0.049 / 0.000 / 0.000 |
+| scenario12_capture20110819.binetflow | 3/9 / 3/9 / 0/9 / 0/9 | 313 / 313 / 139 / 139 | 0.016 / 0.016 / 0.000 / 0.000 |
+| scenario5_capture20110815-2.binetflow | 1/1 / 1/1 / 0/1 / 0/1 | 46 / 46 / 28 / 28 | 0.022 / 0.022 / 0.000 / 0.000 |
+| scenario6_capture20110816.binetflow | 1/1 / 1/1 / 1/1 / 1/1 | 567 / 567 / 199 / 199 | 0.023 / 0.023 / 0.055 / 0.055 |
+| scenario7_capture20110816-2.binetflow | 0/1 / 0/1 / 0/1 / 0/1 | 85 / 85 / 23 / 23 | 0.000 / 0.000 / 0.000 / 0.000 |
+
+No alert was changed by the inventory's roles: the listed roles (DNS resolver, server) only act on DNS-based alerts, and these flow records carry no DNS names.
+
 ### Caveats
 
 - Background flows are unverified university traffic and are counted as benign; some may be malicious or misconfigured, so 'other hosts named' is an upper bound on false positives.
@@ -171,6 +185,23 @@ Thresholds changed by learning (held-out file: key default → learned):
 - Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv: scanning.horizontal_scan_hosts 20 → 50; scanning.horizontal_scan_hosts_any 50 → 185; scanning.burst_connections 30 → 89; beaconing.regularity_cv_threshold 0.3 → 0.05; statistical.mad_threshold 3.5 → 2330.0; anomaly.min_score 0.6 → 0.676
 - Tuesday-WorkingHours.pcap_ISCX.csv: scanning.horizontal_scan_hosts 20 → 50; scanning.horizontal_scan_hosts_any 50 → 185; scanning.burst_connections 30 → 89; beaconing.regularity_cv_threshold 0.3 → 0.05; statistical.mad_threshold 3.5 → 2330.0; anomaly.min_score 0.6 → 0.676
 - Wednesday-workingHours.pcap_ISCX.csv: scanning.horizontal_scan_hosts 20 → 50; scanning.horizontal_scan_hosts_any 50 → 185; scanning.burst_connections 30 → 89; beaconing.regularity_cv_threshold 0.3 → 0.05; statistical.mad_threshold 3.5 → 2330.0; anomaly.min_score 0.6 → 0.676
+
+### With an asset inventory (`configs/evaluation/cicids2017_assets.yaml`)
+
+Roles taken from the dataset's published description (CIC-IDS2017) or seen in the traffic (CTU-13); only roles an operator would know. With site tuning the inventory is also used while learning.
+
+| File | Hosts: default / +assets / tuned / tuned+assets | Alerts: default / +assets / tuned / tuned+assets | Host-level precision: default / +assets / tuned / tuned+assets |
+|---|---|---|---|
+| Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv | 2/2 / 2/2 / 2/2 / 2/2 | 155 / 155 / 24 / 24 | 0.258 / 0.258 / 0.958 / 0.958 |
+| Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv | 2/2 / 2/2 / 2/2 / 2/2 | 173 / 173 / 35 / 35 | 0.278 / 0.278 / 0.971 / 0.971 |
+| Friday-WorkingHours-Morning.pcap_ISCX.csv | 7/10 / 7/10 / 2/10 / 2/10 | 469 / 469 / 30 / 30 | 0.345 / 0.345 / 0.500 / 0.500 |
+| Monday-WorkingHours.pcap_ISCX.csv | 0/0 / 0/0 / – / – | 1093 / 1093 / – / – | 0.000 / 0.000 / – / – |
+| Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv | 2/2 / 2/2 / 2/2 / 2/2 | 325 / 325 / 84 / 84 | 0.212 / 0.212 / 0.762 / 0.762 |
+| Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv | 1/2 / 1/2 / 0/2 / 0/2 | 513 / 513 / 13 / 13 | 0.066 / 0.066 / 0.000 / 0.000 |
+| Tuesday-WorkingHours.pcap_ISCX.csv | 2/2 / 2/2 / 2/2 / 2/2 | 1163 / 1163 / 115 / 115 | 0.137 / 0.137 / 0.835 / 0.835 |
+| Wednesday-workingHours.pcap_ISCX.csv | 3/3 / 3/3 / 3/3 / 3/3 | 939 / 939 / 111 / 111 | 0.181 / 0.181 / 0.784 / 0.784 |
+
+No alert was changed by the inventory's roles: the listed roles (DNS resolver, server) only act on DNS-based alerts, and these flow records carry no DNS names.
 
 ### Caveats
 
