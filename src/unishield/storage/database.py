@@ -37,6 +37,7 @@ from sqlalchemy import (
     create_engine,
     event,
     false,
+    true,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
@@ -68,11 +69,43 @@ alerts_table = Table(
     Column("emitted_at", DateTime),
     Column("stored_at", DateTime),
     Column("run_id", String(64)),
+    Column("suppressed_by", Integer),
     Index("ix_alerts_window_end", "window_end"),
     Index("ix_alerts_threat_class", "threat_class"),
     Index("ix_alerts_severity", "severity"),
     Index("ix_alerts_source_ip", "source_ip"),
     Index("ix_alerts_stored_at", "stored_at"),
+    Index("ix_alerts_suppressed_by", "suppressed_by"),
+)
+
+alert_feedback_table = Table(
+    "alert_feedback",
+    metadata,
+    Column("alert_id", String(32), ForeignKey("alerts.alert_id", ondelete="CASCADE"), primary_key=True),
+    Column("verdict", String(24), nullable=False),
+    Column("note", String(2000)),
+    Column("analyst", String(128), nullable=False),
+    Column("created_at", DateTime, nullable=False),
+    Column("updated_at", DateTime, nullable=False),
+    Index("ix_alert_feedback_verdict", "verdict"),
+)
+
+suppression_rules_table = Table(
+    "suppression_rules",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("threat_class", String(48), nullable=False),
+    Column("source", String(64)),
+    Column("destination", String(64)),
+    Column("detector_name", String(64)),
+    Column("reason", String(500), nullable=False),
+    Column("from_alert_id", String(32)),
+    Column("created_by", String(128), nullable=False),
+    Column("created_at", DateTime, nullable=False),
+    Column("expires_at", DateTime, nullable=False),
+    Column("enabled", Boolean, nullable=False, server_default=true()),
+    Column("hits", Integer, nullable=False, server_default="0"),
+    Column("last_hit_at", DateTime),
 )
 
 runs_table = Table(

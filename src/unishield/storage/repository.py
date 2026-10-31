@@ -50,6 +50,7 @@ class AlertQuery:
     since: Optional[datetime] = None          # window_end >= since (traffic time)
     until: Optional[datetime] = None          # window_end < until
     min_confidence: Optional[float] = None
+    suppressed: str = "exclude"               # exclude | include | only (alerts matching a suppression rule)
     sort: str = "window_end"
     descending: bool = True
     limit: int = 100
@@ -126,6 +127,12 @@ class AlertRepository:
             conditions.append(c.window_end < _to_db(q.until))
         if q.min_confidence is not None:
             conditions.append(c.confidence >= q.min_confidence)
+        if q.suppressed == "exclude":
+            conditions.append(c.suppressed_by.is_(None))
+        elif q.suppressed == "only":
+            conditions.append(c.suppressed_by.is_not(None))
+        elif q.suppressed != "include":
+            raise ValueError("suppressed must be exclude, include or only")
         return conditions
 
     def list(self, q: AlertQuery | None = None) -> tuple[list[Alert], int]:
@@ -168,9 +175,13 @@ class AlertRepository:
             return conn.execute(delete(alerts_table)).rowcount or 0
 
     def summary(self, run_id: Optional[str] = None) -> AlertSummary:
+        """Counts of the alerts not suppressed by an analyst rule (suppressed ones counted separately)."""
         c = alerts_table.c
-        where = [c.run_id == run_id] if run_id else []
+        scope = [c.run_id == run_id] if run_id else []
+        where = [*scope, c.suppressed_by.is_(None)]
         with self.engine.connect() as conn:
+            suppressed = conn.execute(select(func.count()).select_from(alerts_table)
+                                      .where(*scope, c.suppressed_by.is_not(None))).scalar_one()
             total, avg_conf, avg_lat, first, last = conn.execute(
                 select(func.count(), func.avg(c.confidence), func.avg(c.detection_latency_ms),
                        func.min(c.timestamp), func.max(c.timestamp)).where(*where)
@@ -180,8 +191,9 @@ class AlertRepository:
                 rows = conn.execute(select(c[name], func.count()).where(*where).group_by(c[name])).all()
                 groups[name] = {k: int(v) for k, v in rows}
         if not total:
-            return AlertSummary()
+            return AlertSummary(suppressed_alerts=int(suppressed))
         return AlertSummary(
+            suppressed_alerts=int(suppressed),
             total_alerts=int(total),
             by_threat_class=groups["threat_class"],
             by_severity=groups["severity"],
@@ -196,7 +208,8 @@ class AlertRepository:
                  limit: int = 100_000) -> list[dict[str, Any]]:
         """Alert counts per severity in buckets of traffic time (by window end)."""
         c = alerts_table.c
-        stmt = select(c.window_end, c.severity).where(*([c.run_id == run_id] if run_id else []))             .order_by(c.window_end).limit(limit)
+        stmt = select(c.window_end, c.severity).where(c.suppressed_by.is_(None),
+                                                      *([c.run_id == run_id] if run_id else []))             .order_by(c.window_end).limit(limit)
         buckets: dict[int, dict[str, Any]] = {}
         with self.engine.connect() as conn:
             for window_end, severity in conn.execute(stmt).all():
@@ -213,7 +226,7 @@ class AlertRepository:
             raise ValueError("column must be source_ip or destination_ip")
         c = alerts_table.c
         stmt = (select(c[column], func.count().label("alerts"), func.max(c.confidence))
-                .where(c[column].is_not(None)).group_by(c[column])
+                .where(c[column].is_not(None), c.suppressed_by.is_(None)).group_by(c[column])
                 .order_by(func.count().desc(), c[column]).limit(limit))
         with self.engine.connect() as conn:
             return [{"ip": ip, "alerts": int(n), "max_confidence": round(float(mc or 0), 4)}

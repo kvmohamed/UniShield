@@ -185,6 +185,11 @@ class Alert(BaseModel):
         default=None,
         description="Replay/analysis run that produced the alert",
     )
+    suppressed_by: Optional[int] = Field(
+        default=None,
+        description="Analyst suppression rule that matched: the alert is stored but hidden by default and "
+                    "not delivered to outputs",
+    )
 
     @field_validator("timestamp", "window_start", "window_end")
     @classmethod
@@ -256,3 +261,4 @@ class AlertSummary(BaseModel):
     avg_detection_latency_ms: float = 0.0
     time_range_start: Optional[datetime] = None
     time_range_end: Optional[datetime] = None
+    suppressed_alerts: int = 0              # matched an analyst suppression rule; not in the counts above

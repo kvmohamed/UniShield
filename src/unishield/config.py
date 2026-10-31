@@ -427,6 +427,11 @@ class LiveConfig(BaseModel):
         return v
 
 
+class FeedbackConfig(BaseModel):
+    """Analyst verdicts and suppression rules (storage/feedback.py)."""
+    max_suppression_days: int = Field(default=90, ge=1, le=365)   # every suppression rule expires
+
+
 class StateConfig(BaseModel):
     """Restart-safe detector state (see processing/state_store.py)."""
     enabled: bool = False
@@ -523,6 +528,7 @@ class UnishieldConfig(BaseModel):
     site: SiteConfig = SiteConfig()
     state: StateConfig = StateConfig()
     live: LiveConfig = LiveConfig()
+    feedback: FeedbackConfig = FeedbackConfig()
 
     @model_validator(mode="after")
     def outbound_only_to_analyst_side(self) -> "UnishieldConfig":

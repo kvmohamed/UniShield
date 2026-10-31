@@ -49,6 +49,7 @@ from unishield.processing.pipeline import Pipeline
 from unishield.processing.state_store import PipelineStateStore
 from unishield.schemas.alert import Alert
 from unishield.storage import AlertRepository, AuditLog, AuditQuery, migrate
+from unishield.storage.feedback import FeedbackStore, SuppressionStore
 from unishield.storage.retention import MaintenanceWorker, housekeeping
 
 logger = logging.getLogger("unishield.api.state")
@@ -63,6 +64,7 @@ _IDLE = {
     "finished_at": None,
     "records_processed": 0,
     "alerts_generated": 0,
+    "alerts_suppressed": 0,
     "error": None,
     "result": None,
 }
@@ -99,6 +101,8 @@ class AppContext:
         self._outputs: Optional[OutputService] = None
         self._accounts: Optional[AccountStore] = None
         self._audit: Optional[AuditLog] = None
+        self._feedback: Optional[FeedbackStore] = None
+        self._suppressions: Optional[SuppressionStore] = None
         self._limiter: Optional[LoginRateLimiter] = None
         self._lock = threading.Lock()
         self.started = time.time()
@@ -126,6 +130,7 @@ class AppContext:
         self._repository = repository
         self._intel = None
         self._accounts = self._audit = None
+        self._feedback = self._suppressions = None
 
     @property
     def intel(self) -> IntelStore:
@@ -152,6 +157,19 @@ class AppContext:
         if self._audit is None:
             self._audit = AuditLog(self.repository.engine)
         return self._audit
+
+    @property
+    def feedback(self) -> FeedbackStore:
+        if self._feedback is None:
+            self._feedback = FeedbackStore(self.repository.engine)
+        return self._feedback
+
+    @property
+    def suppressions(self) -> SuppressionStore:
+        if self._suppressions is None:
+            self._suppressions = SuppressionStore(self.repository.engine,
+                                                  max_days=get_config().feedback.max_suppression_days)
+        return self._suppressions
 
     @property
     def limiter(self) -> LoginRateLimiter:
@@ -225,6 +243,13 @@ class AppContext:
 
     def _store_alert(self, alert: Alert) -> None:
         alert.run_id = self.replay.get("run_id")
+        rule = self.suppressions.match(alert)
+        if rule is not None:                        # analyst suppression: keep it for review, deliver nothing
+            alert.suppressed_by = rule
+            self.repository.add(alert)
+            self.suppressions.record_hit(rule)
+            self.replay["alerts_suppressed"] += 1
+            return
         self.repository.add(alert)
         self.replay["alerts_generated"] += 1
         self.outputs.submit(alert)

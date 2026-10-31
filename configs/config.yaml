@@ -226,6 +226,11 @@ live:
   tick_interval_sec: 1              # how often idle windows are closed on wall-clock time
   allowed_lateness_sec: 120         # exports report flows after they end; wait this long
 
+feedback:
+  # Analyst suppression rules (POST /suppressions) always expire; alerts they
+  # match are stored and marked, never dropped, and not sent to outputs.
+  max_suppression_days: 90
+
 state:
   # Restart-safe detector state: beacon histories, upload baselines, the
   # statistical baseline and the Isolation Forest are snapshotted to this
