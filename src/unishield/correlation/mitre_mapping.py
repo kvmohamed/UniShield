@@ -53,6 +53,7 @@ TECHNIQUE_NAMES: dict[str, str] = {
     "T1048": "Exfiltration Over Alternative Protocol",
     "T1071": "Application Layer Protocol",
     "T1071.004": "Application Layer Protocol: DNS",
+    "T1110": "Brute Force",
     "T1498": "Network Denial of Service",
     "T1498.001": "Network Denial of Service: Direct Network Flood",
     "T1499.001": "Endpoint Denial of Service: OS Exhaustion Flood",
